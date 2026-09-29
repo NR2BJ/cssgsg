@@ -1,5 +1,5 @@
 # cssgsg 맥 입력기. xcodegen으로 cssgsg.xcodeproj를 만든다(생성물은 커밋하지 않는다).
-# 빌드·설치: bash tools/mac/install.sh
+# pkg: bash tools/mac/build-pkg.sh, 릴리스: bash tools/mac/release.sh <버전> (README "릴리스 만들기")
 name: cssgsg
 options:
   bundleIdPrefix: com.cssgsg.inputmethod

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+    <title>cssgsg</title>
+    <welcome language="ko" mime-type="text/plain"><![CDATA[cssgsg — 참신세벌식 · Graphite · 新月配列 한/영/일 입력기
+
+/Library/Input Methods에 설치한다. 설치가 끝나면 입력 메뉴에 cssgsg(ㅊ 아이콘)가 추가된다.
+안 보이면 시스템 설정 → 키보드 → 입력 소스 → 편집에서 추가하거나, 로그아웃했다 다시 로그인한다.
+업데이트는 메뉴 막대의 cssgsg 메뉴 → 업데이트 확인으로 한다.]]></welcome>
+    <welcome language="en" mime-type="text/plain"><![CDATA[cssgsg — Korean (Chamshin Sebeolsik), English (Graphite) and Japanese (Shingetsu) input method.
+
+Installs into /Library/Input Methods and adds cssgsg to the input menu.
+If it does not show up, add it in System Settings → Keyboard → Input Sources, or log out and back in.]]></welcome>
+    <options customize="never" require-scripts="false" hostArchitectures="arm64"/>
+    <domains enable_anywhere="false" enable_currentUserHome="false" enable_localSystem="true"/>
+    <os-version min="13.0"/>
+    <choices-outline>
+        <line choice="default">
+            <line choice="com.cssgsg.inputmethod.pkg"/>
+        </line>
+    </choices-outline>
+    <choice id="default"/>
+    <choice id="com.cssgsg.inputmethod.pkg" visible="false">
+        <pkg-ref id="com.cssgsg.inputmethod.pkg"/>
+    </choice>
+    <!-- onConclusion="none": 설치가 끝나도 로그아웃·재시동을 요구하지 않는다 -->
+    <pkg-ref id="com.cssgsg.inputmethod.pkg" version="__VERSION__" onConclusion="none">cssgsg-component.pkg</pkg-ref>
+</installer-gui-script>

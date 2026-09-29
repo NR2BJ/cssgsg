@@ -6,6 +6,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let candidatePanel = CandidatePanel()
     private var statusItem: NSStatusItem?
     private var permissionItem: NSMenuItem?
+    private var updateItem: NSMenuItem?
+    private var releaseNotesItem: NSMenuItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let connection = Bundle.main.infoDictionary?["InputMethodConnectionName"] as? String
@@ -14,10 +16,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let engine = CoreEngine.shared
         setupStatusItem()
         updateStatus(engine.mode)
+        InputSourceSetup.enableOnce()
         requestPermissionsIfNeeded()
+        Updater.shared.onChange = { [weak self] in self?.refreshUpdateItems() }
+        Updater.shared.start()
+        refreshUpdateItems()
         DeveloperLogger.shared.log("App", "started", metadata: [
             "connection": connection,
-            "version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?",
+            "version": Updater.currentVersion,
             "configError": engine.configError ?? "none",
         ])
     }
@@ -28,6 +34,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         let menu = NSMenu()
         menu.delegate = self
+        let version = NSMenuItem(title: "cssgsg \(Updater.currentVersion)", action: nil, keyEquivalent: "")
+        version.isEnabled = false
+        menu.addItem(version)
+        let update = NSMenuItem(title: "업데이트 확인", action: #selector(updateAction), keyEquivalent: "")
+        update.target = self
+        menu.addItem(update)
+        updateItem = update
+        let notes = NSMenuItem(title: "    바뀐 점 보기", action: #selector(openReleaseNotes), keyEquivalent: "")
+        notes.target = self
+        notes.isHidden = true
+        menu.addItem(notes)
+        releaseNotesItem = notes
+        menu.addItem(.separator())
         let permission = NSMenuItem(title: "⚠︎ 키 보내기 권한 허용…", action: #selector(openPermissionSettings), keyEquivalent: "")
         permission.target = self
         permission.toolTip = "조합 중 ⌘/Option+키와 Codex 줄바꿈에 필요하다. 없어도 입력은 된다."
@@ -44,6 +63,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// 메뉴를 열 때마다 권한을 다시 본다. 권한이 있으면 항목을 숨긴다.
     func menuNeedsUpdate(_ menu: NSMenu) {
         permissionItem?.isHidden = KeyEventReposter.canPostEvents
+    }
+
+    // MARK: - 업데이트
+
+    /// 업데이트 상태를 메뉴 항목 제목으로 보인다(모달 창은 입력기 메인 스레드를 막으므로 쓰지 않는다).
+    private func refreshUpdateItems() {
+        guard let item = updateItem else { return }
+        var offering = false
+        item.isEnabled = true
+        switch Updater.shared.state {
+        case .idle:
+            item.title = "업데이트 확인"
+        case .checking:
+            item.title = "업데이트 확인 중…"
+            item.isEnabled = false
+        case .upToDate:
+            item.title = "최신 버전 사용 중 (다시 확인)"
+        case let .available(release):
+            item.title = "⬆︎ \(release.version) 업데이트 설치…"
+            offering = true
+        case let .downloading(release, progress):
+            item.title = "\(release.version) 내려받는 중… \(Int(progress * 100))%"
+            item.isEnabled = false
+        case let .installing(release):
+            item.title = "\(release.version) 설치 중…"
+            item.isEnabled = false
+        case let .failed(reason):
+            item.title = "⚠︎ 업데이트 실패: \(reason) (다시 확인)"
+        }
+        releaseNotesItem?.isHidden = !offering
+    }
+
+    @objc private func updateAction() {
+        if case .available = Updater.shared.state {
+            Updater.shared.install()
+        } else {
+            Updater.shared.check(userInitiated: true)
+        }
+    }
+
+    @objc private func openReleaseNotes() {
+        guard case let .available(release) = Updater.shared.state,
+              let link = release.htmlURL, let url = URL(string: link) else { return }
+        NSWorkspace.shared.open(url)
     }
 
     func updateStatus(_ mode: InputMode) {

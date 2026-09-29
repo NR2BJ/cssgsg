@@ -16,7 +16,8 @@
 - [~] macOS 입력기 셸 (NRIME 플랫폼층 이식)
   - [x] M2a: IMKit 셸 뼈대. 키 → 코어 → 앱, 메뉴 막대 모드 표시(A/한/あ), 조합 중 밑줄, 후보창
     - NRIME 우회책: ⌘/Ctrl 조합 확정 뒤 키 재전송, Chromium 조합 중 Shift+Enter, 마우스 클릭 확정, 비밀번호 칸은 쿼티
-    - 셸 Swift 계층은 스모크 테스트로 검증했다. 실제 앱에서 쳐 보는 확인은 아직이다
+    - 셸 Swift 계층은 스모크 테스트로 검증했다. 실제 앱에서 쳐 보는 확인은 [확인 목록](docs/mac-checklist.md)으로 한다
+  - [x] 배포: pkg + GitHub 릴리스 + 메뉴의 업데이트 확인(NRIME 방식). 자체 서명 인증서로 서명해서 업데이트해도 권한이 남는다
   - [ ] M2b: 입력 소스 복구, 인증 창에서 ABC로 넘기기, 모드 HUD
   - [ ] M2c: 설정 앱(학습 탭 포함). 그전까지는 메뉴 막대 → "설정 파일 열기"로 `config.toml`을 고친다
 - [ ] Mozc 임베드 (일본어 한자 변환, 지금은 히라가나/가타카나 후보만 내는 임시 변환기)
@@ -30,8 +31,8 @@ layouts/    배열 데이터 (ko: 참신세벌식 TOML, en: Graphite, ja: 新月
 cli/        cssgsg-cli: 터미널에서 쳐보는 도구
 mac/        macOS 입력기(Swift + InputMethodKit). project.yml → xcodegen → cssgsg.xcodeproj(생성물, 커밋 안 함)
 tools/      ffi-smoke(C 헤더 확인), ohi-oracle(오이 차분 비교), crosscheck(배열 데이터 교차 검증),
-            mac(빌드·설치 스크립트, 셸 스모크 테스트), learn(학습 페이지 빌드)
-docs/       verification.md(검증 현황)
+            mac(pkg·릴리스·서명 스크립트, 셸·업데이트 스모크 테스트), learn(학습 페이지 빌드)
+docs/       verification.md(검증 현황), mac-checklist.md(설치 뒤 확인 목록), releases/(릴리스 노트)
 learn/      배열 학습 페이지(설정 앱 학습 탭). template.html → tools/learn/build.mjs → index.html
 ```
 
@@ -49,25 +50,39 @@ cargo run -q -p cssgsg-cli -- repl                          # 한 줄씩 쳐 가
 bash tools/ffi-smoke/run.sh
 ```
 
-### macOS 입력기
+### macOS 입력기 설치·업데이트
 
-Xcode와 xcodegen(`brew install xcodegen`)이 필요하다.
+처음 한 번, 터미널에서(관리자 암호를 묻는다):
 
 ```bash
-bash tools/mac/install.sh
+curl -fL -o /tmp/cssgsg.pkg https://github.com/NR2BJ/cssgsg/releases/latest/download/cssgsg.pkg && sudo installer -pkg /tmp/cssgsg.pkg -target /
 ```
 
-빌드해서 `~/Library/Input Methods/cssgsg.app`에 설치하고 입력 소스를 켠다. NRIME와 번들 ID가 달라서 같이 설치된다.
-처음 설치하면 입력 메뉴에 안 보일 수 있다. 그러면 로그아웃했다 다시 로그인한 뒤 시스템 설정 → 키보드 → 입력 소스 → 편집에서 추가한다.
-처음 실행 때 한 번 "손쉬운 사용"(키 이벤트 보내기) 권한을 물어본다. 없어도 입력은 되고, 조합 중 ⌘/Option+키 재전송과 Codex 줄바꿈만 빠진다.
-지금은 ad-hoc 서명이라 새로 빌드해 설치하면 권한이 풀린다. 그러면 메뉴 막대의 cssgsg 메뉴에 "키 보내기 권한 허용…"이 보인다(목록에 남은 옛 항목은 빼고 다시 켠다).
-업데이트(다시 설치)에는 로그아웃이 필요 없다. 같은 자리에 덮고 프로세스를 끝내면 다음 입력 때 새 앱이 뜬다.
+- `/Library/Input Methods/cssgsg.app`에 설치되고, 입력 메뉴에 cssgsg(ㅊ 아이콘)가 추가된다. 안 보이면 시스템 설정 → 키보드 → 입력 소스 → 편집에서 추가하거나, 로그아웃했다 다시 로그인한다.
+  NRIME와 번들 ID가 달라서 같이 설치된다.
+- 브라우저로 받은 pkg는 서명이 없어서 Gatekeeper가 막는다. 그때는 시스템 설정 → 개인정보 보호 및 보안에서 "그래도 열기"를 누른다(위 명령은 해당 없음).
+- 업데이트: 메뉴 막대 cssgsg 메뉴 → 업데이트 확인(하루 한 번 저절로도 확인한다). 관리자 암호를 한 번 묻고, 로그아웃은 필요 없다.
+- 처음 실행 때 한 번 "손쉬운 사용"(키 이벤트 보내기) 권한을 물어본다. 없어도 입력은 되고, 조합 중 ⌘/Option+키 재전송과 Codex 줄바꿈만 빠진다.
+  릴리스는 고정 인증서로 서명하므로 업데이트해도 권한이 남는다. 권한이 없으면 메뉴에 "키 보내기 권한 허용…"이 보인다.
 
 문제를 재현하려면 개발자 기록을 켠다(키 코드·수식키·시각만 남고 글자 내용은 남지 않는다).
 
 ```bash
 defaults write com.cssgsg.inputmethod.app developerMode -bool true   # 기록: ~/Library/Application Support/cssgsg/developer.log
 ```
+
+### 릴리스 만들기(개발)
+
+Xcode, xcodegen(`brew install xcodegen`), gh가 필요하다. 서명 인증서는 한 번 만든다(로그인 키체인, 20년).
+
+```bash
+bash tools/mac/make-signing-identity.sh                                  # "cssgsg Code Signing" 인증서, 이미 있으면 그대로
+bash tools/mac/build-pkg.sh                                              # build/pkg/cssgsg-<버전>.pkg 만들기만
+bash tools/mac/release.sh 0.1.1 --notes-file docs/releases/v0.1.1.md    # 검사 → 버전 올림 → pkg → GitHub 릴리스 → 확인
+```
+
+`release.sh`는 커밋·푸시하지 않은 변경이 있거나 검사가 하나라도 실패하면 멈춘다. 설치본을 바꾸는 길은 pkg 하나뿐이다
+(스크립트로 `~/Library`에 따로 깔면 같은 번들 ID가 두 곳에 생겨 입력 소스가 꼬인다).
 
 ### 키열 문법
 
@@ -85,6 +100,7 @@ node tools/crosscheck/chamshin.mjs                 # 참신 키 배치 ↔ 타�
 cd tools/ohi-oracle && npm install && node diff.mjs --count 20000   # 참신 조합 ↔ 오이 (무작위 키열)
 node tools/learn/build.mjs --check                # 학습 페이지 예시를 엔진으로 확인, index.html이 최신인지
 bash tools/mac/shell-smoke/run.sh                  # 맥 셸 Swift 계층(진짜 NSEvent) ↔ 러스트 시뮬레이터
+bash tools/mac/update-smoke/run.sh                 # 업데이트 코드: 버전 순서, GitHub 응답, 해시, 설치 AppleScript
 ```
 
 학습 페이지를 고쳤으면 `node tools/learn/build.mjs`로 `learn/index.html`을 다시 만든다.
