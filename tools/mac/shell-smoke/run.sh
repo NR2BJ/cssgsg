@@ -18,7 +18,7 @@ cargo build --release -q -p cssgsg-core -p cssgsg-cli
 mkdir -p "$OUT"
 swiftc -O -module-name shellsmoke \
   -import-objc-header mac/cssgsg/cssgsg-Bridging-Header.h -I core/include \
-  mac/cssgsg/Engine/CoreEngine.swift mac/cssgsg/Engine/KeyTranslation.swift mac/cssgsg/Engine/TextApplier.swift \
+  mac/Shared/Cssgsg.swift mac/cssgsg/Engine/CoreEngine.swift mac/cssgsg/Engine/KeyTranslation.swift mac/cssgsg/Engine/TextApplier.swift \
   tools/mac/shell-smoke/Typist.swift tools/mac/shell-smoke/main.swift \
   -L build/cargo/release -lcssgsg_core -o "$OUT/shell-smoke"
 

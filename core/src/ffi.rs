@@ -344,6 +344,35 @@ unsafe fn str_arg(p: *const c_char) -> String {
     unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned()
 }
 
+/// 설정을 바꾼다(설정 앱이 설정 파일을 고친 뒤). 조합 중인 것·모드·학습은 그대로 둔다.
+/// `config_toml`이 NULL이면 기본 설정. 성공하면 1, 설정 오류면 0(그대로 두고 `cssgsg_last_error`).
+///
+/// # Safety
+/// `e`는 `cssgsg_engine_new`가 돌려준 살아 있는 포인터, `config_toml`은 NULL이거나 NUL로 끝나는 문자열이어야 한다.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn cssgsg_engine_set_config(e: *mut CssgsgEngine, config_toml: *const c_char) -> u8 {
+    // SAFETY: 위 약속대로.
+    let Some(e) = (unsafe { e.as_mut() }) else { return 0 };
+    let config = if config_toml.is_null() {
+        Config::default()
+    } else {
+        match Config::from_toml(&unsafe { str_arg(config_toml) }) {
+            Ok(c) => c,
+            Err(err) => {
+                set_error(&err);
+                return 0;
+            }
+        }
+    };
+    match catch_unwind(AssertUnwindSafe(|| e.engine.set_config(config))) {
+        Ok(()) => 1,
+        Err(_) => {
+            set_error("설정을 바꾸다 패닉");
+            0
+        }
+    }
+}
+
 /// 한자 학습(저장 형식 TSV)을 불러와 지금 것을 바꾼다. 읽은 항목 수를 돌려준다.
 ///
 /// # Safety
@@ -532,6 +561,26 @@ mod tests {
             let out = &*cssgsg_engine_handle_key(other, &key(0x31, 3.1), ptr::null());
             assert!(out.candidate_count > 0 && out.candidate_notes.is_null());
             cssgsg_engine_free(other);
+            cssgsg_engine_free(e);
+        }
+    }
+
+    #[test]
+    fn config_changes_while_running() {
+        unsafe {
+            let e = cssgsg_engine_new(ptr::null());
+            cssgsg_engine_set_mode(e, 1);
+            let cfg = CString::new("[mac]\nhud = false\nnewline_replay_ms = 300").unwrap();
+            assert_eq!(cssgsg_engine_set_config(e, cfg.as_ptr()), 1);
+            let m = cssgsg_engine_mac_settings(e);
+            assert_eq!((m.hud, m.newline_replay_ms), (0, 300));
+            assert_eq!(cssgsg_engine_mode(e), 1, "모드는 그대로");
+            let bad = CString::new("ko_layout = \"nope\"").unwrap();
+            assert_eq!(cssgsg_engine_set_config(e, bad.as_ptr()), 0);
+            assert!(s(cssgsg_last_error()).contains("nope"));
+            assert_eq!(cssgsg_engine_mac_settings(e).hud, 0, "오류면 그대로");
+            assert_eq!(cssgsg_engine_set_config(e, ptr::null()), 1);
+            assert_eq!(cssgsg_engine_mac_settings(e).hud, 1, "NULL은 기본 설정");
             cssgsg_engine_free(e);
         }
     }

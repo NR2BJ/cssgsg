@@ -14,19 +14,11 @@ import Foundation
 /// - TISCreateInputSourceList(…, false): 같은 프로세스에서 먼저 전체 목록(true)을 받아 두면 그런 "기본 켜짐" 모드가
 ///   켜진 목록에 섞여 나온다. 호출 순서에 따라 답이 달라서 쓸 수 없다.
 enum InputSourceSetup {
-    private static var modeID: String { (Bundle.main.bundleIdentifier ?? "com.cssgsg.inputmethod.app") + ".en" }
     private static let promptedKey = "didPromptAddInputSource"
 
-    /// 사용자가 입력 소스에 추가했는지.
+    /// 사용자가 입력 소스에 추가했는지(Cssgsg.isInputSourceAdded, 설정 앱과 같은 판정).
     /// 저장 형식을 읽지 못하면 "추가 안 됨"으로 친다(안내 메뉴가 떠 있을 뿐이라 해가 없다).
-    static var isAdded: Bool {
-        let domain = "com.apple.inputsources" as CFString
-        CFPreferencesAppSynchronize(domain)
-        let key = "AppleEnabledThirdPartyInputSources" as CFString
-        guard let list = CFPreferencesCopyAppValue(key, domain) as? [[String: Any]] else { return false }
-        let id = modeID
-        return list.contains { ($0["Input Mode"] as? String) == id }
-    }
+    static var isAdded: Bool { Cssgsg.isInputSourceAdded }
 
     /// 입력 소스 서버에 이 번들을 (다시) 알린다. 켜지는 않는다. 업데이트로 바뀐 이름(InfoPlist.strings)도 이때 다시 읽힌다.
     static func register() {
@@ -44,8 +36,6 @@ enum InputSourceSetup {
 
     /// 시스템 설정 → 키보드. 입력 소스 "편집…" → + → 영어 → cssgsg 로 추가한다.
     static func openKeyboardSettings() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.Keyboard-Settings.extension") {
-            NSWorkspace.shared.open(url)
-        }
+        Cssgsg.openKeyboardSettings()
     }
 }

@@ -20,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         HanjaLearningStore.shared.load(into: engine)
         setupStatusItem()
         updateStatus(engine.mode)
+        observeSettingsNotices()
         InputSourceSetup.register()
         InputSourceSetup.promptOnceIfNotAdded()
         requestPermissionsIfNeeded()
@@ -45,7 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             DeveloperLogger.shared.log("Mozc", "no data in bundle")
             return
         }
-        let profile = CoreEngine.mozcProfileURL
+        let profile = Cssgsg.mozcProfileURL
         try? FileManager.default.createDirectory(at: profile, withIntermediateDirectories: true)
         let started = Date()
         let ok = engine.useMozc(dataPath: data, profileDir: profile.path)
@@ -84,8 +85,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         permission.toolTip = "조합 중 ⌘/Option+키와 Codex 줄바꿈에 필요하다. 없어도 입력은 된다."
         menu.addItem(permission)
         permissionItem = permission
-        menu.addItem(withTitle: "배열 학습 열기", action: #selector(openLearn), keyEquivalent: "").target = self
-        menu.addItem(withTitle: "설정 파일 열기", action: #selector(openConfig), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "설정…", action: #selector(openSettings), keyEquivalent: ",").target = self
+        menu.addItem(withTitle: "배열 학습…", action: #selector(openLearn), keyEquivalent: "").target = self
         menu.addItem(.separator())
         menu.addItem(withTitle: "cssgsg 다시 시작", action: #selector(restart), keyEquivalent: "").target = self
         item.menu = menu
@@ -169,25 +170,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return image
     }
 
-    @objc private func openLearn() {
-        guard let url = Bundle.main.url(forResource: "index", withExtension: "html") else { return }
-        NSWorkspace.shared.open(url)
+    /// 설정 앱을 연다. 없으면(개발 중 따로 빌드한 입력기 등) 설정 파일을 Finder에서 보인다.
+    @objc private func openSettings() {
+        if !SettingsLauncher.open() {
+            NSWorkspace.shared.activateFileViewerSelecting([Cssgsg.configURL])
+        }
     }
 
-    /// 설정 앱이 생기기 전까지는 config.toml을 직접 고친다. 없으면 설명이 달린 틀을 만들어 준다.
-    @objc private func openConfig() {
-        let url = CoreEngine.configURL
-        let fm = FileManager.default
-        try? fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        if !fm.fileExists(atPath: url.path) {
-            try? Self.configTemplate.write(to: url, atomically: true, encoding: .utf8)
+    /// 설정 앱의 배열 학습 탭. 설정 앱이 없으면 학습 페이지를 브라우저로 연다.
+    @objc private func openLearn() {
+        if !SettingsLauncher.open(tab: "learn"),
+           let url = Bundle.main.url(forResource: "index", withExtension: "html") {
+            NSWorkspace.shared.open(url)
         }
-        NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
     @objc private func restart() {
-        // 입력기 프로세스는 필요할 때 macOS가 다시 띄운다. 설정 파일을 다시 읽을 때 쓴다.
+        // 입력기 프로세스는 필요할 때 macOS가 다시 띄운다.
         NSApp.terminate(nil)
+    }
+
+    // MARK: - 설정 앱 알림
+
+    /// 설정 앱이 보내는 Darwin 알림을 받는다. 콜백은 C 함수라 아무것도 붙잡지 않고, 처리는 메인 스레드에서 한다.
+    private func observeSettingsNotices() {
+        let center = CFNotificationCenterGetDarwinNotifyCenter()
+        let observer = UnsafeRawPointer(Unmanaged.passUnretained(self).toOpaque())
+        for notice in [Cssgsg.Notice.configChanged, .hanjaLearningCleared, .restart] {
+            CFNotificationCenterAddObserver(center, observer, { _, _, name, _, _ in
+                guard let raw = name?.rawValue as String?, let notice = Cssgsg.Notice(rawValue: raw) else { return }
+                DispatchQueue.main.async { AppDelegate.handle(notice) }
+            }, notice.rawValue as CFString, nil, .deliverImmediately)
+        }
+    }
+
+    private static func handle(_ notice: Cssgsg.Notice) {
+        switch notice {
+        case .configChanged:
+            let engine = CoreEngine.shared
+            let ok = engine.reloadConfig()
+            KeyEventReposter.replayDelay = TimeInterval(engine.macSettings.newline_replay_ms) / 1000
+            DeveloperLogger.shared.log("Settings", "config reloaded", metadata: [
+                "ok": "\(ok)", "error": engine.configError ?? "none",
+            ])
+        case .hanjaLearningCleared:
+            HanjaLearningStore.shared.clear()
+            DeveloperLogger.shared.log("Settings", "hanja learning cleared")
+        case .restart:
+            DeveloperLogger.shared.log("Settings", "restart")
+            NSApp.terminate(nil)
+        }
     }
 
     private static let askedPostEventAccessKey = "askedPostEventAccess"
@@ -209,49 +241,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             NSWorkspace.shared.open(url)
         }
     }
-
-    private static let configTemplate = """
-    # cssgsg 설정. 고친 뒤 메뉴 막대의 cssgsg 메뉴에서 "cssgsg 다시 시작"을 누르면 적용된다.
-    # 줄 앞의 #을 지우면 그 설정이 켜진다. 적지 않은 값은 기본값이다.
-
-    # 한국어 배열: "chamshin-v18"(기본형) 또는 "chamshin-d-v19"(D)
-    # ko_layout = "chamshin-v18"
-
-    # 수식키 탭 인식 시간(밀리초)
-    # tap_threshold_ms = 200
-
-    # 수식키별 탭 동작: "toggle_english", "toggle_non_english", "none"
-    # 이 표를 적으면 기본값(오른쪽 Shift = 영어 토글, 왼쪽 Shift = 한↔일)을 대신한다.
-    # [taps]
-    # shift_right = "toggle_english"
-    # shift_left = "toggle_non_english"
-
-    # [ja]
-    # 구두점: "japanese"(、。), "full_width_western"(，．), "half_width_western"(,.)
-    # punctuation = "japanese"
-    # / 자리를 ・로
-    # slash_nakaguro = true
-    # 읽기가 없을 때 Space를 전각 스페이스로
-    # full_width_space = false
-    # 일본어 모드에서 켠 Caps Lock(가타카나)을 다른 모드로 나갈 때 끈다
-    # caps_katakana_auto_off = true
-    # Caps Lock 가타카나는 치는 대로 바로 확정한다(마지막 글자만 잠깐 조합). false면 히라가나처럼 조합으로 들고 있다
-    # katakana_direct = true
-
-    # [mac]
-    # 모드를 바꿀 때 커서 근처에 G/ㅊ/月을 잠깐 보인다
-    # hud = true
-    # HUD 자리: "caret"(커서 위, 커서 자리를 모르면 안 보임) 또는 "mouse"(마우스 옆)
-    # hud_position = "caret"
-    # Codex처럼 줄바꿈 입력을 전송으로 받는 앱에서, 조합 중 Shift+Enter로 확정한 뒤 줄을 바꾸기까지 기다리는 시간(밀리초, 20~1000).
-    # 짧으면 빨라지지만 줄바꿈이 먹힐 수 있다
-    # newline_replay_ms = 120
-
-    """
 }
 
 extension NSApplication {
     var candidatePanel: CandidatePanel? {
         (delegate as? AppDelegate)?.candidatePanel
+    }
+}
+
+/// 설정 앱(입력기 옆의 cssgsgSettings.app)을 연다. 배경 IMKit 앱에서 NSWorkspace로 띄우면 앞으로 오지 않을 때가 있어서
+/// NRIME처럼 /usr/bin/open을 쓴다. 이미 떠 있으면 open의 인자는 무시되니 탭은 분산 알림으로도 알린다.
+enum SettingsLauncher {
+    static var appURL: URL {
+        Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent(Cssgsg.settingsAppName)
+    }
+
+    /// 열었으면 true. 설정 앱이 없으면 false.
+    @discardableResult
+    static func open(tab: String? = nil) -> Bool {
+        let url = appURL
+        guard FileManager.default.fileExists(atPath: url.path) else { return false }
+        if let tab {
+            DistributedNotificationCenter.default().postNotificationName(
+                Cssgsg.showSettingsTab, object: tab, userInfo: nil, deliverImmediately: true)
+        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = ["-a", url.path] + (tab.map { ["--args", "--tab", $0] } ?? [])
+        do {
+            try process.run()
+            return true
+        } catch {
+            DeveloperLogger.shared.log("Settings", "open failed", metadata: ["error": "\(error)"])
+            return false
+        }
     }
 }

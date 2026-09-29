@@ -26,6 +26,8 @@ targets:
       - path: cssgsg
         excludes:
           - Resources/Info.plist
+      # 입력기와 설정 앱이 같이 쓰는 이름·경로·알림
+      - path: Shared
       - path: ../learn/index.html
         buildPhase: resources
         type: file
@@ -64,3 +66,39 @@ targets:
       - sdk: Carbon.framework
       - sdk: IOKit.framework
       - sdk: Security.framework
+
+  # 설정 앱. 입력기 옆(/Library/Input Methods/cssgsgSettings.app)에 같이 설치한다(tools/mac/build-pkg.sh).
+  # 러스트는 설정 라이브러리(config-ffi)만 링크한다. 입력기 코어(Mozc 포함)는 들어가지 않는다.
+  cssgsgSettings:
+    type: application
+    platform: macOS
+    sources:
+      - path: Settings
+        excludes:
+          - Info.plist
+      - path: Shared
+      - path: ../learn/index.html
+        buildPhase: resources
+        type: file
+      - path: ../THIRD_PARTY_NOTICES.txt
+        buildPhase: resources
+        type: file
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.cssgsg.settings
+        PRODUCT_NAME: cssgsgSettings
+        INFOPLIST_FILE: Settings/Info.plist
+        SWIFT_OBJC_BRIDGING_HEADER: Settings/Settings-Bridging-Header.h
+        HEADER_SEARCH_PATHS: $(SRCROOT)/../config-ffi/include
+        LIBRARY_SEARCH_PATHS: $(SRCROOT)/../build/cargo/release
+        OTHER_LDFLAGS: -lcssgsg_config
+        # 러스트 정적 라이브러리에서 설정 변환에 쓰지 않는 코드(엔진, 한자 사전 6MB)를 버린다.
+        DEAD_CODE_STRIPPING: YES
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGNING_ALLOWED: false
+    preBuildScripts:
+      - script: bash "$SRCROOT/../tools/mac/build-config-lib.sh"
+        name: Build Rust config library
+        basedOnDependencyAnalysis: false
+    dependencies:
+      - sdk: WebKit.framework

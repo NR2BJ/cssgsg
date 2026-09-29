@@ -6,6 +6,7 @@
 pub mod config;
 pub mod convert;
 pub mod engine;
+#[cfg(feature = "ffi")]
 pub mod ffi;
 pub mod hangul;
 pub mod hanja;

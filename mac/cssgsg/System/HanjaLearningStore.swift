@@ -6,7 +6,7 @@ import Foundation
 final class HanjaLearningStore {
     static let shared = HanjaLearningStore()
 
-    private let url = CoreEngine.hanjaLearningURL
+    private let url = Cssgsg.hanjaLearningURL
     private var savePending = false
     private let queue = DispatchQueue(label: "cssgsg.hanja-learning", qos: .utility)
 
@@ -27,6 +27,12 @@ final class HanjaLearningStore {
             let tsv = engine.hanjaLearningTSV()
             self.queue.async { self.write(tsv) }
         }
+    }
+
+    /// 기억을 비우고 바로 저장한다(설정 앱이 학습을 지웠을 때).
+    func clear(in engine: CoreEngine = .shared) {
+        engine.loadHanjaLearning("")
+        saveNow(from: engine)
     }
 
     /// 바로 저장한다(끝낼 때).

@@ -5,13 +5,16 @@
 # - 앱을 한 번 띄워 본다(메뉴 막대 메뉴, 처음이면 키보드 설정 안내). 설치가 아직 진행 중이라 LaunchServices가
 #   띄울 것을 0개로 보고 실패할 수 있다. 앱 안 업데이트는 installer가 끝난 뒤 다시 띄우고, 안내 명령도 끝에 open을 붙인다.
 APP="/Library/Input Methods/cssgsg.app"
+SETTINGS_APP="/Library/Input Methods/cssgsgSettings.app"
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/LaunchServices.framework/Versions/Current/Support/lsregister"
 
-# 옛 버전을 끝낸다. 입력 소스로 쓰던 중이면 아래에서 새 버전이 바로 뜬다.
+# 옛 버전을 끝낸다. 입력 소스로 쓰던 중이면 아래에서 새 버전이 바로 뜬다. 설정 앱은 다음에 열 때 새 버전으로 뜬다.
 killall cssgsg 2>/dev/null || true
+killall cssgsgSettings 2>/dev/null || true
 sleep 1
 
 xattr -cr "$APP" 2>/dev/null || true
+xattr -cr "$SETTINGS_APP" 2>/dev/null || true
 
 CONSOLE_USER="$(stat -f "%Su" /dev/console 2>/dev/null || true)"
 if [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != "root" ]; then
@@ -19,6 +22,7 @@ if [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != "root" ]; then
     if [ -n "$CONSOLE_UID" ]; then
         # LaunchServices 등록과 실행은 사용자 세션에서 한다(root로 하면 root의 목록에 들어간다).
         launchctl asuser "$CONSOLE_UID" sudo -u "$CONSOLE_USER" "$LSREGISTER" -f "$APP" 2>/dev/null || true
+        launchctl asuser "$CONSOLE_UID" sudo -u "$CONSOLE_USER" "$LSREGISTER" -f "$SETTINGS_APP" 2>/dev/null || true
         launchctl asuser "$CONSOLE_UID" sudo -u "$CONSOLE_USER" /usr/bin/open -g "$APP" 2>/dev/null || true
     fi
 fi

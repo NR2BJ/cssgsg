@@ -10,6 +10,7 @@ mkdir -p "$OUT"
 swiftc -O -module-name updatesmoke \
   "$ROOT/mac/cssgsg/Update/SemanticVersion.swift" "$ROOT/mac/cssgsg/Update/Updater.swift" \
   "$ROOT/mac/cssgsg/System/InputSourceSetup.swift" "$ROOT/mac/cssgsg/System/DeveloperLogger.swift" \
+  "$ROOT/mac/Shared/Cssgsg.swift" \
   "$ROOT/tools/mac/update-smoke/main.swift" -o "$OUT/update-smoke"
 if [ "${1:-}" = "--live" ]; then
   "$OUT/update-smoke" --live "$2" "$3"

@@ -98,6 +98,10 @@ const CssgsgOutput *cssgsg_engine_reset(CssgsgEngine *engine);
 const CssgsgOutput *cssgsg_engine_set_mode(CssgsgEngine *engine, int32_t mode);
 int32_t cssgsg_engine_mode(const CssgsgEngine *engine);
 
+/* 설정을 바꾼다(설정 앱이 설정 파일을 고친 뒤). 조합 중인 것·모드·학습은 그대로 둔다.
+ * config_toml이 NULL이면 기본 설정. 성공하면 1, 설정 오류면 0(그대로 두고 cssgsg_last_error). */
+uint8_t cssgsg_engine_set_config(CssgsgEngine *engine, const char *config_toml);
+
 /* 한자 학습(TSV)을 불러와 바꾼다. 읽은 항목 수. */
 uint32_t cssgsg_engine_hanja_learning_load(CssgsgEngine *engine, const char *tsv);
 /* 한자 학습을 TSV로. 다음 이 함수 호출이나 해제 전까지 유효. */

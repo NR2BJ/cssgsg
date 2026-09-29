@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # cssgsg 설치 pkg를 만든다 → build/pkg/cssgsg-<버전>.pkg (버전은 mac/project.yml의 MARKETING_VERSION)
+# 담는 것: /Library/Input Methods/cssgsg.app(입력기)과 그 옆의 cssgsgSettings.app(설정 앱, NRIME처럼 따로).
 #
 # NRIME(Tools/build_pkg.sh)에서 겪은 것을 따른다.
 # - 서명은 빌드 때 한다(postinstall에서 하면 권한 창이 뜬다). 안에 든 번들이 없어서 앱 하나만 서명한다(--deep 금지).
@@ -13,6 +14,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT="$ROOT/build/pkg"
 WORK="$OUT/work"
 BUILT="$ROOT/build/mac/Release/cssgsg.app"
+BUILT_SETTINGS="$ROOT/build/mac/Release/cssgsgSettings.app"
 IDENTITY_NAME="cssgsg Code Signing"
 
 echo "=== 빌드 ==="
@@ -20,13 +22,16 @@ cd "$ROOT/mac"
 xcodegen generate --quiet
 mkdir -p "$OUT"
 # Xcode가 이 macOS에서 CoreDevice·시뮬레이터 경고를 잔뜩 내서 기록은 파일로 남긴다.
-if ! xcodebuild -project cssgsg.xcodeproj -scheme cssgsg -configuration Release \
-  SYMROOT="$ROOT/build/mac" build >"$OUT/xcodebuild.log" 2>&1; then
-  grep -E "error:" "$OUT/xcodebuild.log" | head -20
-  echo "빌드 실패. 전체 기록: $OUT/xcodebuild.log"
-  exit 1
-fi
+for scheme in cssgsg cssgsgSettings; do
+  if ! xcodebuild -project cssgsg.xcodeproj -scheme "$scheme" -configuration Release \
+    SYMROOT="$ROOT/build/mac" build >"$OUT/xcodebuild-$scheme.log" 2>&1; then
+    grep -E "error:" "$OUT/xcodebuild-$scheme.log" | head -20
+    echo "빌드 실패($scheme). 전체 기록: $OUT/xcodebuild-$scheme.log"
+    exit 1
+  fi
+done
 [ -d "$BUILT" ] || { echo "빌드 결과가 없다: $BUILT"; exit 1; }
+[ -d "$BUILT_SETTINGS" ] || { echo "빌드 결과가 없다: $BUILT_SETTINGS"; exit 1; }
 VERSION="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$BUILT/Contents/Info.plist")"
 echo "버전 $VERSION"
 
@@ -34,7 +39,9 @@ echo "=== 담을 것 준비 ==="
 rm -rf "$WORK"
 mkdir -p "$WORK/payload/Library/Input Methods" "$WORK/scripts"
 APP="$WORK/payload/Library/Input Methods/cssgsg.app"
+SETTINGS_APP="$WORK/payload/Library/Input Methods/cssgsgSettings.app"
 ditto "$BUILT" "$APP"
+ditto "$BUILT_SETTINGS" "$SETTINGS_APP"
 find "$WORK/payload" -name ".syncthing.*" -delete
 cp "$ROOT/tools/mac/pkg/postinstall" "$WORK/scripts/postinstall"
 chmod +x "$WORK/scripts/postinstall"
@@ -50,14 +57,17 @@ else
     exit 1
   fi
 fi
-codesign --force --sign "$SIGN_ID" --timestamp=none "$APP"
-codesign --verify --strict "$APP"
-REQUIREMENT="$(codesign -d -r- "$APP" 2>&1 | grep designated)"
-echo "  $REQUIREMENT"
-if [ "$SIGN_ID" != "-" ] && ! grep -q "certificate leaf" <<<"$REQUIREMENT"; then
-  echo "서명 요구조건에 인증서가 없다. 업데이트 때 권한이 풀린다."
-  exit 1
-fi
+# 두 앱은 서로 안에 들어 있지 않으니 따로 서명한다.
+for bundle in "$APP" "$SETTINGS_APP"; do
+  codesign --force --sign "$SIGN_ID" --timestamp=none "$bundle"
+  codesign --verify --strict "$bundle"
+  REQUIREMENT="$(codesign -d -r- "$bundle" 2>&1 | grep designated)"
+  echo "  $(basename "$bundle"): $REQUIREMENT"
+  if [ "$SIGN_ID" != "-" ] && ! grep -q "certificate leaf" <<<"$REQUIREMENT"; then
+    echo "서명 요구조건에 인증서가 없다. 업데이트 때 권한이 풀린다."
+    exit 1
+  fi
+done
 
 echo "=== pkg ==="
 pkgbuild --analyze --root "$WORK/payload" "$WORK/component.plist" >/dev/null

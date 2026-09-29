@@ -22,9 +22,7 @@ final class DeveloperLogger {
     var isEnabled: Bool { UserDefaults.standard.bool(forKey: "developerMode") }
 
     private init() {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let dir = support.appendingPathComponent("cssgsg", isDirectory: true)
-        fileURL = dir.appendingPathComponent("developer.log")
+        fileURL = Cssgsg.developerLogURL
     }
 
     func log(_ category: String, _ message: String, metadata: [String: String] = [:]) {

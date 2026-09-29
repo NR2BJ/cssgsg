@@ -176,6 +176,14 @@ impl Engine {
         &self.config
     }
 
+    /// 설정을 바꾼다(설정 앱이 설정 파일을 고쳤을 때). 조합 중인 것·모드·학습은 그대로 두고 다음 키부터 새 설정을 쓴다.
+    pub fn set_config(&mut self, config: Config) {
+        if let Some(layout) = KoLayout::builtin(&config.ko_layout) {
+            self.ko_layout = layout;
+        }
+        self.config = config;
+    }
+
     /// 키 이벤트 하나를 처리한다.
     pub fn handle_key(&mut self, ev: &KeyEvent, ctx: &Context) -> Output {
         let before = self.snapshot();

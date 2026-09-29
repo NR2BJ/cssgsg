@@ -212,6 +212,20 @@ fn d_variant_from_config() {
 }
 
 #[test]
+fn config_can_change_while_running() {
+    // 설정 앱이 바꾸면 모드·학습을 그대로 두고 다음 키부터 새 설정을 쓴다.
+    let mut s = sim();
+    s.type_keys("{rs}kf3").unwrap();
+    assert_eq!(s.screen(), "가3");
+    s.engine.set_config(
+        Config::from_toml("ko_layout = \"chamshin-d-v19\"\n[taps]\nalt_right = \"toggle_english\"").unwrap(),
+    );
+    assert_eq!(s.engine.mode(), Mode::Ko);
+    s.type_keys("{rs}kf3/aN3").unwrap();
+    assert_eq!(s.screen(), "가3갇표3", "오른쪽 Shift 탭은 이제 아무 일도 안 하고 D 배열로 친다");
+}
+
+#[test]
 fn commit_always_reports_new_preedit() {
     // ㅎ 뒤 ㅎ: 앞 ㅎ가 확정되고 새 ㅎ가 조합 중. 화면 글자는 같지만 insertText가 조합 중 글자를
     // 대신하므로 preedit를 다시 알려야 한다.

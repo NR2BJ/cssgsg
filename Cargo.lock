@@ -10,6 +10,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "cssgsg-config"
+version = "0.1.0"
+dependencies = [
+ "cssgsg-core",
+ "serde_json",
+]
+
+[[package]]
 name = "cssgsg-core"
 version = "0.1.0"
 dependencies = [

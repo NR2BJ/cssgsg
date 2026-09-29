@@ -19,11 +19,11 @@
     - 셸 Swift 계층은 스모크 테스트로 검증했다. 실제 앱에서 쳐 보는 확인은 [확인 목록](docs/mac-checklist.md)으로 한다
   - [x] 배포: pkg + GitHub 릴리스 + 메뉴의 업데이트 확인(NRIME 방식). 자체 서명 인증서로 서명해서 업데이트해도 권한이 남는다
   - [~] M2b: 모드 HUD(커서 근처 G/ㅊ/月, 설정 `[mac]`) 완료. 입력 소스 복구, 비밀번호 칸 Graphite(나중에)
-  - [ ] M2c: 설정 앱(학습 탭 포함). 그전까지는 메뉴 막대 → "설정 파일 열기"로 `config.toml`을 고친다
+  - [x] M2c: 설정 앱(0.4.0). 메뉴 막대 cssgsg → "설정…". 탭: 일반(수식키 탭·HUD), 한국어(배열·한자 기억), 일본어(기호·가타카나·Mozc 학습), 배열 학습, 정보
+    - 바꾸면 입력기가 바로 다시 읽는다(다시 시작 없음). 원본은 늘 `config.toml`이고 직접 고쳐도 된다
 - [x] 일본어 한자 변환: Mozc를 입력기 프로세스 안에 정적 링크(0.2.0, [mozc/README.md](mozc/README.md))
 - [x] 한국어 한자 변환(0.3.1, Option+Enter, [CONCEPT.md](CONCEPT.md) §5.4): 조합 중인 글자 하나를 libhangul 사전으로 바꾼다.
   후보창에 뜻(國 나라 국)을 같이 보이고, 자음 하나 + Option+Return은 기호표(ㅁ → ※☆★…). 고른 후보를 기억한다
-- [ ] 설정 앱(학습 탭 포함)
 - [ ] Windows TSF (나중)
 
 ## 구조
@@ -33,7 +33,9 @@ core/       Rust 코어: key, hangul, hanja, latin, kana, engine, ffi, sim
 layouts/    배열 데이터 (ko: 참신세벌식 TOML, en: Graphite, ja: 新月 공식 TSV 원본)
 dict/       사전 원본 (ko: libhangul 한자·기호 사전, 고치지 않고 코어에 넣는다)
 cli/        cssgsg-cli: 터미널에서 쳐보는 도구
-mac/        macOS 입력기(Swift + InputMethodKit). project.yml → xcodegen → cssgsg.xcodeproj(생성물, 커밋 안 함)
+config-ffi/ 설정 앱용 C ABI: config.toml ↔ JSON(코어 Config를 그대로 쓴다. 설정 앱은 입력기 코어 대신 이것만 링크)
+mac/        macOS 입력기(cssgsg/, Swift + InputMethodKit)와 설정 앱(Settings/, SwiftUI), 둘이 같이 쓰는 Shared/.
+            project.yml → xcodegen → cssgsg.xcodeproj(생성물, 커밋 안 함)
 mozc/       Mozc C API 래퍼(cssgsg용). 소스·빌드는 build/mozc, build/mozc-out(tools/mozc/build.sh)
 tools/      ffi-smoke(C 헤더 확인), ohi-oracle(오이 차분 비교), crosscheck(배열 데이터 교차 검증),
             mac(pkg·릴리스·서명 스크립트, 셸·업데이트 스모크 테스트), learn(학습 페이지 빌드)

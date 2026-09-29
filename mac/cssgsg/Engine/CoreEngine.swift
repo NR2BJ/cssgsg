@@ -49,19 +49,13 @@ struct EngineOutput {
 /// 러스트 코어 엔진. 입력기 프로세스에 하나만 있다(모드는 앱 전체 공통, NRIME와 같다).
 /// IMKit은 메인 스레드에서 부르므로 메인 스레드에서만 쓴다.
 final class CoreEngine {
-    static let shared = CoreEngine(configTOML: try? String(contentsOf: configURL, encoding: .utf8))
+    static let shared = CoreEngine(configTOML: try? String(contentsOf: Cssgsg.configURL, encoding: .utf8))
 
     private let engine: OpaquePointer
     /// 설정 파일을 못 읽었으면 그 이유(기본 설정으로 돌았다).
     private(set) var configError: String?
     /// 설정 파일의 [mac] 표(엔진은 쓰지 않고 셸이 쓴다).
-    let macSettings: CssgsgMacSettings
-
-    static var configURL: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("cssgsg", isDirectory: true)
-            .appendingPathComponent("config.toml")
-    }
+    private(set) var macSettings: CssgsgMacSettings
 
     /// config.toml 내용으로 만든다. nil이면 기본 설정, 내용에 오류가 있으면 기본 설정으로 돌고 configError에 남긴다.
     /// 입력기는 shared만 쓴다. 따로 만드는 것은 셸 스모크 테스트(tools/mac/shell-smoke)용이다.
@@ -92,8 +86,19 @@ final class CoreEngine {
         cssgsg_engine_use_mozc(engine, dataPath, profileDir) != 0
     }
 
-    static var mozcProfileURL: URL {
-        configURL.deletingLastPathComponent().appendingPathComponent("mozc", isDirectory: true)
+    /// 설정 파일을 다시 읽어 바로 적용한다(설정 앱이 고친 뒤). 조합 중인 것·모드·학습은 그대로다.
+    /// 파일이 없으면 기본 설정. 오류가 있으면 지금 설정을 그대로 두고 false(configError에 남긴다).
+    @discardableResult
+    func reloadConfig() -> Bool {
+        let text = try? String(contentsOf: Cssgsg.configURL, encoding: .utf8)
+        let ok = (text.map { $0.withCString { cssgsg_engine_set_config(engine, $0) } } ?? cssgsg_engine_set_config(engine, nil)) != 0
+        if ok {
+            configError = nil
+            macSettings = cssgsg_engine_mac_settings(engine)
+        } else {
+            configError = String(cString: cssgsg_last_error())
+        }
+        return ok
     }
 
     /// 한자 학습(TSV)을 불러온다. 읽은 항목 수.
@@ -107,9 +112,6 @@ final class CoreEngine {
         cssgsg_engine_hanja_learning_save(engine).map { String(cString: $0) } ?? ""
     }
 
-    static var hanjaLearningURL: URL {
-        configURL.deletingLastPathComponent().appendingPathComponent("hanja-learning.tsv")
-    }
 
     func handle(_ event: CssgsgKeyEvent, secureField: Bool = false, gameMode: Bool = false, tapsDisabled: Bool = false) -> EngineOutput {
         var ev = event
