@@ -86,20 +86,24 @@ func offline(fixture: String) {
         check(echoed == text, "셸 인용 왕복: \(text)")
     }
 
-    // 설치 명령: && 로 나눈 세 단계를 셸이 어떤 인자로 받는지
+    // 설치 명령(관리자 권한): installer 하나. 셸이 어떤 인자로 받는지
     let pkgPath = "/tmp/a \"b\"/c d\\e's.pkg"
-    let command = Updater.installCommand(pkgPath: pkgPath, uid: 501, user: "me o'neil")
-    let steps = command.components(separatedBy: " && ")
+    let command = Updater.installCommand(pkgPath: pkgPath)
     func argv(_ step: String) -> [String] {
         run("/bin/sh", ["-c", "printf '%s\\n' " + step]).out.split(separator: "\n", omittingEmptySubsequences: false).dropLast().map(String.init)
     }
-    check(steps.count == 3, "설치 명령: 설치 → 잠깐 → 앱 띄우기 세 단계")
-    if steps.count == 3 {
-        check(argv(steps[0]) == ["/usr/sbin/installer", "-pkg", pkgPath, "-target", "/"], "설치 단계 인자: \(argv(steps[0]))")
-        check(argv(steps[1]) == ["/bin/sleep", "1"], "잠깐 단계 인자")
-        check(argv(steps[2]) == ["/bin/launchctl", "asuser", "501", "/usr/bin/sudo", "-u", "me o'neil", "/usr/bin/open", "-g",
-                                 Updater.installedAppPath], "앱 띄우기 단계 인자: \(argv(steps[2]))")
-    }
+    check(argv(command) == ["/usr/sbin/installer", "-pkg", pkgPath, "-target", "/"], "설치 명령 인자: \(argv(command))")
+
+    // 다시 띄우기: osascript가 끝날 때까지 기다렸다가 사용자 세션에서 연다(여는 명령은 echo로 바꿔 시험)
+    let sleeper = Process()
+    sleeper.executableURL = URL(fileURLWithPath: "/bin/sleep")
+    sleeper.arguments = ["0.6"]
+    try? sleeper.run()
+    let started = Date()
+    let relaunch = run("/bin/sh", ["-c", Updater.relaunchScript(waitingFor: sleeper.processIdentifier, opener: "/bin/echo")])
+    let waited = Date().timeIntervalSince(started)
+    check(relaunch.out == "-g \(Updater.installedAppPath)\n", "다시 띄우기: open -g 설치 자리 (\(relaunch.out.trimmingCharacters(in: .newlines)))")
+    check(waited >= 1.5, String(format: "다시 띄우기: 설치(0.6초)가 끝나고 1초 더 기다린 뒤 연다 (%.2f초)", waited))
 
     // AppleScript: 문법 확인 + 리터럴을 되읽으면 셸 명령과 한 글자도 다르지 않은지
     let script = Updater.installerScript(command: command, version: "0.1.2")

@@ -217,7 +217,7 @@ final class Updater: NSObject, URLSessionDownloadDelegate {
 
     private func runInstaller(pkg: URL, release: GitHubRelease) {
         state = .installing(release)
-        let command = Self.installCommand(pkgPath: pkg.path, uid: getuid(), user: NSUserName())
+        let command = Self.installCommand(pkgPath: pkg.path)
         let script = Self.installerScript(command: command, version: release.version)
         // 입력기는 LSUIElement라서, 뒤에서 띄운 암호 창이 키보드 포커스를 못 받을 수 있다(NRIME 8ef120f).
         NSApp.activate(ignoringOtherApps: true)
@@ -228,6 +228,7 @@ final class Updater: NSObject, URLSessionDownloadDelegate {
             var status: Int32 = -1
             do {
                 try process.run()
+                Self.spawnRelauncher(waitingFor: process.processIdentifier)
                 process.waitUntilExit()
                 status = process.terminationStatus
             } catch {}
@@ -246,13 +247,26 @@ final class Updater: NSObject, URLSessionDownloadDelegate {
     /// 설치된 앱의 자리(pkg 설치 위치).
     static let installedAppPath = "/Library/Input Methods/cssgsg.app"
 
-    /// 관리자 권한으로 돌릴 셸 명령: pkg를 설치하고, 설치가 끝나면 사용자 세션에서 새 앱을 띄운다.
-    /// postinstall 안에서 띄우면 설치가 아직 진행 중이라 LaunchServices가 띄울 것을 0개로 본다(0.1.1 업데이트 기록:
-    /// "LAUNCH: Asking CSUI to launch 0 items"). 그래서 installer가 끝난 뒤에 띄운다.
-    static func installCommand(pkgPath: String, uid: uid_t, user: String) -> String {
+    /// 관리자 권한으로 돌릴 셸 명령: pkg 설치만 한다.
+    static func installCommand(pkgPath: String) -> String {
         "/usr/sbin/installer -pkg \(shellQuote(pkgPath)) -target /"
-            + " && /bin/sleep 1"
-            + " && /bin/launchctl asuser \(uid) /usr/bin/sudo -u \(shellQuote(user)) /usr/bin/open -g \(shellQuote(installedAppPath))"
+    }
+
+    /// 설치가 끝나면 새 앱을 띄우는 셸 스크립트. osascript(pid)가 끝나기를 기다렸다가 사용자 세션에서 연다.
+    ///
+    /// root에서 띄우면 안 된다. postinstall 안의 open도, installer 뒤 `launchctl asuser … sudo -u … open`도
+    /// "LAUNCH: Asking CSUI to launch 0 items" / procNotFound(-600)로 실패했다(0.1.1, 0.1.3 업데이트 기록).
+    /// 사용자 세션의 open은 앱을 끈 직후에도 뜬다. 이 셸은 이름이 cssgsg가 아니라 postinstall의 killall에 같이 죽지 않는다.
+    /// 설치를 취소해서 옛 앱이 살아 있으면 open은 아무것도 하지 않는다.
+    static func relaunchScript(waitingFor pid: Int32, opener: String = "/usr/bin/open") -> String {
+        "while /bin/kill -0 \(pid) 2>/dev/null; do /bin/sleep 0.3; done; /bin/sleep 1; \(opener) -g \(shellQuote(installedAppPath))"
+    }
+
+    private static func spawnRelauncher(waitingFor pid: Int32) {
+        let shell = Process()
+        shell.executableURL = URL(fileURLWithPath: "/bin/sh")
+        shell.arguments = ["-c", relaunchScript(waitingFor: pid)]
+        try? shell.run()
     }
 
     /// osascript에 넘길 AppleScript. 셸 명령은 AppleScript 문자열 하나로 감싼다.
