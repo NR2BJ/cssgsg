@@ -20,7 +20,7 @@
 | 모드 전환·단축키·기호 | NRIME 동작, 설계 문서 | 엔진 단위 테스트 | 통과 | `cargo test` |
 | C 인터페이스 | 헤더 `core/include/cssgsg.h` | C 프로그램으로 호출 | 통과 | `bash tools/ffi-smoke/run.sh` |
 | 맥 셸 키 변환(Swift 계층) | macOS ABC 배열 데이터(UCKeyTranslate), IOLLEvent.h 기기 비트, Events.h 키코드, 러스트 시뮬레이터 | CGEvent로 만든 진짜 NSEvent를 IMKit 순서대로(수식키 flagsChanged 따로, 글자 키 뗌 없음) 셸 코드에 넣는다. 무작위 키열을 모드마다 시뮬레이터와 줄마다 비교하고, 수식키 좌우·눌림/뗌, 탭 시각(200ms 경계), 자동 반복을 자체 점검한다 | 9,000/9,000 같음, 자체 점검 30/30. 일부러 넣은 버그 4개를 모두 잡았다 | `bash tools/mac/shell-smoke/run.sh` |
-| 업데이트 코드 | GitHub 실제 응답 모양, 알려진 SHA-256 값, `osacompile`, `/bin/sh` | 버전 순서(semver), 권할 릴리스 고르기, 응답 해석, 해시 대조, 버전 문자열 거르기. 설치 AppleScript는 문법을 컴파일로 확인하고, 따옴표·공백·백슬래시가 든 경로가 셸에 한 인자로 넘어가는지 본다 | 31/31 | `bash tools/mac/update-smoke/run.sh` |
+| 업데이트·설치 코드 | GitHub 실제 응답 모양, 알려진 SHA-256 값, `osacompile`, `/bin/sh`, NRIME의 입력 소스 켜기 | 버전 순서(semver), 권할 릴리스 고르기, 응답 해석, 해시 대조, 버전 문자열 거르기. 설치 AppleScript는 문법을 컴파일로 확인하고, 따옴표·공백·백슬래시가 든 경로가 셸에 한 인자로 넘어가는지 본다. 입력 소스 켜기 계획(처음 실행 / 반쪽 상태 복구 / 사용자가 뺀 경우) | 38/38 | `bash tools/mac/update-smoke/run.sh` |
 | 올라간 릴리스 | GitHub API, 로컬 pkg | 릴리스 직후 앱과 같은 코드로 최신 릴리스를 읽고, 파일을 받아 해시를 로컬 pkg와 맞춘다 | 릴리스마다 | `tools/mac/release.sh`가 돌린다 |
 | pkg 구성 | NRIME에서 겪은 문제 목록 | 풀어 보고 확인: 재배치 끔(`relocatable="false"`, `<relocate/>` 비어 있음), 로그아웃 요구 없음, 설치 뒤 스크립트, 안에 든 앱의 서명(인증서 기준 요구조건), `._` 파일 없음 | 통과(0.1.0) | `pkgutil --expand-full` |
 | 확인 목록 기대값 | 엔진 | `docs/mac-checklist.md`의 엔진 확인 칸을 모두 다시 쳐 본다 | 15/15 | `cargo test --test mac_checklist` |

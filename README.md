@@ -58,7 +58,8 @@ bash tools/ffi-smoke/run.sh
 curl -fL -o /tmp/cssgsg.pkg https://github.com/NR2BJ/cssgsg/releases/latest/download/cssgsg.pkg && sudo installer -pkg /tmp/cssgsg.pkg -target /
 ```
 
-- `/Library/Input Methods/cssgsg.app`에 설치되고, 입력 메뉴에 cssgsg(ㅊ 아이콘)가 추가된다. 안 보이면 시스템 설정 → 키보드 → 입력 소스 → 편집에서 추가하거나, 로그아웃했다 다시 로그인한다.
+- `/Library/Input Methods/cssgsg.app`에 설치되고, 입력 메뉴에 cssgsg(ㅊ 아이콘)가 추가된다. 안 보이면 시스템 설정 → 키보드 → 입력 소스 → 편집 → + 에서
+  **영어(English)** 목록의 cssgsg를 추가하거나(NRIME처럼 입력 모드 언어가 영어라서 거기 있다), 로그아웃했다 다시 로그인한다.
   NRIME와 번들 ID가 달라서 같이 설치된다.
 - 브라우저로 받은 pkg는 서명이 없어서 Gatekeeper가 막는다. 그때는 시스템 설정 → 개인정보 보호 및 보안에서 "그래도 열기"를 누른다(위 명령은 해당 없음).
 - 업데이트: 메뉴 막대 cssgsg 메뉴 → 업데이트 확인(하루 한 번 저절로도 확인한다). 관리자 암호를 한 번 묻고, 로그아웃은 필요 없다.

@@ -16,7 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let engine = CoreEngine.shared
         setupStatusItem()
         updateStatus(engine.mode)
-        InputSourceSetup.enableOnce()
+        InputSourceSetup.run()
         requestPermissionsIfNeeded()
         Updater.shared.onChange = { [weak self] in self?.refreshUpdateItems() }
         Updater.shared.start()

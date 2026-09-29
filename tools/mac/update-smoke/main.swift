@@ -98,6 +98,25 @@ func offline(fixture: String) {
     }
 }
 
+func setupPlan() {
+    typealias S = InputSourceSetup.Source
+    let method = { (on: Bool) in S(id: "app", isMethod: true, enabled: on, enableCapable: true) }
+    let mode = { (on: Bool) in S(id: "app.en", isMethod: false, enabled: on, enableCapable: true) }
+    check(InputSourceSetup.plan([method(false), mode(false)], firstRun: true) == ["app", "app.en"],
+          "입력 소스: 처음 실행이면 본체와 모드를 모두 켠다(본체 먼저)")
+    check(InputSourceSetup.plan([mode(false), method(false)], firstRun: true) == ["app", "app.en"],
+          "입력 소스: 목록 순서와 상관없이 본체 먼저")
+    check(InputSourceSetup.plan([method(true), mode(true)], firstRun: true).isEmpty, "입력 소스: 이미 켜져 있으면 그대로")
+    check(InputSourceSetup.plan([method(false), mode(true)], firstRun: false) == ["app"],
+          "입력 소스: 모드만 켜진 반쪽 상태(0.1.0)면 본체를 켠다")
+    check(InputSourceSetup.plan([method(false), mode(false)], firstRun: false).isEmpty,
+          "입력 소스: 사용자가 뺐으면(둘 다 꺼짐) 건드리지 않는다")
+    check(InputSourceSetup.plan([method(true), mode(false)], firstRun: false).isEmpty,
+          "입력 소스: 모드를 끈 것도 건드리지 않는다")
+    let stuck = S(id: "app", isMethod: true, enabled: false, enableCapable: false)
+    check(InputSourceSetup.plan([stuck, mode(true)], firstRun: false).isEmpty, "입력 소스: 켤 수 없는 것은 건너뛴다")
+}
+
 func live(pkg: String, version: String) {
     let semaphore = DispatchSemaphore(value: 0)
     var body: Data?
@@ -146,8 +165,18 @@ func live(pkg: String, version: String) {
 let args = Array(CommandLine.arguments.dropFirst())
 if args.first == "--live", args.count == 3 {
     live(pkg: args[1], version: args[2])
+} else if args.first == "--setup-plan", args.count == 2 {
+    // 이 컴퓨터의 실제 상태로 계획만 세워 본다(켜지는 않는다).
+    let found = InputSourceSetup.installed(args[1])
+    for item in found {
+        print("  \(item.info.id) 본체=\(item.info.isMethod) 켜짐=\(item.info.enabled) 켜기가능=\(item.info.enableCapable)")
+    }
+    print("처음 실행이면 켤 것:", InputSourceSetup.plan(found.map(\.info), firstRun: true))
+    print("그 뒤 실행이면 켤 것:", InputSourceSetup.plan(found.map(\.info), firstRun: false))
+    exit(0)
 } else if args.count == 1 {
     offline(fixture: args[0])
+    setupPlan()
 } else {
     print("사용법: update-smoke <fixture.json> | update-smoke --live <pkg> <버전>")
     exit(2)
