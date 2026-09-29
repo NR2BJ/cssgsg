@@ -122,6 +122,9 @@ func selfTest() -> Bool {
         }
     }
 
+    // 입력기는 한국어로 시작한다(셸이 쓰는 CoreEngine 그대로, 설정 파일 없이).
+    check(CoreEngine(configTOML: nil).mode == .ko, "입력기는 한국어(ㅊ)로 시작")
+
     // 빠른 탭 전환 보정(tap_buffering): 탭 수식키를 누른 채 친 글자는 잡아 두고 타이머를 청한다.
     do {
         let config = "tap_buffering = true"

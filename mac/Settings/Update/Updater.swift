@@ -1,7 +1,7 @@
 // NRIME(github.com/NR2BJ/NRIME)의 Shared/UpdateManager.swift를 줄여서 가져왔다.
 // - 채널은 정식(stable)과 베타(beta)다. 정식은 GitHub /releases/latest, 베타는 /releases 목록에서 가장 높은 버전
 //   (prerelease 포함). 채널마다 ETag와 받은 응답을 따로 둔다.
-// - 확인은 설정 앱만 한다(정보 탭을 열 때 하루에 한 번, "지금 확인", 채널을 바꿀 때). 입력기 프로세스는 네트워크를 쓰지 않는다.
+// - 확인은 설정 앱만 한다(정보 탭을 열 때마다, "지금 확인", 채널을 바꿀 때). 입력기 프로세스는 네트워크를 쓰지 않는다.
 //   0.4.0까지는 입력기 메뉴가 확인했는데, 입력기에서 창을 띄우면 메인 스레드가 막혀 모든 앱의 입력이 멈출 수 있어
 //   메뉴 항목뿐이었다. 설정 앱에서는 릴리스 노트와 진행을 제대로 보인다.
 // - 같은 버전 재업로드 감지는 뺐다. 릴리스 스크립트가 이미 있는 태그를 거부하므로 버전은 늘 올라간다.
@@ -191,7 +191,9 @@ final class Updater: NSObject, ObservableObject, URLSessionDownloadDelegate {
         }
     }
 
-    private static let checkInterval: TimeInterval = 24 * 60 * 60
+    /// 정보 탭을 열 때 이만큼 지났으면 확인한다. 0.5.0은 NRIME처럼 하루였는데, 그날 한 번 본 뒤에는 새 릴리스가 나와도
+    /// 다음 날까지 "최신 버전이다"로 보였다(사용자가 0.5.0에 머물러 있었다). 바뀐 게 없으면 GitHub는 304만 준다(ETag).
+    private static let checkInterval: TimeInterval = 60
     private static let channelKey = "updateChannel"
 
     static var currentVersion: String {
@@ -224,7 +226,7 @@ final class Updater: NSObject, ObservableObject, URLSessionDownloadDelegate {
 
     // MARK: - 확인
 
-    /// 정보 탭을 열 때: 하루가 지났으면 확인하고, 아니면 지난번 응답으로 상태를 보인다.
+    /// 정보 탭을 열 때: 1분이 지났으면 확인하고, 아니면 지난번 응답으로 상태를 보인다.
     func checkIfDue() {
         if let last = lastCheckDate(channel), Date().timeIntervalSince(last) < Self.checkInterval {
             if case .idle = state { evaluate(cachedReleases(channel)) }
