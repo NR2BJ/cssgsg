@@ -217,7 +217,8 @@ final class Updater: NSObject, URLSessionDownloadDelegate {
 
     private func runInstaller(pkg: URL, release: GitHubRelease) {
         state = .installing(release)
-        let script = Self.installerScript(pkgPath: pkg.path, version: release.version)
+        let command = Self.installCommand(pkgPath: pkg.path, uid: getuid(), user: NSUserName())
+        let script = Self.installerScript(command: command, version: release.version)
         // 입력기는 LSUIElement라서, 뒤에서 띄운 암호 창이 키보드 포커스를 못 받을 수 있다(NRIME 8ef120f).
         NSApp.activate(ignoringOtherApps: true)
         DispatchQueue.global(qos: .userInitiated).async {
@@ -242,14 +243,32 @@ final class Updater: NSObject, URLSessionDownloadDelegate {
         }
     }
 
-    /// osascript에 넘길 AppleScript. 경로는 AppleScript 문자열로 감싸고, 셸에는 quoted form으로 넘긴다.
-    static func installerScript(pkgPath: String, version: String) -> String {
-        func literal(_ text: String) -> String {
-            "\"" + text.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
-        }
+    /// 설치된 앱의 자리(pkg 설치 위치).
+    static let installedAppPath = "/Library/Input Methods/cssgsg.app"
+
+    /// 관리자 권한으로 돌릴 셸 명령: pkg를 설치하고, 설치가 끝나면 사용자 세션에서 새 앱을 띄운다.
+    /// postinstall 안에서 띄우면 설치가 아직 진행 중이라 LaunchServices가 띄울 것을 0개로 본다(0.1.1 업데이트 기록:
+    /// "LAUNCH: Asking CSUI to launch 0 items"). 그래서 installer가 끝난 뒤에 띄운다.
+    static func installCommand(pkgPath: String, uid: uid_t, user: String) -> String {
+        "/usr/sbin/installer -pkg \(shellQuote(pkgPath)) -target /"
+            + " && /bin/sleep 1"
+            + " && /bin/launchctl asuser \(uid) /usr/bin/sudo -u \(shellQuote(user)) /usr/bin/open -g \(shellQuote(installedAppPath))"
+    }
+
+    /// osascript에 넘길 AppleScript. 셸 명령은 AppleScript 문자열 하나로 감싼다.
+    static func installerScript(command: String, version: String) -> String {
         let prompt = "cssgsg \(safe(version)) 업데이트를 설치합니다."
-        return "do shell script \"/usr/sbin/installer -pkg \" & quoted form of \(literal(pkgPath)) & \" -target /\""
-            + " with administrator privileges with prompt \(literal(prompt))"
+        return "do shell script \(appleScriptLiteral(command)) with administrator privileges with prompt \(appleScriptLiteral(prompt))"
+    }
+
+    /// 셸 작은따옴표 인용. 안의 '는 '\''로 바꾼다.
+    static func shellQuote(_ text: String) -> String {
+        "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    /// AppleScript 문자열 리터럴. \ 와 " 를 escape한다.
+    static func appleScriptLiteral(_ text: String) -> String {
+        "\"" + text.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
     }
 
     /// 버전 문자열에서 파일 이름·안내 문구에 넣어도 되는 글자(ASCII 영숫자, ".", "-")만 남긴다.

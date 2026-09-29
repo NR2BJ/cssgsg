@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let candidatePanel = CandidatePanel()
     private var statusItem: NSStatusItem?
     private var permissionItem: NSMenuItem?
+    private var addSourceItem: NSMenuItem?
     private var updateItem: NSMenuItem?
     private var releaseNotesItem: NSMenuItem?
 
@@ -16,7 +17,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let engine = CoreEngine.shared
         setupStatusItem()
         updateStatus(engine.mode)
-        InputSourceSetup.run()
+        InputSourceSetup.register()
+        InputSourceSetup.promptOnceIfNotAdded()
         requestPermissionsIfNeeded()
         Updater.shared.onChange = { [weak self] in self?.refreshUpdateItems() }
         Updater.shared.start()
@@ -47,6 +49,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(notes)
         releaseNotesItem = notes
         menu.addItem(.separator())
+        let addSource = NSMenuItem(title: "⚠︎ 입력 소스에 추가하기…", action: #selector(openKeyboardSettings), keyEquivalent: "")
+        addSource.target = self
+        addSource.toolTip = "시스템 설정 → 키보드 → 입력 소스 편집 → + → 영어 → cssgsg. macOS는 입력기가 스스로 추가되지 못하게 한다."
+        menu.addItem(addSource)
+        addSourceItem = addSource
         let permission = NSMenuItem(title: "⚠︎ 키 보내기 권한 허용…", action: #selector(openPermissionSettings), keyEquivalent: "")
         permission.target = self
         permission.toolTip = "조합 중 ⌘/Option+키와 Codex 줄바꿈에 필요하다. 없어도 입력은 된다."
@@ -60,9 +67,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem = item
     }
 
-    /// 메뉴를 열 때마다 권한을 다시 본다. 권한이 있으면 항목을 숨긴다.
+    /// 메뉴를 열 때마다 권한과 입력 소스 추가 여부를 다시 본다. 됐으면 항목을 숨긴다.
     func menuNeedsUpdate(_ menu: NSMenu) {
         permissionItem?.isHidden = KeyEventReposter.canPostEvents
+        addSourceItem?.isHidden = InputSourceSetup.isAdded
+    }
+
+    @objc private func openKeyboardSettings() {
+        InputSourceSetup.openKeyboardSettings()
     }
 
     // MARK: - 업데이트

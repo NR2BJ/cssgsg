@@ -1,7 +1,9 @@
 #!/bin/bash
 # cssgsg pkg postinstall (root로 돈다). NRIME처럼 최소로 한다.
 # - 여기서 swift나 codesign을 부르지 않는다(알림·권한 창이 뜬다). 서명은 빌드 때 끝낸다.
-# - 입력 소스 등록과 켜기는 앱이 처음 뜰 때 스스로 한다(InputSourceSetup). 그래서 여기서는 앱을 한 번 띄운다.
+# - 입력 소스는 켜지 않는다. macOS 27은 입력기를 프로그램이 켜는 것을 받아들이지 않는다(사용자가 시스템 설정에서 추가).
+# - 앱을 한 번 띄워 본다(메뉴 막대 메뉴, 처음이면 키보드 설정 안내). 설치가 아직 진행 중이라 LaunchServices가
+#   띄울 것을 0개로 보고 실패할 수 있다. 앱 안 업데이트는 installer가 끝난 뒤 다시 띄우고, 안내 명령도 끝에 open을 붙인다.
 APP="/Library/Input Methods/cssgsg.app"
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/LaunchServices.framework/Versions/Current/Support/lsregister"
 

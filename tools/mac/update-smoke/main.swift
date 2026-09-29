@@ -3,6 +3,7 @@
 //   update-smoke <fixture.json>                  버전 순서, 권할 릴리스, GitHub 응답 해석, 해시, AppleScript
 //   update-smoke --live <pkg 파일> <버전>        GitHub에 올라간 최신 릴리스를 앱과 같은 코드로 읽고, 파일을 받아 해시를 맞춰 본다
 import AppKit
+import Carbon
 import CryptoKit
 import Foundation
 
@@ -79,42 +80,37 @@ func offline(fixture: String) {
     check(Updater.safe("1.0\"; rm -rf /") == "1.0rm-rf", "safe: 따옴표·공백·기호 제거")
     check(Updater.safe("1.0한") == "1.0", "safe: ASCII만")
 
-    // 설치 AppleScript: 문법 확인 + 셸에 넘어가는 명령
-    for path in ["/Users/me/Library/Caches/com.cssgsg.inputmethod.app/updates/cssgsg-0.1.1.pkg",
-                 "/tmp/a \"b\"/c d\\e's.pkg"] {
-        let script = Updater.installerScript(pkgPath: path, version: "0.1.1")
-        let compiled = run("/usr/bin/osacompile", ["-e", script, "-o", temp.path + ".scpt"])
-        try? FileManager.default.removeItem(atPath: temp.path + ".scpt")
-        check(compiled.status == 0, "AppleScript 문법: \(path) \(compiled.status == 0 ? "" : compiled.out)")
-        check(script.contains("with administrator privileges") && script.contains("with prompt"),
-              "AppleScript: 관리자 권한 + 안내 문구")
-        // do shell script가 받을 명령 문자열을 그대로 만들어 보고, 셸이 경로를 한 인자로 받는지 본다.
-        let expression = script.replacingOccurrences(of: "do shell script ", with: "")
-            .components(separatedBy: " with administrator privileges")[0]
-        let command = run("/usr/bin/osascript", ["-e", expression]).out.trimmingCharacters(in: .newlines)
-        let argv = run("/bin/sh", ["-c", "printf '%s\\n' " + command.replacingOccurrences(of: "/usr/sbin/installer ", with: "")])
-            .out.split(separator: "\n").map(String.init)
-        check(argv == ["-pkg", path, "-target", "/"], "셸 인자: \(argv)")
+    // 셸 인용: 까다로운 글자가 든 문자열이 셸을 거쳐 그대로 돌아오는지
+    for text in ["/tmp/a \"b\"/c d\\e's.pkg", "it's", "$(rm -rf /)", "`x`", "a;b&&c|d", "공백 있는 이름"] {
+        let echoed = run("/bin/sh", ["-c", "printf '%s' " + Updater.shellQuote(text)]).out
+        check(echoed == text, "셸 인용 왕복: \(text)")
     }
-}
 
-func setupPlan() {
-    typealias S = InputSourceSetup.Source
-    let method = { (on: Bool) in S(id: "app", isMethod: true, enabled: on, enableCapable: true) }
-    let mode = { (on: Bool) in S(id: "app.en", isMethod: false, enabled: on, enableCapable: true) }
-    check(InputSourceSetup.plan([method(false), mode(false)], firstRun: true) == ["app", "app.en"],
-          "입력 소스: 처음 실행이면 본체와 모드를 모두 켠다(본체 먼저)")
-    check(InputSourceSetup.plan([mode(false), method(false)], firstRun: true) == ["app", "app.en"],
-          "입력 소스: 목록 순서와 상관없이 본체 먼저")
-    check(InputSourceSetup.plan([method(true), mode(true)], firstRun: true).isEmpty, "입력 소스: 이미 켜져 있으면 그대로")
-    check(InputSourceSetup.plan([method(false), mode(true)], firstRun: false) == ["app"],
-          "입력 소스: 모드만 켜진 반쪽 상태(0.1.0)면 본체를 켠다")
-    check(InputSourceSetup.plan([method(false), mode(false)], firstRun: false).isEmpty,
-          "입력 소스: 사용자가 뺐으면(둘 다 꺼짐) 건드리지 않는다")
-    check(InputSourceSetup.plan([method(true), mode(false)], firstRun: false).isEmpty,
-          "입력 소스: 모드를 끈 것도 건드리지 않는다")
-    let stuck = S(id: "app", isMethod: true, enabled: false, enableCapable: false)
-    check(InputSourceSetup.plan([stuck, mode(true)], firstRun: false).isEmpty, "입력 소스: 켤 수 없는 것은 건너뛴다")
+    // 설치 명령: && 로 나눈 세 단계를 셸이 어떤 인자로 받는지
+    let pkgPath = "/tmp/a \"b\"/c d\\e's.pkg"
+    let command = Updater.installCommand(pkgPath: pkgPath, uid: 501, user: "me o'neil")
+    let steps = command.components(separatedBy: " && ")
+    func argv(_ step: String) -> [String] {
+        run("/bin/sh", ["-c", "printf '%s\\n' " + step]).out.split(separator: "\n", omittingEmptySubsequences: false).dropLast().map(String.init)
+    }
+    check(steps.count == 3, "설치 명령: 설치 → 잠깐 → 앱 띄우기 세 단계")
+    if steps.count == 3 {
+        check(argv(steps[0]) == ["/usr/sbin/installer", "-pkg", pkgPath, "-target", "/"], "설치 단계 인자: \(argv(steps[0]))")
+        check(argv(steps[1]) == ["/bin/sleep", "1"], "잠깐 단계 인자")
+        check(argv(steps[2]) == ["/bin/launchctl", "asuser", "501", "/usr/bin/sudo", "-u", "me o'neil", "/usr/bin/open", "-g",
+                                 Updater.installedAppPath], "앱 띄우기 단계 인자: \(argv(steps[2]))")
+    }
+
+    // AppleScript: 문법 확인 + 리터럴을 되읽으면 셸 명령과 한 글자도 다르지 않은지
+    let script = Updater.installerScript(command: command, version: "0.1.2")
+    let compiled = run("/usr/bin/osacompile", ["-e", script, "-o", temp.path + ".scpt"])
+    try? FileManager.default.removeItem(atPath: temp.path + ".scpt")
+    check(compiled.status == 0, "AppleScript 문법 \(compiled.status == 0 ? "" : compiled.out)")
+    check(script.hasPrefix("do shell script ") && script.contains(" with administrator privileges with prompt "),
+          "AppleScript: 관리자 권한 + 안내 문구")
+    let literal = script.dropFirst("do shell script ".count).components(separatedBy: " with administrator privileges")[0]
+    let roundTrip = run("/usr/bin/osascript", ["-e", "return " + literal]).out
+    check(roundTrip.hasSuffix("\n") && String(roundTrip.dropLast()) == command, "AppleScript 리터럴 왕복")
 }
 
 func live(pkg: String, version: String) {
@@ -165,18 +161,17 @@ func live(pkg: String, version: String) {
 let args = Array(CommandLine.arguments.dropFirst())
 if args.first == "--live", args.count == 3 {
     live(pkg: args[1], version: args[2])
-} else if args.first == "--setup-plan", args.count == 2 {
-    // 이 컴퓨터의 실제 상태로 계획만 세워 본다(켜지는 않는다).
-    let found = InputSourceSetup.installed(args[1])
-    for item in found {
-        print("  \(item.info.id) 본체=\(item.info.isMethod) 켜짐=\(item.info.enabled) 켜기가능=\(item.info.enableCapable)")
-    }
-    print("처음 실행이면 켤 것:", InputSourceSetup.plan(found.map(\.info), firstRun: true))
-    print("그 뒤 실행이면 켤 것:", InputSourceSetup.plan(found.map(\.info), firstRun: false))
+} else if args.first == "--input-status" {
+    // 이 컴퓨터에서 cssgsg 입력 소스가 어떻게 보이는지(바꾸지 않는다).
+    let id = "com.cssgsg.inputmethod.app.en"
+    let condition = [kTISPropertyInputSourceID as String: id] as CFDictionary
+    let installed = (TISCreateInputSourceList(condition, true)?.takeRetainedValue() as? [TISInputSource]) ?? []
+    let name = installed.first.flatMap { TISGetInputSourceProperty($0, kTISPropertyLocalizedName) }
+        .map { Unmanaged<CFString>.fromOpaque($0).takeUnretainedValue() as String } ?? "(없음)"
+    print("설치됨: \(!installed.isEmpty), 목록에 보이는 이름: \(name), 입력 소스에 추가됨: \(InputSourceSetup.isAdded)")
     exit(0)
 } else if args.count == 1 {
     offline(fixture: args[0])
-    setupPlan()
 } else {
     print("사용법: update-smoke <fixture.json> | update-smoke --live <pkg> <버전>")
     exit(2)

@@ -55,12 +55,14 @@ bash tools/ffi-smoke/run.sh
 처음 한 번, 터미널에서(관리자 암호를 묻는다):
 
 ```bash
-curl -fL -o /tmp/cssgsg.pkg https://github.com/NR2BJ/cssgsg/releases/latest/download/cssgsg.pkg && sudo installer -pkg /tmp/cssgsg.pkg -target /
+curl -fL -o /tmp/cssgsg.pkg https://github.com/NR2BJ/cssgsg/releases/latest/download/cssgsg.pkg && sudo installer -pkg /tmp/cssgsg.pkg -target / && open -g "/Library/Input Methods/cssgsg.app"
 ```
 
-- `/Library/Input Methods/cssgsg.app`에 설치되고, 입력 메뉴에 cssgsg(ㅊ 아이콘)가 추가된다. 안 보이면 시스템 설정 → 키보드 → 입력 소스 → 편집 → + 에서
-  **영어(English)** 목록의 cssgsg를 추가하거나(NRIME처럼 입력 모드 언어가 영어라서 거기 있다), 로그아웃했다 다시 로그인한다.
+- `/Library/Input Methods/cssgsg.app`에 설치되고, 메뉴 막대에 cssgsg 메뉴(A / 한 / あ)가 뜨고, 키보드 설정이 한 번 열린다.
   NRIME와 번들 ID가 달라서 같이 설치된다.
+- **입력 소스에는 직접 추가한다.** macOS는 입력기가 스스로 입력 소스에 추가되지 못하게 한다.
+  시스템 설정 → 키보드 → 텍스트 입력 → 입력 소스 "편집…" → 왼쪽 아래 + → **영어** → cssgsg → 추가.
+  목록에 안 보이면 시스템 설정을 끝냈다(⌘Q) 다시 열거나, 로그아웃했다 다시 로그인한다. 추가하기 전까지 cssgsg 메뉴에 "⚠︎ 입력 소스에 추가하기…"가 보인다.
 - 브라우저로 받은 pkg는 서명이 없어서 Gatekeeper가 막는다. 그때는 시스템 설정 → 개인정보 보호 및 보안에서 "그래도 열기"를 누른다(위 명령은 해당 없음).
 - 업데이트: 메뉴 막대 cssgsg 메뉴 → 업데이트 확인(하루 한 번 저절로도 확인한다). 관리자 암호를 한 번 묻고, 로그아웃은 필요 없다.
 - 처음 실행 때 한 번 "손쉬운 사용"(키 이벤트 보내기) 권한을 물어본다. 없어도 입력은 되고, 조합 중 ⌘/Option+키 재전송과 Codex 줄바꿈만 빠진다.
