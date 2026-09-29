@@ -1,4 +1,4 @@
-// 맥 셸 스모크 테스트의 타자기. 셸의 KeyTranslation.swift, CoreEngine.swift와 같이 빌드한다(run.sh).
+// 맥 셸 스모크 테스트의 타자기. 셸의 KeyTranslation.swift(ModifierState), CoreEngine.swift와 같이 빌드한다(run.sh).
 //
 // CGEvent로 만든 진짜 NSEvent를 IMKit 컨트롤러가 받는 순서대로 셸 코드에 넣고, 앱 화면을 흉내 낸다.
 // 키열 문법과 화면 규칙은 러스트 시뮬레이터(core/src/sim.rs)와 같아서 cssgsg-cli batch와 줄마다 비교할 수 있다.
@@ -6,6 +6,8 @@
 // 러스트 시뮬레이터와 일부러 다르게 한 것(실제 입력 흐름에 맞춘다)
 // - 글자 → 맥 키코드, 그리고 앱이 넣는 글자는 macOS ABC 배열 데이터(UCKeyTranslate)에서 얻는다. 러스트 쪽 표와 독립.
 // - Shift·⌘·Ctrl·Option은 수식키 눌림/뗌(flagsChanged)을 따로 보내고, 좌우 기기 비트(IOLLEvent.h)도 붙인다.
+// - macOS 27의 IMKit처럼 좌우 기기 비트를 빼거나(deviceBits: false), flagsChanged를 두 번씩 보낼 수 있다
+//   (duplicateFlags: true). 2026-09-29 개발자 기록에서 둘 다 실제로 봤다.
 // - 글자 키의 뗌은 보내지 않는다(컨트롤러는 keyDown과 flagsChanged만 받는다).
 // - 엔진이 Caps Lock을 끄라고 하면, OS가 보낼 Caps Lock flagsChanged를 다음 입력 전에 보낸다.
 import Carbon
@@ -72,6 +74,9 @@ enum Flag {
     static let command = CGEventFlags.maskCommand.rawValue
     /// 진짜 키 이벤트에 늘 붙어 있는 비트(NX_NONCOALSESCEDMASK).
     static let nonCoalesced = UInt64(NX_NONCOALSESCEDMASK)
+    /// 좌우 기기 비트 전부.
+    static let deviceMask = UInt64(NX_DEVICELSHIFTKEYMASK | NX_DEVICERSHIFTKEYMASK | NX_DEVICELCTLKEYMASK | NX_DEVICERCTLKEYMASK
+        | NX_DEVICELALTKEYMASK | NX_DEVICERALTKEYMASK | NX_DEVICELCMDKEYMASK | NX_DEVICERCMDKEYMASK)
 }
 
 /// 수식키 하나: 맥 키코드(Events.h), 기기 비트와 같은 종류 양쪽 기기 비트(IOLLEvent.h), 합친 플래그.
@@ -119,7 +124,7 @@ func makeEvent(_ type: CGEventType, code: UInt16, flags: UInt64, at seconds: Dou
 
 // MARK: - 타자기
 
-/// 키열을 IMKit 이벤트 순서대로 셸 코드(KeyTranslation → CoreEngine)에 넣고 앱 화면을 흉내 낸다.
+/// 키열을 IMKit 이벤트 순서대로 셸 코드(ModifierState → CoreEngine)에 넣고 앱 화면을 흉내 낸다.
 final class Typist {
     let engine = CoreEngine(configTOML: nil)
     let layout: AbcLayout
@@ -132,20 +137,29 @@ final class Typist {
 
     private var caps = false
     private var held: UInt64 = 0
-    /// 컨트롤러의 lastModifierFlags와 같다(프로세스 전체에서 하나).
-    private var previousFlags: NSEvent.ModifierFlags = []
+    /// 컨트롤러의 modifiers와 같다(프로세스 전체에서 하나).
+    private var modifiers = ModifierState()
     private var capsOffPending = false
     private var clock = 1.0
+    /// 좌우 기기 비트를 붙일지(false면 macOS 27 IMKit처럼 합친 플래그만).
+    let deviceBits: Bool
+    /// flagsChanged를 4ms 간격으로 두 번씩 보낼지(macOS 27 IMKit).
+    let duplicateFlags: Bool
 
-    init(layout: AbcLayout, mode: InputMode) {
+    init(layout: AbcLayout, mode: InputMode, deviceBits: Bool = true, duplicateFlags: Bool = false) {
         self.layout = layout
         self.mode = mode
+        self.deviceBits = deviceBits
+        self.duplicateFlags = duplicateFlags
         apply(engine.setMode(mode))
     }
 
     var screen: String { text + preedit }
 
-    private var flags: UInt64 { held | (caps ? Flag.alphaShift : 0) | Flag.nonCoalesced }
+    private var flags: UInt64 {
+        let all = held | (caps ? Flag.alphaShift : 0) | Flag.nonCoalesced
+        return deviceBits ? all : all & ~Flag.deviceMask
+    }
 
     // MARK: 수식키
 
@@ -173,11 +187,15 @@ final class Typist {
     }
 
     private func flagsChanged(_ code: UInt16) {
-        let event = makeEvent(.flagsChanged, code: code, flags: flags, at: clock)
-        let previous = previousFlags
-        previousFlags = event.modifierFlags
+        deliverFlags(makeEvent(.flagsChanged, code: code, flags: flags, at: clock))
+        if duplicateFlags {
+            deliverFlags(makeEvent(.flagsChanged, code: code, flags: flags, at: clock + 0.004))
+        }
+    }
+
+    private func deliverFlags(_ event: NSEvent) {
         lastEvent = event
-        guard let key = KeyTranslation.flagsChanged(event, previous: previous) else { return }
+        guard let key = modifiers.flagsChanged(event) else { return }
         lastKey = key
         apply(engine.handle(key))
     }
@@ -189,7 +207,7 @@ final class Typist {
         deliverPending()
         clock += 0.03
         let event = makeEvent(.keyDown, code: code, flags: flags, at: clock, autorepeat: autorepeat)
-        let key = KeyTranslation.keyDown(event)
+        let key = modifiers.keyDown(event)
         lastEvent = event
         lastKey = key
         let out = engine.handle(key)

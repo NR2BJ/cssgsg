@@ -15,8 +15,8 @@ final class CssgsgInputController: IMKInputController {
 
     private static weak var activeController: CssgsgInputController?
     private static var mouseMonitor: Any?
-    /// 수식키 눌림/뗌은 앞 이벤트와 비교해야 안다. 프로세스 전체에서 하나.
-    private static var lastModifierFlags: NSEvent.ModifierFlags = []
+    /// 수식키 상태(좌우, 눌림). 컨트롤러는 클라이언트마다 따로 생기므로 프로세스 전체에서 하나를 같이 쓴다.
+    private static var modifiers = ModifierState()
     /// ⌘+키 재전송과 Shift+Enter 줄바꿈 전에 기다리는 시간(NRIME 기본 15ms).
     static var shiftEnterDelay: TimeInterval = 0.015
 
@@ -55,9 +55,8 @@ final class CssgsgInputController: IMKInputController {
 
         switch event.type {
         case .flagsChanged:
-            let previous = Self.lastModifierFlags
-            Self.lastModifierFlags = event.modifierFlags
-            guard let keyEvent = KeyTranslation.flagsChanged(event, previous: previous) else { return false }
+            // 바뀐 것이 없으면(IMKit이 같은 flagsChanged를 두 번 보낸다) 엔진에 넘기지 않는다.
+            guard let keyEvent = Self.modifiers.flagsChanged(event) else { return false }
             let out = CoreEngine.shared.handle(keyEvent, secureField: secure)
             logKey(event, keyEvent, out)
             // 전환은 되지만, 확정할 글자를 비밀번호 칸에 넣지는 않는다.
@@ -65,7 +64,7 @@ final class CssgsgInputController: IMKInputController {
             return false
 
         case .keyDown:
-            let keyEvent = KeyTranslation.keyDown(event)
+            let keyEvent = Self.modifiers.keyDown(event)
             let out = CoreEngine.shared.handle(keyEvent, secureField: secure)
             logKey(event, keyEvent, out)
             if secure {
@@ -218,6 +217,7 @@ final class CssgsgInputController: IMKInputController {
             "hid": String(format: "0x%02X", key.key),
             "down": "\(key.down)",
             "mods": String(format: "0x%03X", key.mods),
+            "raw": String(format: "0x%X", event.modifierFlags.rawValue),
             "t": String(format: "%.3f", key.time),
             "consumed": "\(out.consumed)",
             "commitLen": "\(out.commit.count)",

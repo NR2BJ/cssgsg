@@ -23,20 +23,25 @@ swiftc -O -module-name shellsmoke \
 echo "=== 자체 점검 ==="
 "$OUT/shell-smoke" --self-test
 
-echo "=== 러스트 시뮬레이터와 비교 (모드별 $N줄) ==="
+echo "=== 러스트 시뮬레이터와 비교 (모드별 $N줄 × 입력 조건 4가지) ==="
+# 입력 조건: 기기 비트 있음/없음 × flagsChanged 한 번/두 번. macOS 27 IMKit은 비트 없음·두 번이다.
 fail=0
 for mode in en ko ja; do
   node tools/mac/shell-smoke/corpus.mjs "$mode" "$N" > "$OUT/corpus-$mode.txt"
   build/cargo/release/cssgsg-cli batch --mode "$mode" < "$OUT/corpus-$mode.txt" > "$OUT/sim-$mode.jsonl"
-  "$OUT/shell-smoke" --mode "$mode" < "$OUT/corpus-$mode.txt" > "$OUT/shell-$mode.jsonl"
-  if cmp -s "$OUT/sim-$mode.jsonl" "$OUT/shell-$mode.jsonl"; then
-    echo "$mode: $N줄 모두 같음"
-  else
-    fail=1
-    count=$(paste "$OUT/sim-$mode.jsonl" "$OUT/shell-$mode.jsonl" | awk -F'\t' '$1 != $2' | wc -l | tr -d ' ')
-    echo "$mode: ${count}줄 다름 (키열 / 시뮬레이터 / 셸)"
-    paste "$OUT/corpus-$mode.txt" "$OUT/sim-$mode.jsonl" "$OUT/shell-$mode.jsonl" \
-      | awk -F'\t' '$2 != $3 { print "  " $1 "\n    sim   " $2 "\n    shell " $3 }' | head -30
-  fi
+  for variant in "" "--no-device-bits" "--duplicate-flags" "--no-device-bits --duplicate-flags"; do
+    name="${variant:-기본}"
+    # shellcheck disable=SC2086
+    "$OUT/shell-smoke" --mode "$mode" $variant < "$OUT/corpus-$mode.txt" > "$OUT/shell-$mode.jsonl"
+    if cmp -s "$OUT/sim-$mode.jsonl" "$OUT/shell-$mode.jsonl"; then
+      echo "$mode [$name]: $N줄 모두 같음"
+    else
+      fail=1
+      count=$(paste "$OUT/sim-$mode.jsonl" "$OUT/shell-$mode.jsonl" | awk -F'\t' '$1 != $2' | wc -l | tr -d ' ')
+      echo "$mode [$name]: ${count}줄 다름 (키열 / 시뮬레이터 / 셸)"
+      paste "$OUT/corpus-$mode.txt" "$OUT/sim-$mode.jsonl" "$OUT/shell-$mode.jsonl" \
+        | awk -F'\t' '$2 != $3 { print "  " $1 "\n    sim   " $2 "\n    shell " $3 }' | head -12
+    fi
+  done
 done
 exit $fail

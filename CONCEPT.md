@@ -583,7 +583,9 @@ k     = { cho = "ㄱ" }
   - 프로그램으로 소스를 바꾸는 일은 최소화한다. 예외는 NRIME의 비번 ABC 핸드오프다. 지금 macOS 27에서 쓰이고 있는 검증된 로직이라 그대로 유지한다.
 - **Chromium:** 활성화 도중에 `attributes(forCharacterIndex:)`를 동기로 부르면 데드락이 날 수 있다(azooKey). 캐럿 위치 조회는 활성화 경로에서 빼고 지연시킨다.
 - **창 재사용:** macOS 26에서는 NSWindow 메모리가 회수되지 않는다. 후보창과 HUD는 한 번 만들어서 재사용한다.
-- **설치:** 입력기 설치에는 여전히 로그아웃이 필요하다(2026-06 Apple DTS 확인). 업데이트는 프로세스 재시작으로 된다.
+- **설치:** 입력기 설치에는 여전히 로그아웃이 필요하다(2026-06 Apple DTS 확인). 업데이트는 프로세스 재시작으로 된다. 2026-09-29 cssgsg 0.1.x로 다시 확인했다: 새로 설치한 입력기는 로그아웃 뒤에야 추가(+) 목록에 나온다.
+- **입력 소스 켜기(macOS 27 실측):** 서드파티 입력기는 프로그램이 켤 수 없다. `TISEnableInputSource`는 noErr를 돌려주지만 아무것도 저장하지 않는다(입력기 안에서도 밖에서도). 켜진 목록은 `com.apple.inputsources`의 `AppleEnabledThirdPartyInputSources`이고, 시스템 설정의 추가가 여기에 쓴다. TIS의 켜짐 속성은 `tsInputModeDefaultStateKey` 때문에 추가하지 않은 모드도 켜짐으로 보인다. 목록 이름은 `InfoPlist.strings`에서 모드 ID로 찾는다.
+- **IMKit 수식키 이벤트(macOS 27 실측, 개발자 기록):** flagsChanged에 좌우 기기 비트가 없다(오른쪽 Shift도 합친 .shift만). 그리고 같은 flagsChanged가 3~5ms 간격으로 두 번 온다(keyDown은 한 번). 좌우는 keyCode로 기억하고, 상태가 바뀐 것만 넘긴다(`ModifierState`, NRIME ShortcutHandler와 같은 방식).
 
 ### 버릴 것 / 고칠 것
 
