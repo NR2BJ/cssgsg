@@ -13,6 +13,10 @@ enum KeyEventReposter {
     /// 다시 보낸 이벤트 표시(eventSourceUserData). "CSSG"를 ASCII 16진수로.
     static let repostTag: Int64 = 0x4353_5347
 
+    /// 키 이벤트를 보낼 권한(손쉬운 사용)이 있는지. 없으면 보낸 이벤트는 소리 없이 버려진다.
+    /// ad-hoc 서명이면 macOS가 앱을 바이너리 해시로 기억해서, 새로 빌드할 때마다 권한이 풀린다.
+    static var canPostEvents: Bool { CGPreflightPostEventAccess() }
+
     /// 태그를 단 키 누름(down+up)을 `delay` 뒤에 보낸다.
     ///
     /// 이벤트 소스는 nil이 아니라 `.hidSystemState`다. 소스가 없으면 HID 상태가 비어 Chromium이 실제 키 누름과
@@ -46,6 +50,12 @@ enum KeyEventReposter {
     /// Chromium에서 확정 뒤의 Shift+Enter 줄바꿈.
     static func performChromiumNewline(keyCode: UInt16, client: any IMKTextInput, delay: TimeInterval) {
         if ChromiumDetector.frontmostAppTreatsNewlineInsertAsSubmit {
+            // 권한이 없으면 다시 보낸 키가 버려지고, "\n"을 넣으면 이 앱은 전송해 버린다.
+            // 확정만 하고 줄바꿈은 넣지 않는다(한 번 더 누르면 된다).
+            guard canPostEvents else {
+                DeveloperLogger.shared.log("Reposter", "newline skipped: no post-event access")
+                return
+            }
             postKeyPress(keyCode: keyCode, flags: .maskShift, after: max(delay, replayDelay))
         } else {
             scheduleNewlineInsert(into: client, after: delay)

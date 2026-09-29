@@ -83,9 +83,11 @@ final class CssgsgInputController: IMKInputController {
         let commandLike = !event.modifierFlags.intersection([.command, .control, .option]).isEmpty
         let isEnter = event.keyCode == 0x24 || event.keyCode == 0x4C
 
-        // ⌘/Ctrl/Option+키가 조합을 확정했다: performKeyEquivalent 경로라 false로는 앱에 안 간다.
+        // ⌘/Ctrl/Option+키가 조합을 확정했다: performKeyEquivalent 경로라 false로는 앱에 안 가는 경우가 있다.
         if !out.consumed && commandLike && !out.commit.isEmpty {
             apply(out, client: client)
+            // 권한이 없으면 다시 보낸 키가 버려진다. 그럴 바엔 원래 키를 앱에 넘긴다.
+            guard KeyEventReposter.canPostEvents else { return false }
             KeyEventReposter.repost(event, after: Self.shiftEnterDelay)
             return true
         }

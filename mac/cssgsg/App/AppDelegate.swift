@@ -1,10 +1,11 @@
 import Cocoa
 import InputMethodKit
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private(set) var server: IMKServer?
     let candidatePanel = CandidatePanel()
     private var statusItem: NSStatusItem?
+    private var permissionItem: NSMenuItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let connection = Bundle.main.infoDictionary?["InputMethodConnectionName"] as? String
@@ -26,12 +27,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         let menu = NSMenu()
+        menu.delegate = self
+        let permission = NSMenuItem(title: "⚠︎ 키 보내기 권한 허용…", action: #selector(openPermissionSettings), keyEquivalent: "")
+        permission.target = self
+        permission.toolTip = "조합 중 ⌘/Option+키와 Codex 줄바꿈에 필요하다. 없어도 입력은 된다."
+        menu.addItem(permission)
+        permissionItem = permission
         menu.addItem(withTitle: "배열 학습 열기", action: #selector(openLearn), keyEquivalent: "").target = self
         menu.addItem(withTitle: "설정 파일 열기", action: #selector(openConfig), keyEquivalent: "").target = self
         menu.addItem(.separator())
         menu.addItem(withTitle: "cssgsg 다시 시작", action: #selector(restart), keyEquivalent: "").target = self
         item.menu = menu
         statusItem = item
+    }
+
+    /// 메뉴를 열 때마다 권한을 다시 본다. 권한이 있으면 항목을 숨긴다.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        permissionItem?.isHidden = KeyEventReposter.canPostEvents
     }
 
     func updateStatus(_ mode: InputMode) {
@@ -78,10 +90,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.terminate(nil)
     }
 
-    /// ⌘+키 재전송·Codex 줄바꿈(키 이벤트 보내기)에 필요하다. 처음 한 번 시스템이 물어본다.
+    private static let askedPostEventAccessKey = "askedPostEventAccess"
+
+    /// ⌘/Option+키 재전송·Codex 줄바꿈(키 이벤트 보내기)에 필요하다. 시스템 창은 처음 실행 때 한 번만 띄운다.
+    /// ad-hoc 서명이면 새 빌드마다 권한이 풀리는데, 그때마다 창을 띄우지 않고 메뉴에 허용 항목만 보인다.
     private func requestPermissionsIfNeeded() {
-        if !CGPreflightPostEventAccess() {
-            _ = CGRequestPostEventAccess()
+        let defaults = UserDefaults.standard
+        guard !KeyEventReposter.canPostEvents, !defaults.bool(forKey: Self.askedPostEventAccessKey) else { return }
+        defaults.set(true, forKey: Self.askedPostEventAccessKey)
+        _ = CGRequestPostEventAccess()
+    }
+
+    /// 시스템 창을 다시 띄워 보고(이미 거절했거나 목록에 옛 빌드가 남아 있으면 안 뜬다), 손쉬운 사용 설정을 연다.
+    /// 목록에 cssgsg가 켜져 있는데도 이 항목이 보이면 옛 빌드 기록이다. 빼고(-) 다시 켜면 된다.
+    @objc private func openPermissionSettings() {
+        _ = CGRequestPostEventAccess()
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
         }
     }
 
