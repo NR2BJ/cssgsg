@@ -14,11 +14,11 @@
   - 모드 전환: 오른쪽 Shift 탭 = 영어 ↔ 직전 비영어, 왼쪽 Shift 탭 = 한 ↔ 일 (NRIME 설정 그대로)
   - C ABI(`core/include/cssgsg.h`)와 C 스모크 테스트
 - [~] macOS 입력기 셸 (NRIME 플랫폼층 이식)
-  - [x] M2a: IMKit 셸 뼈대. 키 → 코어 → 앱, 메뉴 막대 모드 표시(A/한/あ), 조합 중 밑줄, 후보창
+  - [x] M2a: IMKit 셸 뼈대. 키 → 코어 → 앱, 메뉴 막대 모드 표시(G/ㅊ/月), 조합 중 밑줄, 후보창
     - NRIME 우회책: ⌘/Ctrl 조합 확정 뒤 키 재전송, Chromium 조합 중 Shift+Enter, 마우스 클릭 확정, 비밀번호 칸은 쿼티
     - 셸 Swift 계층은 스모크 테스트로 검증했다. 실제 앱에서 쳐 보는 확인은 [확인 목록](docs/mac-checklist.md)으로 한다
   - [x] 배포: pkg + GitHub 릴리스 + 메뉴의 업데이트 확인(NRIME 방식). 자체 서명 인증서로 서명해서 업데이트해도 권한이 남는다
-  - [~] M2b: 모드 HUD(커서 근처 A/한/あ, 설정 `[mac]`) 완료. 입력 소스 복구, 비밀번호 칸 Graphite(나중에)
+  - [~] M2b: 모드 HUD(커서 근처 G/ㅊ/月, 설정 `[mac]`) 완료. 입력 소스 복구, 비밀번호 칸 Graphite(나중에)
   - [ ] M2c: 설정 앱(학습 탭 포함). 그전까지는 메뉴 막대 → "설정 파일 열기"로 `config.toml`을 고친다
 - [ ] Mozc 임베드 (일본어 한자 변환, 지금은 히라가나/가타카나 후보만 내는 임시 변환기)
 - [ ] Windows TSF (나중)
@@ -58,7 +58,7 @@ bash tools/ffi-smoke/run.sh
 curl -fL -o /tmp/cssgsg.pkg https://github.com/NR2BJ/cssgsg/releases/latest/download/cssgsg.pkg && sudo installer -pkg /tmp/cssgsg.pkg -target / && open -g "/Library/Input Methods/cssgsg.app"
 ```
 
-- `/Library/Input Methods/cssgsg.app`에 설치되고, 메뉴 막대에 cssgsg 메뉴(A / 한 / あ)가 뜨고, 키보드 설정이 한 번 열린다.
+- `/Library/Input Methods/cssgsg.app`에 설치되고, 메뉴 막대에 cssgsg 메뉴(G / ㅊ / 月)가 뜨고, 키보드 설정이 한 번 열린다.
   NRIME와 번들 ID가 달라서 같이 설치된다.
 - **처음 설치한 뒤 로그아웃했다 다시 로그인한다.** 새로 설치한 입력기는 그래야 추가 목록에 나온다(macOS, 확인함).
 - **입력 소스에는 직접 추가한다.** macOS는 입력기가 스스로 입력 소스에 추가되지 못하게 한다.

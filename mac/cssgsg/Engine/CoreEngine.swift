@@ -6,12 +6,12 @@ enum InputMode: Int32 {
     case ko = 1
     case ja = 2
 
-    /// 메뉴 막대에 보일 글자.
+    /// 메뉴 막대와 HUD에 보일 글자: 배열 이름의 머리글자(참신세벌식 ㅊ, Graphite G, 新月 月).
     var label: String {
         switch self {
-        case .en: return "A"
-        case .ko: return "한"
-        case .ja: return "あ"
+        case .en: return "G"
+        case .ko: return "ㅊ"
+        case .ja: return "月"
         }
     }
 }

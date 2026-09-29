@@ -215,7 +215,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     # katakana_direct = true
 
     # [mac]
-    # 모드를 바꿀 때 커서 근처에 A/한/あ를 잠깐 보인다
+    # 모드를 바꿀 때 커서 근처에 G/ㅊ/月을 잠깐 보인다
     # hud = true
     # HUD 자리: "caret"(커서 위, 커서 자리를 모르면 안 보임) 또는 "mouse"(마우스 옆)
     # hud_position = "caret"

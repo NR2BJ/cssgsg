@@ -750,7 +750,7 @@ k     = { cho = "ㄱ" }
 - 1단계(코어) 완료: 세 배열, 모드 전환, C ABI, 검증(`docs/verification.md`).
 - 2단계 M2a 완료: `mac/`의 IMKit 셸 뼈대. 키 → 코어 → 앱, 메뉴 막대 모드 표시, NRIME 우회책(⌘ 재전송, Chromium Shift+Enter, 마우스 클릭 확정, 비밀번호 칸). 셸 Swift 계층은 스모크 테스트로 검증했고, 실제 앱 확인은 설치 뒤 체크리스트로 한다.
 - 배포(2026-09-29): pkg + GitHub 릴리스(공개) + 메뉴의 업데이트 확인. 설치본을 바꾸는 길은 pkg 하나로 둔다. 자체 서명 인증서로 서명해서 업데이트해도 손쉬운 사용 권한이 남는다. v0.1.0이 첫 릴리스다.
-- M2b 모드 HUD 완료(0.1.6): 모드를 바꿀 때 확정 전 커서 위에 A/한/あ를 1초. 설정 파일 `[mac]`(hud, hud_position, newline_replay_ms)는 코어가 읽어 FFI로 셸에 넘긴다.
+- M2b 모드 HUD 완료(0.1.6): 모드를 바꿀 때 확정 전 커서 위에 모드 글자를 1초(0.1.7부터 G/ㅊ/月). 설정 파일 `[mac]`(hud, hud_position, newline_replay_ms)는 코어가 읽어 FFI로 셸에 넘긴다.
 - 다음: 입력 소스 복구 → M2c(설정 앱 + 학습 탭) → 한자(Option+Enter) → Mozc. 비밀번호 칸 Graphite는 나중에(§13).
 
 ---
