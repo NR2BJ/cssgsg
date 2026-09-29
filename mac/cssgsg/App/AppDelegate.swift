@@ -1,0 +1,121 @@
+import Cocoa
+import InputMethodKit
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    private(set) var server: IMKServer?
+    let candidatePanel = CandidatePanel()
+    private var statusItem: NSStatusItem?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        let connection = Bundle.main.infoDictionary?["InputMethodConnectionName"] as? String
+            ?? (Bundle.main.bundleIdentifier ?? "com.cssgsg.inputmethod.app") + "_Connection"
+        server = IMKServer(name: connection, bundleIdentifier: Bundle.main.bundleIdentifier)
+        let engine = CoreEngine.shared
+        setupStatusItem()
+        updateStatus(engine.mode)
+        requestPermissionsIfNeeded()
+        DeveloperLogger.shared.log("App", "started", metadata: [
+            "connection": connection,
+            "version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?",
+            "configError": engine.configError ?? "none",
+        ])
+    }
+
+    // MARK: - 메뉴 막대
+
+    private func setupStatusItem() {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        let menu = NSMenu()
+        menu.addItem(withTitle: "배열 학습 열기", action: #selector(openLearn), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "설정 파일 열기", action: #selector(openConfig), keyEquivalent: "").target = self
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "cssgsg 다시 시작", action: #selector(restart), keyEquivalent: "").target = self
+        item.menu = menu
+        statusItem = item
+    }
+
+    func updateStatus(_ mode: InputMode) {
+        guard let button = statusItem?.button else { return }
+        button.image = Self.statusIcon(mode.label)
+        button.title = ""
+        button.toolTip = "cssgsg: \(["영어 (Graphite)", "한국어 (참신세벌식)", "일본어 (新月配列)"][Int(mode.rawValue)])"
+    }
+
+    /// 메뉴 막대 아이콘을 글자로 그린다(Retina 자동 대응, 템플릿 이미지).
+    private static func statusIcon(_ text: String) -> NSImage {
+        let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 14, weight: .medium),
+                .foregroundColor: NSColor.black,
+            ]
+            let str = NSAttributedString(string: text, attributes: attrs)
+            let size = str.size()
+            str.draw(at: NSPoint(x: (rect.width - size.width) / 2, y: (rect.height - size.height) / 2))
+            return true
+        }
+        image.isTemplate = true
+        return image
+    }
+
+    @objc private func openLearn() {
+        guard let url = Bundle.main.url(forResource: "index", withExtension: "html") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    /// 설정 앱이 생기기 전까지는 config.toml을 직접 고친다. 없으면 설명이 달린 틀을 만들어 준다.
+    @objc private func openConfig() {
+        let url = CoreEngine.configURL
+        let fm = FileManager.default
+        try? fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if !fm.fileExists(atPath: url.path) {
+            try? Self.configTemplate.write(to: url, atomically: true, encoding: .utf8)
+        }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    @objc private func restart() {
+        // 입력기 프로세스는 필요할 때 macOS가 다시 띄운다. 설정 파일을 다시 읽을 때 쓴다.
+        NSApp.terminate(nil)
+    }
+
+    /// ⌘+키 재전송·Codex 줄바꿈(키 이벤트 보내기)에 필요하다. 처음 한 번 시스템이 물어본다.
+    private func requestPermissionsIfNeeded() {
+        if !CGPreflightPostEventAccess() {
+            _ = CGRequestPostEventAccess()
+        }
+    }
+
+    private static let configTemplate = """
+    # cssgsg 설정. 고친 뒤 메뉴 막대의 cssgsg 메뉴에서 "cssgsg 다시 시작"을 누르면 적용된다.
+    # 줄 앞의 #을 지우면 그 설정이 켜진다. 적지 않은 값은 기본값이다.
+
+    # 한국어 배열: "chamshin-v18"(기본형) 또는 "chamshin-d-v19"(D)
+    # ko_layout = "chamshin-v18"
+
+    # 수식키 탭 인식 시간(밀리초)
+    # tap_threshold_ms = 200
+
+    # 수식키별 탭 동작: "toggle_english", "toggle_non_english", "none"
+    # 이 표를 적으면 기본값(오른쪽 Shift = 영어 토글, 왼쪽 Shift = 한↔일)을 대신한다.
+    # [taps]
+    # shift_right = "toggle_english"
+    # shift_left = "toggle_non_english"
+
+    # [ja]
+    # 구두점: "japanese"(、。), "full_width_western"(，．), "half_width_western"(,.)
+    # punctuation = "japanese"
+    # / 자리를 ・로
+    # slash_nakaguro = true
+    # 읽기가 없을 때 Space를 전각 스페이스로
+    # full_width_space = false
+    # 일본어 모드에서 켠 Caps Lock(가타카나)을 다른 모드로 나갈 때 끈다
+    # caps_katakana_auto_off = true
+
+    """
+}
+
+extension NSApplication {
+    var candidatePanel: CandidatePanel? {
+        (delegate as? AppDelegate)?.candidatePanel
+    }
+}

@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# 맥 셸 스모크 테스트: 셸의 Swift 계층(NSEvent → KeyTranslation → CoreEngine → C ABI)을 검증한다.
+#
+# 1. 자체 점검: 수식키 좌우·눌림/뗌 판정, NSEvent 시각 단위로 탭 판정, 자동 반복, ABC 배열 표.
+# 2. 무작위 키열을 모드마다 러스트 시뮬레이터(cssgsg-cli batch)와 셸 코드에 같이 넣고 화면을 줄마다 비교한다.
+#    글자 → 맥 키코드는 macOS ABC 배열 데이터에서 얻으므로, 코어의 맥 키코드 표도 같이 검증된다.
+#
+# bash tools/mac/shell-smoke/run.sh [모드별 줄 수, 기본 3000]
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+OUT="$ROOT/build/mac-smoke"
+N="${1:-3000}"
+export PATH="$HOME/.cargo/bin:$PATH"
+cd "$ROOT"
+cargo build --release -q -p cssgsg-core -p cssgsg-cli
+mkdir -p "$OUT"
+swiftc -O -module-name shellsmoke \
+  -import-objc-header mac/cssgsg/cssgsg-Bridging-Header.h -I core/include \
+  mac/cssgsg/Engine/CoreEngine.swift mac/cssgsg/Engine/KeyTranslation.swift \
+  tools/mac/shell-smoke/Typist.swift tools/mac/shell-smoke/main.swift \
+  -L build/cargo/release -lcssgsg_core -o "$OUT/shell-smoke"
+
+echo "=== 자체 점검 ==="
+"$OUT/shell-smoke" --self-test
+
+echo "=== 러스트 시뮬레이터와 비교 (모드별 $N줄) ==="
+fail=0
+for mode in en ko ja; do
+  node tools/mac/shell-smoke/corpus.mjs "$mode" "$N" > "$OUT/corpus-$mode.txt"
+  build/cargo/release/cssgsg-cli batch --mode "$mode" < "$OUT/corpus-$mode.txt" > "$OUT/sim-$mode.jsonl"
+  "$OUT/shell-smoke" --mode "$mode" < "$OUT/corpus-$mode.txt" > "$OUT/shell-$mode.jsonl"
+  if cmp -s "$OUT/sim-$mode.jsonl" "$OUT/shell-$mode.jsonl"; then
+    echo "$mode: $N줄 모두 같음"
+  else
+    fail=1
+    count=$(paste "$OUT/sim-$mode.jsonl" "$OUT/shell-$mode.jsonl" | awk -F'\t' '$1 != $2' | wc -l | tr -d ' ')
+    echo "$mode: ${count}줄 다름 (키열 / 시뮬레이터 / 셸)"
+    paste "$OUT/corpus-$mode.txt" "$OUT/sim-$mode.jsonl" "$OUT/shell-$mode.jsonl" \
+      | awk -F'\t' '$2 != $3 { print "  " $1 "\n    sim   " $2 "\n    shell " $3 }' | head -30
+  fi
+done
+exit $fail

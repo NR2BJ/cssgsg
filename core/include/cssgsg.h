@@ -44,7 +44,7 @@ typedef struct CssgsgEngine CssgsgEngine;
 typedef struct CssgsgKeyEvent {
     uint16_t key;    /* HID 키 코드 (cssgsg_key_from_mac_keycode) */
     uint8_t down;    /* 1 = 눌림, 0 = 뗌. 수식키도 눌림/뗌을 따로 보낸다 */
-    uint8_t repeat;  /* 1 = 키 반복 */
+    uint8_t is_repeat; /* 1 = 키 반복 */
     uint32_t mods;   /* 이 이벤트가 반영된 뒤의 CSSGSG_MOD_* */
     double time;     /* 초 단위 단조 시각 (NSEvent.timestamp) */
 } CssgsgKeyEvent;
@@ -52,6 +52,7 @@ typedef struct CssgsgKeyEvent {
 typedef struct CssgsgContext {
     uint8_t game_mode;      /* 영어 모드를 쿼티 그대로 통과 (윈도우 게임) */
     uint8_t taps_disabled;  /* 수식키 탭 전환 끄기 */
+    uint8_t secure_field;   /* 비밀번호 칸 등: 조합 없이 모두 통과 (언어 전환 탭은 된다) */
 } CssgsgContext;
 
 typedef struct CssgsgSegment {

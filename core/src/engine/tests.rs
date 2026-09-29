@@ -223,3 +223,53 @@ fn commit_always_reports_new_preedit() {
     assert_eq!(out.commit, "ㅎ");
     assert_eq!(out.preedit.map(|p| p.text), Some("ㅎ".into()));
 }
+
+#[test]
+fn command_or_control_down_commits_composition() {
+    // ⌘를 누르는 순간 확정(키는 앱으로). 그 뒤 ⌘C는 조합이 없으니 그냥 통과.
+    let mut e = Engine::new(Config::default());
+    let ctx = Context::default();
+    e.set_mode(Mode::Ko);
+    e.handle_key(&KeyEvent::down(Key::K, Mods::default(), 1.0), &ctx);
+    e.handle_key(&KeyEvent::down(Key::F, Mods::default(), 1.1), &ctx);
+    let out = e.handle_key(&KeyEvent::down(Key::META_LEFT, Mods(Mods::META_L), 1.2), &ctx);
+    assert_eq!((out.consumed, out.commit.as_str()), (false, "가"));
+    let out = e.handle_key(&KeyEvent::down(Key::C, Mods(Mods::META_L), 1.3), &ctx);
+    assert_eq!((out.consumed, out.commit.as_str()), (false, ""));
+    // Shift(수식키)를 누르는 건 확정하지 않는다.
+    e.handle_key(&KeyEvent::down(Key::K, Mods::default(), 2.0), &ctx);
+    let out = e.handle_key(&KeyEvent::down(Key::SHIFT_LEFT, Mods(Mods::SHIFT_L), 2.1), &ctx);
+    assert_eq!(out.commit, "");
+}
+
+#[test]
+fn japanese_shift_enter_commits_and_passes_enter() {
+    let mut s = sim();
+    s.type_keys("{ls}s{S-ent}").unwrap();
+    assert_eq!(s.screen(), "か\n");
+    // 변환 중 Shift+Enter도 확정하고 줄을 바꾼다.
+    let mut s = sim();
+    s.type_keys("{ls}s{sp}{S-ent}").unwrap();
+    assert_eq!(s.screen(), "か\n");
+    // 그냥 Enter는 확정만.
+    assert_eq!(typed("{ls}s{ent}"), "か");
+}
+
+#[test]
+fn secure_field_passes_keys_but_keeps_taps_consistent() {
+    let mut s = sim();
+    s.ctx.secure_field = true;
+    // 영어 모드여도 Graphite로 바꾸지 않는다(비밀번호는 쿼티).
+    s.type_keys("jlwwi").unwrap();
+    assert_eq!(s.screen(), "jlwwi");
+    // 언어 전환 탭은 된다.
+    s.type_keys("{rs}").unwrap();
+    assert_eq!(s.engine.mode(), Mode::Ko);
+    // Shift+글자는 탭이 아니다(글자가 탭 판정을 끊는다).
+    let mut e = Engine::new(Config::default());
+    let ctx = Context { secure_field: true, ..Context::default() };
+    e.handle_key(&KeyEvent::down(Key::SHIFT_RIGHT, Mods(Mods::SHIFT_R), 1.0), &ctx);
+    e.handle_key(&KeyEvent::down(Key::A, Mods(Mods::SHIFT_R), 1.02), &ctx);
+    let out = e.handle_key(&KeyEvent::up(Key::SHIFT_RIGHT, Mods::default(), 1.05), &ctx);
+    assert_eq!(out.mode, None);
+}

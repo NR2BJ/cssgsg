@@ -41,6 +41,8 @@ pub struct Context {
     pub game_mode: bool,
     /// 수식키 탭 전환을 끈다(플레이 중에도 IME를 켜 두는 게임 등).
     pub taps_disabled: bool,
+    /// 비밀번호 칸 등: 조합하지 않고 키를 모두 넘긴다. 언어 전환 탭은 그대로 된다(갇히지 않게).
+    pub secure_field: bool,
 }
 
 /// 조합 중 글자와 밑줄 구간. 구간 위치는 글자(char) 단위다.
@@ -202,7 +204,16 @@ impl Engine {
             }
         }
 
-        if !ev.down || ev.key.is_modifier() || ev.key == Key::CAPS_LOCK {
+        // ⌘/Ctrl을 누르는 순간 조합을 확정한다(NRIME). Electron에서는 ⌘+키가 handle을 거치지 않고
+        // performKeyEquivalent로 가서, 조합 중 글자가 그 단축키에 먹힌다.
+        if ev.down
+            && !ev.repeat
+            && matches!(ev.key, Key::META_LEFT | Key::META_RIGHT | Key::CONTROL_LEFT | Key::CONTROL_RIGHT)
+        {
+            return Output::commit_pass(self.take_composition());
+        }
+
+        if !ev.down || ev.key.is_modifier() || ev.key == Key::CAPS_LOCK || ctx.secure_field {
             return Output::pass();
         }
 
@@ -358,8 +369,9 @@ impl Engine {
                 if self.kana.reading().is_empty() {
                     return Output::pass();
                 }
-                // Enter는 확정만 한다(줄바꿈 없음).
-                return Output::commit_eat(self.take_composition());
+                // Enter는 확정만 한다(줄바꿈 없음). Shift+Enter는 확정하고 Enter를 앱에 넘겨 줄을 바꾼다.
+                let commit = self.take_composition();
+                return if shift { Output::commit_pass(commit) } else { Output::commit_eat(commit) };
             }
             _ => {}
         }
@@ -408,7 +420,10 @@ impl Engine {
             return Output::eat();
         }
         match k {
-            Key::ENTER | Key::NUMPAD_ENTER => return Output::commit_eat(self.take_composition()),
+            Key::ENTER | Key::NUMPAD_ENTER => {
+                let commit = self.take_composition();
+                return if shift { Output::commit_pass(commit) } else { Output::commit_eat(commit) };
+            }
             Key::ESCAPE | Key::BACKSPACE => {
                 // 변환 취소: 읽기로 돌아간다.
                 self.converter.cancel();

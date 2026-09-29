@@ -15,3 +15,6 @@ DerivedData/
 
 # node
 node_modules/
+
+# xcodegen 생성물
+mac/*.xcodeproj/

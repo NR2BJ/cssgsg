@@ -13,7 +13,12 @@
   - 新月配列 가나 조합기: ☆/★ 앞치기, ゛ 뒤치기, 3타 단축, Caps Lock 가타카나
   - 모드 전환: 오른쪽 Shift 탭 = 영어 ↔ 직전 비영어, 왼쪽 Shift 탭 = 한 ↔ 일 (NRIME 설정 그대로)
   - C ABI(`core/include/cssgsg.h`)와 C 스모크 테스트
-- [ ] macOS 입력기 셸 (NRIME 플랫폼층 이식)
+- [~] macOS 입력기 셸 (NRIME 플랫폼층 이식)
+  - [x] M2a: IMKit 셸 뼈대. 키 → 코어 → 앱, 메뉴 막대 모드 표시(A/한/あ), 조합 중 밑줄, 후보창
+    - NRIME 우회책: ⌘/Ctrl 조합 확정 뒤 키 재전송, Chromium 조합 중 Shift+Enter, 마우스 클릭 확정, 비밀번호 칸은 쿼티
+    - 셸 Swift 계층은 스모크 테스트로 검증했다. 실제 앱에서 쳐 보는 확인은 아직이다
+  - [ ] M2b: 입력 소스 복구, 인증 창에서 ABC로 넘기기, 모드 HUD
+  - [ ] M2c: 설정 앱(학습 탭 포함). 그전까지는 메뉴 막대 → "설정 파일 열기"로 `config.toml`을 고친다
 - [ ] Mozc 임베드 (일본어 한자 변환, 지금은 히라가나/가타카나 후보만 내는 임시 변환기)
 - [ ] Windows TSF (나중)
 
@@ -23,7 +28,9 @@
 core/       Rust 코어: key, hangul, latin, kana, engine, ffi, sim
 layouts/    배열 데이터 (ko: 참신세벌식 TOML, en: Graphite, ja: 新月 공식 TSV 원본)
 cli/        cssgsg-cli: 터미널에서 쳐보는 도구
-tools/      ffi-smoke(C 헤더 확인), ohi-oracle(오이 차분 비교), crosscheck(배열 데이터 교차 검증)
+mac/        macOS 입력기(Swift + InputMethodKit). project.yml → xcodegen → cssgsg.xcodeproj(생성물, 커밋 안 함)
+tools/      ffi-smoke(C 헤더 확인), ohi-oracle(오이 차분 비교), crosscheck(배열 데이터 교차 검증),
+            mac(빌드·설치 스크립트, 셸 스모크 테스트), learn(학습 페이지 빌드)
 docs/       verification.md(검증 현황)
 learn/      배열 학습 페이지(설정 앱 학습 탭). template.html → tools/learn/build.mjs → index.html
 ```
@@ -42,7 +49,27 @@ cargo run -q -p cssgsg-cli -- repl                          # 한 줄씩 쳐 가
 bash tools/ffi-smoke/run.sh
 ```
 
-키열 문법: 보통 글자는 쿼티 자리, 대문자와 Shift 기호는 Shift. `{sp}` `{bs}` `{ent}` `{esc}` `{tab}` `{left}` …,
+### macOS 입력기
+
+Xcode와 xcodegen(`brew install xcodegen`)이 필요하다.
+
+```bash
+bash tools/mac/install.sh
+```
+
+빌드해서 `~/Library/Input Methods/cssgsg.app`에 설치하고 입력 소스를 켠다. NRIME와 번들 ID가 달라서 같이 설치된다.
+처음 설치하면 입력 메뉴에 안 보일 수 있다. 그러면 로그아웃했다 다시 로그인한 뒤 시스템 설정 → 키보드 → 입력 소스 → 편집에서 추가한다.
+처음 쓸 때 "손쉬운 사용"(키 이벤트 보내기) 권한을 물어본다. ⌘+키 재전송과 Codex 줄바꿈에 필요하다.
+
+문제를 재현하려면 개발자 기록을 켠다(키 코드·수식키·시각만 남고 글자 내용은 남지 않는다).
+
+```bash
+defaults write com.cssgsg.inputmethod.app developerMode -bool true   # 기록: ~/Library/Application Support/cssgsg/developer.log
+```
+
+### 키열 문법
+
+보통 글자는 쿼티 자리, 대문자와 Shift 기호는 Shift. `{sp}` `{bs}` `{ent}` `{esc}` `{tab}` `{left}` …,
 `{rs}` `{ls}`(오른쪽/왼쪽 Shift 탭), `{caps}`, `{click}`, `{M-c}`(⌘C) 같은 식이다.
 
 ## 검증
@@ -55,6 +82,7 @@ cargo test                                         # 전수·공식 파일 대�
 node tools/crosscheck/chamshin.mjs                 # 참신 키 배치 ↔ 타닥 배열도·오이 배열표
 cd tools/ohi-oracle && npm install && node diff.mjs --count 20000   # 참신 조합 ↔ 오이 (무작위 키열)
 node tools/learn/build.mjs --check                # 학습 페이지 예시를 엔진으로 확인, index.html이 최신인지
+bash tools/mac/shell-smoke/run.sh                  # 맥 셸 Swift 계층(진짜 NSEvent) ↔ 러스트 시뮬레이터
 ```
 
 학습 페이지를 고쳤으면 `node tools/learn/build.mjs`로 `learn/index.html`을 다시 만든다.

@@ -1,0 +1,56 @@
+# cssgsg 맥 입력기. xcodegen으로 cssgsg.xcodeproj를 만든다(생성물은 커밋하지 않는다).
+# 빌드·설치: bash tools/mac/install.sh
+name: cssgsg
+options:
+  bundleIdPrefix: com.cssgsg.inputmethod
+  deploymentTarget:
+    macOS: "13.0"
+  createIntermediateGroups: true
+  developmentLanguage: ko
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MACOSX_DEPLOYMENT_TARGET: "13.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    ARCHS: arm64
+    ONLY_ACTIVE_ARCH: YES
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+
+targets:
+  cssgsg:
+    type: application
+    platform: macOS
+    sources:
+      - path: cssgsg
+        excludes:
+          - Resources/Info.plist
+      - path: ../learn/index.html
+        buildPhase: resources
+        type: file
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.cssgsg.inputmethod.app
+        PRODUCT_NAME: cssgsg
+        INFOPLIST_FILE: cssgsg/Resources/Info.plist
+        SWIFT_OBJC_BRIDGING_HEADER: cssgsg/cssgsg-Bridging-Header.h
+        HEADER_SEARCH_PATHS: $(SRCROOT)/../core/include
+        LIBRARY_SEARCH_PATHS: $(SRCROOT)/../build/cargo/release
+        OTHER_LDFLAGS: -lcssgsg_core
+        COMBINE_HIDPI_IMAGES: true
+        # 입력기는 서명 없이(ad-hoc) 쓴다
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGNING_ALLOWED: false
+    preBuildScripts:
+      - script: bash "$SRCROOT/../tools/mac/build-core.sh"
+        name: Build Rust core
+        basedOnDependencyAnalysis: false
+    postBuildScripts:
+      - script: chmod +x "${BUILT_PRODUCTS_DIR}/${EXECUTABLE_PATH}"
+        name: Fix executable permissions
+        basedOnDependencyAnalysis: false
+    dependencies:
+      - sdk: InputMethodKit.framework
+      - sdk: Carbon.framework
+      - sdk: IOKit.framework

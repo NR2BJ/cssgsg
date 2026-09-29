@@ -21,7 +21,7 @@ pub struct CssgsgKeyEvent {
     /// HID 키 코드(`cssgsg_key_from_mac_keycode`로 얻는다).
     pub key: u16,
     pub down: u8,
-    pub repeat: u8,
+    pub is_repeat: u8,
     /// `CSSGSG_MOD_*` 비트.
     pub mods: u32,
     /// 초 단위 단조 시각(NSEvent.timestamp).
@@ -33,6 +33,7 @@ pub struct CssgsgKeyEvent {
 pub struct CssgsgContext {
     pub game_mode: u8,
     pub taps_disabled: u8,
+    pub secure_field: u8,
 }
 
 #[repr(C)]
@@ -247,10 +248,14 @@ pub unsafe extern "C" fn cssgsg_engine_handle_key(
         key: Key(ev.key),
         down: ev.down != 0,
         mods: Mods(ev.mods),
-        repeat: ev.repeat != 0,
+        repeat: ev.is_repeat != 0,
         time: ev.time,
     };
-    let ctx = Context { game_mode: ctx.game_mode != 0, taps_disabled: ctx.taps_disabled != 0 };
+    let ctx = Context {
+        game_mode: ctx.game_mode != 0,
+        taps_disabled: ctx.taps_disabled != 0,
+        secure_field: ctx.secure_field != 0,
+    };
     unsafe { run(e, |engine| engine.handle_key(&event, &ctx)) }
 }
 
@@ -319,7 +324,7 @@ mod tests {
     }
 
     fn key(mac: u16, t: f64) -> CssgsgKeyEvent {
-        CssgsgKeyEvent { key: cssgsg_key_from_mac_keycode(mac), down: 1, repeat: 0, mods: 0, time: t }
+        CssgsgKeyEvent { key: cssgsg_key_from_mac_keycode(mac), down: 1, is_repeat: 0, mods: 0, time: t }
     }
 
     #[test]
