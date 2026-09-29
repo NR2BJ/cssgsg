@@ -1,0 +1,12 @@
+{
+  "name": "cssgsg-ohi-oracle",
+  "private": true,
+  "description": "오이(Online Hangeul IME)를 정답지로 참신세벌식 조합기를 차분 비교한다",
+  "type": "module",
+  "scripts": {
+    "diff": "node diff.mjs"
+  },
+  "dependencies": {
+    "jsdom": "^24.1.0"
+  }
+}

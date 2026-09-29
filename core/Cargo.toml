@@ -1,0 +1,15 @@
+[package]
+name = "cssgsg-core"
+description = "cssgsg 입력 엔진 코어 (플랫폼 독립)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+name = "cssgsg_core"
+crate-type = ["rlib", "staticlib"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+toml = "0.9"

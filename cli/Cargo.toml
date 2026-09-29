@@ -1,0 +1,14 @@
+[package]
+name = "cssgsg-cli"
+description = "cssgsg 엔진을 터미널에서 쳐보는 도구 (테스트·차분 비교용)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "cssgsg-cli"
+path = "src/main.rs"
+
+[dependencies]
+cssgsg-core = { path = "../core" }

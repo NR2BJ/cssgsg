@@ -1,0 +1,3 @@
+# ~/Documents는 Syncthing 동기화 폴더다. 빌드 산출물은 .stignore가 이미 막는 build/ 아래에 둔다.
+[build]
+target-dir = "build/cargo"
