@@ -15,17 +15,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         server = IMKServer(name: connection, bundleIdentifier: Bundle.main.bundleIdentifier)
         let engine = CoreEngine.shared
         Self.applyMacSettings(engine.macSettings)
-        startMozc(engine)
+        let mozc = MozcLoader.start(engine)
+        MozcStatus.update { $0 = $0.started(with: mozc) }
         HanjaLearningStore.shared.load(into: engine)
         setupStatusItem()
         updateStatus(engine.mode)
         observeSettingsNotices()
         InputSourceSetup.register()
         InputSourceSetup.promptOnceIfNotAdded()
-        requestPermissionsIfNeeded()
-        Self.publishStatus()
-        // 0.4.0까지 입력기가 업데이트를 확인하며 남긴 값(이제 설정 앱이 확인한다).
-        for key in ["updateCachedRelease", "updateETag", "updateLastCheck"] {
+        PermissionMonitor.start()
+        MozcUpdater.shared.start()
+        // 0.4.0까지 업데이트를 확인하며 남긴 값, 0.5.x의 권한 값(이제 permissionStatus와 설정 앱이 쓴다).
+        for key in ["updateCachedRelease", "updateETag", "updateLastCheck", "postEventAllowed", "askedPostEventAccess"] {
             UserDefaults.standard.removeObject(forKey: key)
         }
         DeveloperLogger.shared.log("App", "started", metadata: [
@@ -36,25 +37,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// 끝낼 때(메뉴의 다시 시작 포함) 한자 학습을 바로 저장한다(평소에는 2초씩 모아 저장).
+    /// Mozc 학습은 Mozc가 파일에 바로 쓴다(mmap). 이 시작은 깨끗이 끝난 것으로 적는다(MozcComponents.endRun).
     func applicationWillTerminate(_ notification: Notification) {
         HanjaLearningStore.shared.saveNow()
-    }
-
-    /// Mozc(일본어 한자 변환)를 켠다. 준비는 10~20ms라 시작할 때 바로 한다.
-    /// 학습 기록은 cssgsg 폴더 안에 따로 둔다(NRIME의 ~/Library/Application Support/Mozc와 섞이지 않게).
-    private func startMozc(_ engine: CoreEngine) {
-        guard let data = Bundle.main.path(forResource: "mozc", ofType: "data") else {
-            DeveloperLogger.shared.log("Mozc", "no data in bundle")
-            return
-        }
-        let profile = Cssgsg.mozcProfileURL
-        try? FileManager.default.createDirectory(at: profile, withIntermediateDirectories: true)
-        let started = Date()
-        let ok = engine.useMozc(dataPath: data, profileDir: profile.path)
-        DeveloperLogger.shared.log("Mozc", ok ? "ready" : "failed", metadata: [
-            "ms": String(format: "%.0f", Date().timeIntervalSince(started) * 1000),
-            "error": ok ? "-" : String(cString: cssgsg_last_error()),
-        ])
+        MozcLoader.finish()
     }
 
     // MARK: - 메뉴 막대
@@ -87,12 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         UILanguage.active = UILanguage.stored()
         titleMenuItems()
-        Self.publishStatus()
-    }
-
-    /// 설정 앱 정보 탭이 읽을 입력기 상태(키 보내기 권한은 프로세스마다라 설정 앱이 직접 볼 수 없다).
-    static func publishStatus() {
-        UserDefaults.standard.set(KeyEventReposter.canPostEvents, forKey: Cssgsg.postEventAllowedKey)
+        PermissionMonitor.refreshIfStale()
     }
 
     func updateStatus(_ mode: InputMode) {
@@ -130,8 +111,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    /// 끝내고 곧바로 다시 띄운다. 이 셸은 이름이 cssgsg가 아니고 사용자 세션에서 돈다(업데이트 뒤 다시 띄우기와 같다).
     @objc private func restart() {
+        Self.relaunch()
+    }
+
+    /// 끝내고 곧바로 다시 띄운다. 이 셸은 이름이 cssgsg가 아니고 사용자 세션에서 돈다(업데이트 뒤 다시 띄우기와 같다).
+    private static func relaunch() {
         let shell = Process()
         shell.executableURL = URL(fileURLWithPath: "/bin/sh")
         let path = Bundle.main.bundlePath.replacingOccurrences(of: "'", with: "'\\''")
@@ -153,6 +138,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let observer = UnsafeRawPointer(Unmanaged.passUnretained(self).toOpaque())
         let notices: [Cssgsg.Notice] = [
             .configChanged, .hanjaLearningCleared, .restart, .statusRequest, .requestPostEventAccess, .userDictionaryChanged,
+            .mozcCheckForUpdate,
         ]
         for notice in notices {
             CFNotificationCenterAddObserver(center, observer, { _, _, name, _, _ in
@@ -176,34 +162,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             DeveloperLogger.shared.log("Settings", "hanja learning cleared")
         case .restart:
             DeveloperLogger.shared.log("Settings", "restart")
-            NSApp.terminate(nil)
+            relaunch()
         case .statusRequest:
-            publishStatus()
+            PermissionMonitor.refresh(force: true)
         case .requestPostEventAccess:
-            _ = CGRequestPostEventAccess()
-            publishStatus()
+            PermissionMonitor.requestMissing()
         case .userDictionaryChanged:
             let ok = CoreEngine.shared.reloadUserDictionary()
             DeveloperLogger.shared.log("Settings", "user dictionary reloaded", metadata: ["ok": "\(ok)"])
+        case .mozcCheckForUpdate:
+            MozcUpdater.shared.checkNow()
         }
     }
 
     /// 설정 파일의 [mac] 표 중 셸이 쓰는 값.
     private static func applyMacSettings(_ settings: CssgsgMacSettings) {
-        KeyEventReposter.replayDelay = TimeInterval(settings.newline_replay_ms) / 1000
-        CssgsgInputController.shiftEnterDelay = TimeInterval(settings.shift_enter_delay_ms) / 1000
         CandidatePanel.fontSize = CGFloat(settings.candidate_font_size)
-    }
-
-    private static let askedPostEventAccessKey = "askedPostEventAccess"
-
-    /// ⌘/Option+키 재전송·Codex 줄바꿈(키 이벤트 보내기)에 필요하다. 시스템 창은 처음 실행 때 한 번만 띄운다.
-    /// 그 뒤로는 창을 띄우지 않는다. 상태와 허용 단추는 설정 앱 정보 탭에 있다(설정 앱이 알림으로 청한다).
-    private func requestPermissionsIfNeeded() {
-        let defaults = UserDefaults.standard
-        guard !KeyEventReposter.canPostEvents, !defaults.bool(forKey: Self.askedPostEventAccessKey) else { return }
-        defaults.set(true, forKey: Self.askedPostEventAccessKey)
-        _ = CGRequestPostEventAccess()
     }
 
 }

@@ -90,16 +90,16 @@ pub struct MacConfig {
     pub hud_position: HudPosition,
     /// 후보창 글자 크기(포인트).
     pub candidate_font_size: u32,
-    /// Electron 앱: 조합 중 Shift+Enter면 확정한 뒤 이만큼(밀리초, 5~100) 기다렸다 줄바꿈을 넣는다.
-    /// ⌘/Option+키 재전송도 이만큼 기다린다. 기본 15는 NRIME 실험값이다. 설정 앱은 이 값을 그대로 보인다
-    /// (0.5.1~0.5.3은 15에 더하는 조정값이었는데, 사용자: 지금 대기를 바로 바꾸는 편이 훨씬 알기 쉽다).
-    pub shift_enter_delay_ms: u32,
-    /// Codex처럼 줄바꿈 입력을 전송으로 받는 앱: 확정한 뒤 Shift+Enter 키를 다시 보내기까지(밀리초, 20~1000).
-    /// 위 값과 따로 쓰인다(더하지 않는다). 기본 120은 NRIME 실험값이다(2026-09-30: 사용자가 다시 재 볼 예정).
-    pub newline_replay_ms: u32,
-    /// 0.5.1~0.5.3의 조정값(15ms에 더하던 것). 읽으면 `shift_enter_delay_ms`로 옮긴다.
+    /// 0.5.x의 줄바꿈 대기(Electron `shift_enter_delay_ms`, Codex `newline_replay_ms`, 0.5.1~0.5.3 `newline_delay_offset_ms`).
+    /// 0.6.0부터 쓰지 않는다: 기다리지 않고 다음 런루프 차례에 줄을 바꾼다. 그 값들은 macOS가 권한 없이 보낸 키를
+    /// 소리 없이 버리던 때 정한 것이고, 권한이 있으면 기다림 없이 늘 됐다(NRIME 1.0.12, Discord 9/9, Codex 11/11).
+    /// 옛 설정 파일이 오류 나지 않게 읽기만 하고 버린다.
     #[serde(skip_serializing)]
-    pub newline_delay_offset_ms: Option<i32>,
+    pub shift_enter_delay_ms: Option<i64>,
+    #[serde(skip_serializing)]
+    pub newline_replay_ms: Option<i64>,
+    #[serde(skip_serializing)]
+    pub newline_delay_offset_ms: Option<i64>,
 }
 
 impl Default for MacConfig {
@@ -108,8 +108,8 @@ impl Default for MacConfig {
             hud: true,
             hud_position: HudPosition::Caret,
             candidate_font_size: 14,
-            shift_enter_delay_ms: 15,
-            newline_replay_ms: 120,
+            shift_enter_delay_ms: None,
+            newline_replay_ms: None,
             newline_delay_offset_ms: None,
         }
     }
@@ -215,10 +215,6 @@ impl Config {
     pub fn from_toml(src: &str) -> Result<Self, String> {
         let table: toml::Table = src.parse().map_err(|e: toml::de::Error| e.to_string())?;
         let has_shortcuts = table.contains_key("shortcuts");
-        let has_shift_enter = table
-            .get("mac")
-            .and_then(toml::Value::as_table)
-            .is_some_and(|mac| mac.contains_key("shift_enter_delay_ms"));
         let mut c: Config =
             toml::Value::Table(table).try_into().map_err(|e: toml::de::Error| e.to_string())?;
         if let Some(taps) = c.taps.take()
@@ -226,12 +222,10 @@ impl Config {
         {
             c.shortcuts = shortcuts_from_legacy_taps(&taps)?;
         }
-        // 0.5.1~0.5.3의 조정값(15ms에 더하던 것) → 대기 시간 그대로. shift_enter_delay_ms가 적혀 있으면 그것.
-        if let Some(offset) = c.mac.newline_delay_offset_ms.take()
-            && !has_shift_enter
-        {
-            c.mac.shift_enter_delay_ms = (15 + offset).clamp(5, 100) as u32;
-        }
+        // 0.5.x의 줄바꿈 대기는 버린다(MacConfig 설명).
+        c.mac.shift_enter_delay_ms = None;
+        c.mac.newline_replay_ms = None;
+        c.mac.newline_delay_offset_ms = None;
         c.validate()?;
         Ok(c)
     }
@@ -245,8 +239,6 @@ impl Config {
             ("tap_threshold_ms", self.tap_threshold_ms, 50, 1000),
             ("tap_overlap_ms", self.tap_overlap_ms, 30, 80),
             ("mac.candidate_font_size", self.mac.candidate_font_size, 10, 28),
-            ("mac.shift_enter_delay_ms", self.mac.shift_enter_delay_ms, 5, 100),
-            ("mac.newline_replay_ms", self.mac.newline_replay_ms, 20, 1000),
         ];
         for (name, value, lo, hi) in ranges {
             if !(lo..=hi).contains(&value) {
@@ -407,22 +399,6 @@ impl Config {
             &mac.candidate_font_size.to_string(),
             mac.candidate_font_size == dmac.candidate_font_size,
         ));
-        line(
-            "# Shift+Enter 줄바꿈 대기(밀리초, 5~100): Electron 앱에서 조합 중인 글자를 확정한 뒤 줄바꿈을 넣기까지 기다립니다. ⌘+키를 다시 보낼 때도 씁니다",
-        );
-        line(&setting(
-            "shift_enter_delay_ms",
-            &mac.shift_enter_delay_ms.to_string(),
-            mac.shift_enter_delay_ms == dmac.shift_enter_delay_ms,
-        ));
-        line(
-            "# Codex 줄바꿈 대기(밀리초, 20~1000): Codex처럼 줄바꿈을 전송으로 받는 앱에서 확정한 뒤 Shift+Enter를 다시 보내기까지 기다립니다(위 값과 따로 씁니다)",
-        );
-        line(&setting(
-            "newline_replay_ms",
-            &mac.newline_replay_ms.to_string(),
-            mac.newline_replay_ms == dmac.newline_replay_ms,
-        ));
         out
     }
 }
@@ -501,10 +477,7 @@ mod tests {
         assert_eq!(c.shortcuts.for_combo(&option_return(Mods::ALT_R)), None);
         assert_eq!(c.tap_threshold_ms, 200);
         assert!(!c.tap_buffering && c.ja.yen_sign && c.ja.convert_with_space && c.ja.convert_with_tab);
-        assert_eq!(
-            (c.mac.shift_enter_delay_ms, c.mac.newline_replay_ms, c.mac.candidate_font_size),
-            (15, 120, 14)
-        );
+        assert_eq!(c.mac.candidate_font_size, 14);
     }
 
     #[test]
@@ -547,30 +520,17 @@ mod tests {
     }
 
     #[test]
-    fn newline_delays_are_separate() {
-        // Electron 대기와 Codex 대기는 따로 적고 따로 쓴다(더하지 않는다).
-        let mac = |toml: &str| Config::from_toml(toml).unwrap().mac;
-        let m = mac("[mac]\nshift_enter_delay_ms = 35");
-        assert_eq!((m.shift_enter_delay_ms, m.newline_replay_ms), (35, 120));
-        let m = mac("[mac]\nshift_enter_delay_ms = 5\nnewline_replay_ms = 60");
-        assert_eq!((m.shift_enter_delay_ms, m.newline_replay_ms), (5, 60));
-        assert!(Config::from_toml("[mac]\nshift_enter_delay_ms = 4").is_err());
-        assert!(Config::from_toml("[mac]\nshift_enter_delay_ms = 101").is_err());
-        assert!(Config::from_toml("[mac]\nnewline_replay_ms = 10").is_err());
-        assert!(Config::from_toml("[mac]\nnewline_replay_ms = 1001").is_err());
-        // 0.5.1~0.5.3 파일의 조정값(15ms에 더하던 것)은 대기 시간으로 옮긴다(5~100).
-        let delay = |toml: &str| mac(toml).shift_enter_delay_ms;
-        assert_eq!(delay("[mac]\nnewline_delay_offset_ms = 20"), 35);
-        assert_eq!(delay("[mac]\nnewline_delay_offset_ms = -10"), 5);
-        assert_eq!(delay("[mac]\nnewline_delay_offset_ms = -30"), 5);
-        assert_eq!(
-            delay("[mac]\nnewline_delay_offset_ms = 20\nshift_enter_delay_ms = 25"),
-            25,
-            "새 키가 있으면 그것"
-        );
-        let c = Config::from_toml("[mac]\nnewline_delay_offset_ms = 20").unwrap();
-        assert_eq!(c.mac.newline_delay_offset_ms, None, "옮긴 뒤에는 들고 있지 않는다");
-        assert!(!c.to_toml().contains("newline_delay_offset_ms ="), "옛 키는 다시 쓰지 않는다");
+    fn old_newline_waits_are_read_and_dropped() {
+        // 0.5.x 파일의 줄바꿈 대기는 오류 없이 읽고 버린다. 다시 쓰지도 않는다.
+        for toml in [
+            "[mac]\nshift_enter_delay_ms = 35\nnewline_replay_ms = 150",
+            "[mac]\nnewline_delay_offset_ms = -30",
+            "[mac]\nshift_enter_delay_ms = 4\nnewline_replay_ms = 5000",
+        ] {
+            let c = Config::from_toml(toml).unwrap_or_else(|e| panic!("{toml}: {e}"));
+            assert_eq!(c, Config::default(), "{toml}");
+            assert!(!c.to_toml().contains("delay"), "{toml}");
+        }
     }
 
     /// 설정 파일로 쓴 것을 다시 읽으면 같은 설정이다.
@@ -599,8 +559,6 @@ mod tests {
             "convert_with_tab",
             "katakana_direct",
             "candidate_font_size",
-            "shift_enter_delay_ms",
-            "newline_replay_ms",
         ] {
             assert!(text.contains(&format!("# {key} = ")), "{key}");
         }
@@ -630,8 +588,6 @@ mod tests {
                 hud: false,
                 hud_position: HudPosition::Mouse,
                 candidate_font_size: 18,
-                shift_enter_delay_ms: 30,
-                newline_replay_ms: 200,
                 ..MacConfig::default()
             },
             ..Config::default()
@@ -640,9 +596,7 @@ mod tests {
         let text = c.to_toml();
         assert!(text.contains("\nko_layout = \"chamshin-d-v19\"\n"));
         assert!(text.contains("\ntoggle_english = \"control_left+space\"\n"));
-        assert!(
-            text.contains("\nshift_enter_delay_ms = 30\n") && text.contains("\nnewline_replay_ms = 200\n")
-        );
+        assert!(text.contains("\ncandidate_font_size = 18\n"));
         assert!(text.contains("\ntoggle_non_english = \"\"\n"), "없음은 빈 글자열");
         assert!(text.contains("\nhanja = \"tap:alt_right\"\n"));
         assert!(text.contains("\n# slash_nakaguro = true\n"), "바꾸지 않은 것은 주석 그대로");

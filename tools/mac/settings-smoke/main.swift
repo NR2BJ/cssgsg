@@ -180,7 +180,7 @@ if let i = args.firstIndex(of: "--shots"), i + 1 < args.count {
             let l = lang.rawValue
             render(GeneralTab(model: model), width: 740, height: 1000, name: "general-\(l)", to: out)
             render(KoreanTab(model: model), width: 740, height: 420, name: "korean-\(l)", to: out)
-            render(JapaneseTab(model: model, dictionary: dictionary), width: 740, height: 1640, name: "japanese-\(l)", to: out)
+            render(JapaneseTab(model: model, dictionary: dictionary), width: 740, height: 1960, name: "japanese-\(l)", to: out)
             render(AboutTab(model: model, updater: updater, language: .constant(lang)), width: 740, height: 1000,
                    name: "about-\(l)", to: out)
         }

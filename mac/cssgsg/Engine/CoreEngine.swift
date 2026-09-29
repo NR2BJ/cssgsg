@@ -83,9 +83,10 @@ final class CoreEngine {
 
     var mode: InputMode { InputMode(rawValue: cssgsg_engine_mode(engine)) ?? .en }
 
-    /// 일본어 한자 변환(Mozc)을 켠다. 실패하면 false(변환기는 히라가나·가타카나만 내는 임시 변환기 그대로).
-    func useMozc(dataPath: String, profileDir: String) -> Bool {
-        cssgsg_engine_use_mozc(engine, dataPath, profileDir) != 0
+    /// 일본어 한자 변환(Mozc) 엔진을 읽어 켠다(MozcLoader). 되면 nil, 안 되면 까닭
+    /// (변환기는 히라가나·가타카나만 내는 임시 변환기 그대로).
+    func useMozc(libraryPath: String, dataPath: String, profileDir: String) -> String? {
+        cssgsg_engine_use_mozc(engine, libraryPath, dataPath, profileDir) != 0 ? nil : String(cString: cssgsg_last_error())
     }
 
     /// 설정 파일을 다시 읽어 바로 적용한다(설정 앱이 고친 뒤). 조합 중인 것·모드·학습은 그대로다.

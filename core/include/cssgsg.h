@@ -112,17 +112,21 @@ uint32_t cssgsg_engine_hanja_learning_load(CssgsgEngine *engine, const char *tsv
 /* 한자 학습을 TSV로. 다음 이 함수 호출이나 해제 전까지 유효. */
 const char *cssgsg_engine_hanja_learning_save(CssgsgEngine *engine);
 
-/* Mozc(일본어 한자 변환)를 켠다. 성공하면 1. mozc 기능 없이 빌드했거나 데이터를 못 읽으면 0(변환기는 그대로).
- * data_path: mozc.data, profile_dir: 학습·사용자 사전 폴더. */
-uint8_t cssgsg_engine_use_mozc(CssgsgEngine *engine, const char *data_path, const char *profile_dir);
+/* 이 코어가 읽을 수 있는 Mozc 엔진 C API 판(mozc/cssgsg/cssgsg_mozc.h의 CSSGSG_MOZC_ABI_VERSION).
+ * mozc 기능 없이 빌드했으면 0. */
+int32_t cssgsg_mozc_abi(void);
+
+/* Mozc(일본어 한자 변환)를 켠다: 엔진을 읽고 만든 뒤 낱말 하나를 변환해 본다. 성공하면 1.
+ * 실패하면 0(변환기는 그대로, 까닭은 cssgsg_last_error).
+ * library_path: libcssgsg_mozc.dylib, data_path: 같이 빌드한 mozc.data, profile_dir: 학습·사용자 사전 폴더. */
+uint8_t cssgsg_engine_use_mozc(CssgsgEngine *engine, const char *library_path, const char *data_path,
+                               const char *profile_dir);
 
 /* 맥 셸 설정(설정 파일의 [mac]). 엔진은 쓰지 않는다. engine이 NULL이면 기본값. */
 typedef struct CssgsgMacSettings {
     uint8_t hud;               /* 모드를 바꿀 때 G/ㅊ/月를 잠깐 보인다 */
     uint8_t hud_at_mouse;      /* 1이면 마우스 옆, 0이면 커서 위 */
-    uint32_t newline_replay_ms; /* Codex류 Shift+Enter 다시 보내기 전 대기(밀리초, 설정 값 그대로) */
     uint32_t candidate_font_size; /* 후보창 글자 크기(포인트) */
-    uint32_t shift_enter_delay_ms; /* 조합 중 Shift+Enter·⌘+키 재전송 전 대기(밀리초, Electron 앱) */
 } CssgsgMacSettings;
 CssgsgMacSettings cssgsg_engine_mac_settings(const CssgsgEngine *engine);
 

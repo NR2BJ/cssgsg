@@ -1,5 +1,7 @@
-//! Mozc 변환(`mozc` 기능). 데이터: CSSGSG_MOZC_DATA 또는 build/mozc-out/data/mozc.data.
+//! Mozc 변환(`mozc` 기능). 엔진: CSSGSG_MOZC_LIB 또는 build/mozc-out/lib/libcssgsg_mozc.dylib,
+//! 데이터: CSSGSG_MOZC_DATA 또는 build/mozc-out/data/mozc.data(tools/mozc/build.sh).
 //! 실행: cargo test -p cssgsg-core --features mozc --test mozc
+//! 엔진 워크플로(.github/workflows/mozc-component.yml)도 새로 빌드한 엔진을 이것으로 시험한 뒤에 낸다.
 //! 학습 폴더는 테스트 전체가 임시 폴더 하나를 같이 쓴다(Mozc 설정이 프로세스 전체에 하나라서).
 //! 학습은 끈다: 한 테스트가 확정한 후보가 다른 테스트의 1순위를 바꾸지 않게.
 //! 테스트는 한 번에 하나씩 돈다(SERIAL). Mozc는 설정·학습 폴더 같은 전역 상태가 있어서, 여러 엔진을 여러 스레드에서
@@ -19,24 +21,64 @@ fn serial() -> MutexGuard<'static, ()> {
     SERIAL.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-fn paths() -> (String, String) {
+/// (엔진, 데이터, 학습 폴더)
+fn paths() -> (String, String, String) {
     static PROFILE: OnceLock<String> = OnceLock::new();
-    let data = std::env::var("CSSGSG_MOZC_DATA")
-        .unwrap_or_else(|_| format!("{}/../build/mozc-out/data/mozc.data", env!("CARGO_MANIFEST_DIR")));
+    let out = format!("{}/../build/mozc-out", env!("CARGO_MANIFEST_DIR"));
+    let library =
+        std::env::var("CSSGSG_MOZC_LIB").unwrap_or_else(|_| format!("{out}/lib/libcssgsg_mozc.dylib"));
+    let data = std::env::var("CSSGSG_MOZC_DATA").unwrap_or_else(|_| format!("{out}/data/mozc.data"));
     let profile = PROFILE.get_or_init(|| {
         let dir = std::env::temp_dir().join(format!("cssgsg-mozc-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir.to_string_lossy().into_owned()
     });
-    (data, profile.clone())
+    (library, data, profile.clone())
 }
 
 fn mozc() -> MozcConverter {
-    let (data, profile) = paths();
-    let mut m = MozcConverter::new(&data, &profile).expect("Mozc를 만들 수 없다(tools/mozc/build.sh를 먼저)");
+    let (library, data, profile) = paths();
+    let mut m = MozcConverter::load(&library, &data, &profile)
+        .unwrap_or_else(|e| panic!("Mozc를 읽을 수 없다(tools/mozc/build.sh를 먼저): {e}"));
     m.set_learning(false);
     m
+}
+
+#[test]
+fn speaks_the_c_api_version_of_the_header() {
+    let header = include_str!("../../mozc/cssgsg/cssgsg_mozc.h");
+    let line = header.lines().find(|l| l.starts_with("#define CSSGSG_MOZC_ABI_VERSION")).unwrap();
+    let version: i32 = line.split_whitespace().nth(2).unwrap().parse().unwrap();
+    assert_eq!(version, cssgsg_core::mozc::SUPPORTED_ABI);
+    assert_eq!(cssgsg_core::ffi::cssgsg_mozc_abi(), version);
+}
+
+#[test]
+fn reports_its_version() {
+    let _serial = serial();
+    let m = mozc();
+    let version = m.version();
+    let parts: Vec<&str> = version.split('.').collect();
+    assert!(parts.len() == 4 && parts.iter().all(|p| p.parse::<u32>().is_ok()), "{version}");
+}
+
+#[test]
+fn refuses_what_is_not_an_engine() {
+    let _serial = serial();
+    let (library, data, profile) = paths();
+    // 없는 파일, Mozc가 아닌 라이브러리, 맞지 않는 데이터: 모두 까닭과 함께 실패하고 프로세스는 멀쩡하다.
+    let missing = MozcConverter::load("/nonexistent/libcssgsg_mozc.dylib", &data, &profile).err().unwrap();
+    assert!(missing.starts_with("dlopen:"), "{missing}");
+    let other = MozcConverter::load("/usr/lib/libz.1.dylib", &data, &profile).err().unwrap();
+    assert!(other.contains("cssgsg_mozc_abi_version"), "{other}");
+    let not_data = format!("{}/Cargo.toml", env!("CARGO_MANIFEST_DIR"));
+    let bad_data = MozcConverter::load(&library, &not_data, &profile).err().unwrap();
+    assert!(bad_data.contains("mozc.data"), "{bad_data}");
+    // 그 뒤에도 제대로 된 엔진은 읽힌다.
+    let mut m = mozc();
+    assert_eq!(m.start("にほんご").unwrap().segments, vec!["日本語"]);
+    m.cancel();
 }
 
 #[test]
@@ -173,7 +215,7 @@ fn user_dictionary(entries: &[(&str, &str)]) -> Vec<u8> {
 #[test]
 fn reload_picks_up_the_user_dictionary() {
     let _serial = serial();
-    let (_, profile) = paths();
+    let (_, _, profile) = paths();
     let mut m = mozc();
     // 두 번째 읽기에는 작은 가나(ゃ っ)와 장음 부호(ー)가 있다(NRIME 때 등록이 안 되던 것).
     let words = [("くもつくもつ", "蜘蛛津雲津"), ("ちゃっきゅーもつ", "茶っ究ー津")];

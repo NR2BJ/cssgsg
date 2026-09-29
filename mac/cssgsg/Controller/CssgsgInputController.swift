@@ -6,8 +6,8 @@ import InputMethodKit
 /// NRIME에서 옮긴 규칙
 /// - 확정은 insertText만 쓴다. 그 앞뒤에 setMarkedText("")를 부르지 않는다(Chromium·JS 에디터에서 글자가 사라진다).
 /// - 언어 전환(수식키)은 비밀번호 칸 판정보다 먼저 처리한다. 막히면 사용자가 빠져나올 길이 없다.
-/// - ⌘/Ctrl/Option+키가 조합을 확정했으면, 확정 뒤 그 키를 태그 달린 CGEvent로 다시 보낸다.
-/// - 조합 중 Shift+Enter는 Chromium이면 확정 뒤 잠깐 기다렸다 줄바꿈을 직접 넣는다.
+/// - ⌘/Ctrl/Option+키가 조합을 확정했으면, 확정 뒤 그 키를 CGEvent로 다시 보낸다(다음 런루프 차례).
+/// - 조합 중 Shift+Enter는 Chromium이면 확정 뒤(다음 런루프 차례) 줄바꿈을 직접 넣는다.
 /// - 입력기 활성화 때는 확정하지 않고 버린다("사과" → "사과과" 중복 방지). 비활성화 때는 sender에 확정한다.
 /// - 전역 마우스 클릭 감시로 조합을 확정한다(포커스 이동 때 commitComposition을 안 부르는 앱이 있다).
 @objc(CssgsgInputController)
@@ -17,8 +17,6 @@ final class CssgsgInputController: IMKInputController {
     private static var mouseMonitor: Any?
     /// 수식키 상태(좌우, 눌림). 컨트롤러는 클라이언트마다 따로 생기므로 프로세스 전체에서 하나를 같이 쓴다.
     private static var modifiers = ModifierState()
-    /// ⌘+키 재전송과 Shift+Enter 줄바꿈 전에 기다리는 시간(NRIME 기본 15ms). 설정 파일 [mac] shift_enter_delay_ms.
-    static var shiftEnterDelay: TimeInterval = 0.015
 
     private let secureInput = SecureInputDetector()
     /// 마우스 감시 콜백 때는 self.client()가 이미 nil일 수 있어서 마지막 클라이언트를 들고 있는다.
@@ -31,17 +29,8 @@ final class CssgsgInputController: IMKInputController {
 
     override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {
         guard let event, let client = sender as? (any IMKTextInput) else { return false }
-
-        // 우리가 다시 보낸 키는 그대로 앱으로.
-        if let cg = event.cgEvent, cg.getIntegerValueField(.eventSourceUserData) == KeyEventReposter.repostTag {
-            return false
-        }
+        // 우리가 다시 보낸 키(KeyEventReposter)도 여기로 온다. 그때는 조합이 없어서 엔진이 앱으로 넘긴다.
         cachedClient = client
-
-        // 기다리던 줄바꿈은 이 키보다 먼저 들어가야 한다.
-        if event.type == .keyDown {
-            KeyEventReposter.flushPendingNewline()
-        }
 
         let secure = secureInput.shouldSuppressComposition() || secureInput.isAuthenticationClient(client.bundleIdentifier())
         if secure != lastSecureState {
@@ -87,7 +76,7 @@ final class CssgsgInputController: IMKInputController {
             apply(out, client: client)
             // 권한이 없으면 다시 보낸 키가 버려진다. 그럴 바엔 원래 키를 앱에 넘긴다.
             guard KeyEventReposter.canPostEvents else { return false }
-            KeyEventReposter.repost(event, after: Self.shiftEnterDelay)
+            KeyEventReposter.repost(event)
             return true
         }
 
@@ -95,7 +84,7 @@ final class CssgsgInputController: IMKInputController {
         if !out.consumed && isEnter && event.modifierFlags.contains(.shift) && !out.commit.isEmpty {
             apply(out, client: client)
             if ChromiumDetector.isFrontmostAppChromium {
-                KeyEventReposter.performChromiumNewline(keyCode: event.keyCode, client: client, delay: Self.shiftEnterDelay)
+                KeyEventReposter.performChromiumNewline(keyCode: event.keyCode, client: client)
                 return true
             }
             return false
@@ -159,6 +148,7 @@ final class CssgsgInputController: IMKInputController {
     override func activateServer(_ sender: Any!) {
         super.activateServer(sender)
         Self.activeController = self
+        PermissionMonitor.refreshIfStale()
         if Self.mouseMonitor == nil {
             Self.mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { _ in
                 Self.activeController?.commitOnMouseClick()

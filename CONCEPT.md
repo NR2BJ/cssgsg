@@ -453,8 +453,11 @@ k     = { cho = "ㄱ" }
 **Mozc in-process 선례:** iOS `IosEngine`(mutex로 `SessionHandler` 감쌈), Android JNI `evalCommand`, fcitx5-mozc의 `use_server=False`, Fcitx5 macOS의 CMake 빌드(IPC 없음).
 
 **배치:**
-- **macOS:** Mozc 엔진을 IMK 프로세스에 링크하고 전용 엔진 스레드 1개로 직렬화한다. 입력 스레드는 기다리지 않는다.
+- **macOS:** Mozc 엔진을 IMK 프로세스 안에서 쓴다. 입력 스레드는 기다리지 않는다(변환 1ms 안쪽).
   - NRIME에서 mozc_server 바이너리를 직접 패치하던 부담(macOS 26.4 크래시)과 실행 비트 사고가 같이 사라진다.
+  - 0.6.0부터 엔진은 C API만 내보내는 `libcssgsg_mozc.dylib`이고 코어가 실행 중에 읽는다(dlopen). 앱에 든 엔진과,
+    엔진 워크플로가 upstream Mozc로 빌드해 내면 입력기가 받아 둔 더 새 엔진 중 고른다. 그래서 Mozc는 입력기와 따로 올라간다
+    (NRIME 1.0.12와 같다, README "Mozc 엔진 업데이트").
 - **Windows:** TIP는 얇게 두고, Mozc는 사용자당 1개인 엔진 호스트 프로세스에 둔다. 통신은 비동기 named pipe다(§10).
 
 **코어 ↔ 엔진 프로토콜:** `Convert(reading)` / `MoveSegment` / `ResizeSegment` / `Select(i)` / `Commit` / `Cancel`.
@@ -582,11 +585,15 @@ k     = { cho = "ㄱ" }
 
 1. **커밋은 `insertText`만 쓴다.** `setMarkedText("")`를 앞뒤로 부르지 않는다. Chromium과 JS 에디터에서 텍스트가 사라진다.
 2. **Shift+Enter.**
-   - Chromium: 커밋 후 15ms 뒤에 `insertText("\n")`, 그 외 앱: `return false`.
-   - 대기 중인 개행은 다음 keyDown 전에 flush한다.
-   - Codex는 "커밋만" 하는 상태를 수용한다.
+   - Chromium: 커밋 후 런 루프 다음 차례에 `insertText("\n")`(handle() 안에서 넣으면 Chromium이 버린다), Codex처럼 줄바꿈 넣기를
+     보내기로 받는 앱은 Shift+Enter를 다시 보낸다. 그 외 앱: `return false`.
+   - 0.5.x까지는 기다렸다(Electron 15ms, Codex 120ms, 대기 중 친 키 순서 지키기). NRIME 1.0.12-beta.5와 같이 0.6.0에서 뺐다:
+     두 값은 macOS가 권한 없이 보낸 키를 소리 없이 버리던 때 정했고, 권한이 있으면 기다리지 않아도 늘 됐다(NRIME: Discord 9/9,
+     Codex 11/11). 앱은 handle()의 답을 받고서야 다음 키를 보내고, 줄바꿈은 그 답보다 먼저 줄에 선다.
 3. **Chromium 판별은 번들 내용물로 한다**(`app.asar`, `v8_context_snapshot*.bin`). 이름 매칭은 쓰지 않는다. Codex가 프레임워크 이름을 바꾼 사례가 있다.
-4. **조합 중 ⌘/Ctrl.** flagsChanged에서 수식키가 눌리면 커밋한다. 그래도 keyDown이 오면 커밋한 뒤 태그를 단 CGEvent를 재전송한다. 태그 이벤트는 그대로 통과시킨다.
+4. **조합 중 ⌘/Ctrl.** flagsChanged에서 수식키가 눌리면 커밋한다. 그래도 keyDown이 오면 커밋한 뒤 CGEvent를 재전송한다.
+   0.5.x는 재전송한 키에 태그(eventSourceUserData)를 달아 알아봤는데, 태그는 IMK를 거치면 남지 않는다(NRIME 기록에서도 한 번도
+   알아본 적이 없다). 0.6.0에서 뺐다: 재전송한 키는 조합이 없으니 그대로 앱으로 간다.
 5. **포커스 전환.**
    - `activateServer`는 커밋하지 않고 상태만 초기화한다("사과과" 중복 방지).
    - `deactivateServer`는 `sender`에 커밋한다.
@@ -603,7 +610,9 @@ k     = { cho = "ㄱ" }
     - 자체 NSPanel을 쓴다.
     - 선택 텍스트를 한자로 바꿀 때는 먼저 marked text로 전환한다.
     - 후보 세션은 명시적으로 종료한다.
-11. **캐럿 위치.** `attributes(forCharacterIndex:0)` 단일 경로를 쓰고, 실패하면 숨긴다. v1.0.8 결론이며 30번 고친 끝에 얻은 것이다.
+11. **캐럿 위치.** 앱에 먼저 묻고(`attributes(forCharacterIndex:)`, 커서 자리 → 0), 손쉬운 사용(AX)은 마지막에, 모두 실패하면 숨긴다.
+    v1.0.8 결론이며 30번 고친 끝에 얻은 것이다. `AXEnhancedUserInterface`는 켜지 않는다: Chromium·Electron·Firefox를 무거운
+    손쉬운 사용 모드로 바꾼다(NRIME 1.0.12).
 12. **번들 바이너리.** 빌드와 PKG 단계에서 실행 비트를 검증한다(v1.0.9 사고).
 
 ### macOS 26/27에서 새로 생긴 것 (2026 조사)
@@ -616,6 +625,11 @@ k     = { cho = "ㄱ" }
 - **설치:** 입력기 설치에는 여전히 로그아웃이 필요하다(2026-06 Apple DTS 확인). 업데이트는 프로세스 재시작으로 된다. 2026-09-29 cssgsg 0.1.x로 다시 확인했다: 새로 설치한 입력기는 로그아웃 뒤에야 추가(+) 목록에 나온다.
 - **입력 소스 켜기(macOS 27 실측):** 서드파티 입력기는 프로그램이 켤 수 없다. `TISEnableInputSource`는 noErr를 돌려주지만 아무것도 저장하지 않는다(입력기 안에서도 밖에서도). 켜진 목록은 `com.apple.inputsources`의 `AppleEnabledThirdPartyInputSources`이고, 시스템 설정의 추가가 여기에 쓴다. TIS의 켜짐 속성은 `tsInputModeDefaultStateKey` 때문에 추가하지 않은 모드도 켜짐으로 보인다. 목록 이름은 `InfoPlist.strings`에서 모드 ID로 찾는다.
 - **업데이트 뒤 다시 띄우기(macOS 27 실측):** root에서 여는 `open`(postinstall 안, 또는 installer 뒤 `launchctl asuser … sudo -u … open`)은 "launch 0 items" / procNotFound(-600)로 실패했다. 사용자 세션의 `open`은 앱을 끈 직후에도 뜬다. 그래서 앱이 osascript와 함께 사용자 세션의 작은 셸을 띄워, 설치가 끝나면 연다. 입력 소스로 쓰는 중이면 타자를 치는 순간 imklaunchagent도 띄운다.
+- **키 보내기 권한(NRIME 1.0.12, macOS 27):** `CGPreflightPostEventAccess()`의 답은 프로세스가 처음 물었을 때로 굳는다. 떠 있는 동안
+  사용자가 켜도 계속 거짓이라, `CGPreflightPostEventAccess() || AXIsProcessTrusted()`로 본다(손쉬운 사용 권한도 키 보내기를 허락한다).
+  macOS 27은 "손쉬운 사용"을 "기기 제어 및 데이터 접근"으로 바꿨다. 입력기는 스스로 묻지 않고(0.5.x는 첫 실행 때 한 번 물었다),
+  활성화될 때(1분에 한 번까지) 확인해 설정 앱에 알린다. 청하는 것은 설정 앱 단추를 눌렀을 때만(`AXIsProcessTrustedWithOptions` 창 +
+  `CGRequestPostEventAccess`). 권한이 풀리면 macOS는 cssgsg를 허용됨으로 둔 채 보낸 키를 버린다. 그때는 목록에서 지우고 다시 추가한다.
 - **IMKit 수식키 이벤트(macOS 27 실측, 개발자 기록):** flagsChanged에 좌우 기기 비트가 없다(오른쪽 Shift도 합친 .shift만). 그리고 같은 flagsChanged가 3~5ms 간격으로 두 번 온다(keyDown은 한 번). 좌우는 keyCode로 기억하고, 상태가 바뀐 것만 넘긴다(`ModifierState`, NRIME ShortcutHandler와 같은 방식).
 
 ### 버릴 것 / 고칠 것
@@ -781,7 +795,7 @@ k     = { cho = "ㄱ" }
 - 2단계 M2a 완료: `mac/`의 IMKit 셸 뼈대. 키 → 코어 → 앱, 메뉴 막대 모드 표시, NRIME 우회책(⌘ 재전송, Chromium Shift+Enter, 마우스 클릭 확정, 비밀번호 칸). 셸 Swift 계층은 스모크 테스트로 검증했고, 실제 앱 확인은 설치 뒤 체크리스트로 한다.
 - 배포(2026-09-29): pkg + GitHub 릴리스(공개) + 앱 안 업데이트(0.4.0까지 입력기 메뉴, 0.5.0부터 설정 앱 정보 탭). 설치본을 바꾸는 길은 pkg 하나로 둔다. 자체 서명 인증서로 서명해서 업데이트해도 손쉬운 사용 권한이 남는다. v0.1.0이 첫 릴리스다.
 - M2b 모드 HUD 완료(0.1.6): 모드를 바꿀 때 확정 전 커서 위에 모드 글자를 1초(0.1.7부터 G/ㅊ/月). 설정 파일 `[mac]`(hud, hud_position, newline_replay_ms)는 코어가 읽어 FFI로 셸에 넘긴다.
-- 일본어 한자 변환(0.2.0): §6.3대로 Mozc를 입력기 프로세스에 정적 링크했다(mozc_server 없음, `mozc/`). 읽기를 key_string으로 넣고 Space 변환, MSIME 키맵, 음역 펼침, 학습 폴더 분리. 엔진 준비 10~20ms, 변환 1ms 안쪽.
+- 일본어 한자 변환(0.2.0): §6.3대로 Mozc를 입력기 프로세스에 정적 링크했다(mozc_server 없음, `mozc/`, 0.6.0부터 dylib). 읽기를 key_string으로 넣고 Space 변환, MSIME 키맵, 음역 펼침, 학습 폴더 분리. 엔진 준비 10~20ms, 변환 1ms 안쪽.
 - 한국어 한자 변환(0.3.0, 0.3.1에서 조합 중인 글자 하나로 줄임): §5.4. libhangul 사전을 코어에 넣고, Option+Enter로 조합 중인 음절을 한자로(자음 하나는 기호로) 바꾼다. 뜻 표시, 학습.
 - 설정 앱(0.4.0, M2c): 입력기 옆의 `cssgsgSettings.app`(SwiftUI). 탭은 일반(수식키 탭 동작·탭 인식 시간·HUD·Shift+Enter 대기), 한국어(배열, 한자 기억 지우기), 일본어(기호, 가타카나, Mozc 학습 지우기), 배열 학습(learn/index.html), 정보(버전, 입력 소스 추가 여부, 설정 파일, 개발자 기록, 고지문).
   - `config.toml`이 원본이다. 설정 앱은 바꿀 때마다 파일을 다시 읽고(직접 고친 것을 덮지 않게) 그 위에 바꿔 쓴 뒤 Darwin 알림(`com.cssgsg.config-changed`)을 보낸다. 입력기는 받자마자 다시 읽어 적용한다(`cssgsg_engine_set_config`, 모드·조합·학습은 그대로). 설정 앱이 앞으로 올 때도 알려서, 직접 고친 파일은 설정 앱을 열면 적용된다.
@@ -795,8 +809,16 @@ k     = { cho = "ㄱ" }
   - 일본어: 변환 키(Space·Tab), 기호(구두점, ・, ¥, 전각 공백), 가타카나, 개인 사전(Mozc 사용자 사전, 아래), Mozc 학습 지우기, 변환 단축키 설명서.
   - 배열 학습: 배열 탭을 누르면 그 배열만 보인다(0.4.0은 CSS가 `hidden`을 덮어 모두 한 페이지에 보였다).
   - 정보: 버전, 입력 소스, 키 보내기 권한(입력기가 적어 둔 값, 허용 단추), 업데이트(정식·베타 채널), 화면 언어(한국어·English·日本語, 입력기 메뉴도 따른다), 파일, 고지문.
-  - 입력기 메뉴 막대 메뉴는 설정·다시 시작·종료 셋뿐이다. 업데이트 확인은 설정 앱만 한다(입력기 프로세스는 네트워크를 쓰지 않는다).
+  - 입력기 메뉴 막대 메뉴는 설정·다시 시작·종료 셋뿐이다. 앱 업데이트 확인은 설정 앱만 한다. 0.6.0부터 입력기는 Mozc 엔진만
+    스스로 확인한다(하루 한 번, 메인 스레드 밖, 창 없음).
   - 개인 사전: `~/Library/Application Support/cssgsg/mozc/user_dictionary.db`(Mozc UserDictionaryStorage 프로토콜 버퍼)를 `config-ffi`가 직접 읽고 쓴다(필요한 필드만, 모르는 필드는 그대로 남긴다). 첫 사전만 보이고(없으면 "User Dictionary"를 만든다, NRIME와 같다), 품사는 NRIME의 18개. 저장하면 Darwin 알림 → 입력기가 Mozc에 RELOAD를 보낸다(바로 적용). 읽기는 Mozc NormalizeReading처럼 가타카나를 히라가나로 바꿔 넣는다.
+- 0.6.0(사용자 요청, NRIME 1.0.12-beta.5 확인): ① Mozc를 입력기와 따로 업데이트한다. 엔진은 dylib(C API 판 1), 앱에 든 것 +
+  엔진 워크플로(`.github/workflows/mozc-component.yml`, 매주 월요일, upstream Mozc의 버전·데이터가 바뀌었을 때)가 낸 prerelease를
+  입력기가 5분 뒤·하루 한 번 확인해 받는다(SHA-256 두 겹 확인, `~/Library/Application Support/cssgsg/mozc-engines/`).
+  못 읽거나, 읽다가 죽거나, 10분 안에 깨끗이 끝나지 않은 시작이 세 번이면 그 엔진은 버리고 앱에 든 것을 쓴다(NRIME와 달리 깨끗이
+  끝난 시작은 세지 않는다: 다시 시작을 몇 번 눌러도 멀쩡한 엔진을 버리지 않게). 설정 앱 일본어 → 변환 엔진(버전, 지금 확인, 지금 적용).
+  ② 줄바꿈 대기를 없앴다(§9-2, `mac.shift_enter_delay_ms`·`newline_replay_ms`·`newline_delay_offset_ms`는 읽고 버린다).
+  ③ 권한: NRIME PermissionMonitor(§9 키 보내기 권한), 정보 탭 "입력기 권한". ④ 캐럿: 앱에 먼저 묻고 AX는 마지막(§9-11).
 - 다음: 입력 소스 복구는 문제가 생기면. 비밀번호 칸 Graphite, ABC 전환 막기(비밀번호 칸)는 나중에(§13). 윈도우(3단계).
 
 ---
@@ -833,6 +855,8 @@ k     = { cho = "ㄱ" }
   - 0.5.0(사용자 요청): 단축키는 녹화, 개인 사전은 따로 탭을 두지 않고 일본어 탭 안에, 업데이트와 화면 언어는 정보 탭에, 입력기 메뉴는 설정·다시 시작·종료만. 한국어/일본어로 바로 가는 단축키와 일본어 Shift 로마자 입력은 넣지 않는다(가타카나는 Caps Lock).
   - 0.5.1(사용자 결정): 조합 단축키도 수식키 좌우를 가린다. ↓는 변환 키가 아니다. 공백은 반각/전각 하나로 고른다. 빠른 탭 전환 보정은 보류. 입력기는 한국어로 시작한다.
   - 줄바꿈 대기(0.5.4, 사용자 결정): Electron 대기(기본 15ms)와 고급의 Codex 대기(기본 120ms, 사용자가 실험으로 다시 찾는다)를 따로, 대기 시간 그대로 고른다. 둘은 더하지 않는다.
+    → 0.6.0(사용자 결정 "줄바꿈 대기 없애 될듯"): 대기를 없앴다. 줄바꿈은 런 루프 다음 차례에 넣는다(§9-2).
+  - Mozc 업데이트(0.6.0, 사용자 요청): 입력기를 새로 내지 않아도 Mozc만 올린다(NRIME와 같다). 앱 업데이트는 엔진 릴리스를 보지 않는다.
   - 화면 문구(0.5.4, 사용자 결정): 사용자에게 보이는 글은 NRIME처럼 이름은 명사형, 설명은 합니다체로 쓴다. 릴리스 노트도 합니다체.
 - 한국어 한자 변환(2026-09-29, §5.4): Option+Enter로 **조합 중인 글자 하나만** 바꾼다. 0.3.0의 낱말 변환(앞 글자 끌어오기)은 Discord에서 글자가 겹쳐서 사용자 결정으로 뺐다. 첫 후보가 바로 조합에 보이고 조작은 일본어 후보창과 같다.
 - 新月 모드 입력 규칙:

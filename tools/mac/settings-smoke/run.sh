@@ -14,7 +14,7 @@ SOURCES=()
 while IFS= read -r f; do SOURCES+=("$f"); done < <(find mac/Settings -name '*.swift' ! -name SettingsApp.swift | sort)
 swiftc -O -module-name settingssmoke \
   -import-objc-header mac/Settings/Settings-Bridging-Header.h -I config-ffi/include \
-  mac/Shared/Cssgsg.swift "${SOURCES[@]}" tools/mac/settings-smoke/main.swift \
+  mac/Shared/*.swift "${SOURCES[@]}" tools/mac/settings-smoke/main.swift \
   -L build/cargo/release -lcssgsg_config -framework WebKit -o "$OUT/settings-smoke"
 if [ "${1:-}" = "--shots" ]; then
   "$OUT/settings-smoke" --shots "$ROOT/build/settings-shots"

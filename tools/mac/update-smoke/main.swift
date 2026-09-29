@@ -1,4 +1,4 @@
-// 업데이트 코드 스모크 테스트. 설정 앱의 Update/SemanticVersion.swift, Update/Updater.swift와 같이 빌드한다(run.sh).
+// 업데이트 코드 스모크 테스트. 설정 앱의 Update/Updater.swift, 공용 SemanticVersion.swift·GitHubRelease.swift와 같이 빌드한다(run.sh).
 //
 //   update-smoke <fixture.json>                  버전 순서, 채널별 권할 릴리스, GitHub 응답 해석, 해시, 설치 스크립트
 //   update-smoke --live <pkg 파일> <버전>        GitHub에 올라간 최신 릴리스를 앱과 같은 코드로 읽고, 파일을 받아 해시를 맞춰 본다
@@ -68,6 +68,15 @@ func offline(fixture: String) {
     check(UpdateLogic.pick(list + [release("v0.2.0")], over: "0.2.0-beta.10", channel: .beta)?.version == "0.2.0",
           "베타를 쓰던 사람도 같은 버전의 정식 릴리스를 받음")
     check(UpdateLogic.pick(list, over: "0.2.0-beta.10", channel: .beta) == nil, "더 높은 것이 없으면 권하지 않음")
+    // Mozc 엔진 릴리스(mozc-<판>-<날짜>-<커밋>, prerelease, pkg 없이 cssgsg-mozc.zip)는 앱 업데이트가 아니다.
+    // 태그가 버전으로 읽히더라도 pkg가 없어서 권하지 않는다.
+    let engine = GitHubRelease(
+        tagName: "mozc-1-20261120-c2c2c2c", body: nil, htmlURL: nil, draft: false, prerelease: true,
+        assets: [GitHubAsset(name: "cssgsg-mozc.zip", size: 1, browserDownloadURL: "https://example.invalid/cssgsg-mozc.zip",
+                             digest: "sha256:00")])
+    check(UpdateLogic.pick(list + [engine], over: "0.2.0-beta.10", channel: .beta) == nil
+          && !UpdateLogic.offers(engine, over: "0.0.1", channel: .beta) && !UpdateLogic.offers(engine, over: "0.0.1", channel: .stable),
+          "Mozc 엔진 릴리스는 어느 채널에서도 앱 업데이트로 권하지 않음")
 
     // 실제 GitHub 응답 모양. 정식(/releases/latest)은 릴리스 하나, 베타(/releases)는 목록이다.
     do {
@@ -86,18 +95,19 @@ func offline(fixture: String) {
         check(false, "응답 해석: \(error)")
     }
     check(UpdateChannel.stable.url.path.hasSuffix("/releases/latest"), "정식 채널 주소")
-    check(UpdateChannel.beta.url.path.hasSuffix("/releases") && UpdateChannel.beta.url.query == "per_page=20", "베타 채널 주소")
+    check(UpdateChannel.beta.url.path.hasSuffix("/releases") && UpdateChannel.beta.url.query == "per_page=100",
+          "베타 채널 주소(Mozc 엔진 릴리스가 섞여도 앱 릴리스가 목록에 들도록 100개)")
 
     // 해시
     let temp = FileManager.default.temporaryDirectory.appendingPathComponent("cssgsg-update-smoke-\(getpid())")
     try? Data("abc".utf8).write(to: temp)
     defer { try? FileManager.default.removeItem(at: temp) }
     let abc = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-    check(UpdateLogic.fileMatchesDigest(at: temp, expected: "sha256:" + abc) == true, "해시 일치")
-    check(UpdateLogic.fileMatchesDigest(at: temp, expected: "SHA256:" + abc.uppercased()) == true, "해시 대소문자 무시")
-    check(UpdateLogic.fileMatchesDigest(at: temp, expected: "sha256:" + String(repeating: "0", count: 64)) == false, "해시 불일치")
-    check(UpdateLogic.fileMatchesDigest(at: temp, expected: nil) == nil, "해시 없음 → nil(설치 안 함)")
-    check(UpdateLogic.fileMatchesDigest(at: URL(fileURLWithPath: "/nonexistent/x"), expected: "sha256:" + abc) == false,
+    check(GitHub.fileMatchesDigest(at: temp, expected: "sha256:" + abc) == true, "해시 일치")
+    check(GitHub.fileMatchesDigest(at: temp, expected: "SHA256:" + abc.uppercased()) == true, "해시 대소문자 무시")
+    check(GitHub.fileMatchesDigest(at: temp, expected: "sha256:" + String(repeating: "0", count: 64)) == false, "해시 불일치")
+    check(GitHub.fileMatchesDigest(at: temp, expected: nil) == nil, "해시 없음 → nil(설치 안 함)")
+    check(GitHub.fileMatchesDigest(at: URL(fileURLWithPath: "/nonexistent/x"), expected: "sha256:" + abc) == false,
           "파일 없음 → 불일치")
 
     // 버전 문자열 거르기
@@ -181,7 +191,7 @@ func live(pkg: String, version: String) {
         return
     }
     check(asset.name == "cssgsg.pkg", "파일 이름 cssgsg.pkg (고정 링크 releases/latest/download/cssgsg.pkg)")
-    check(UpdateLogic.fileMatchesDigest(at: URL(fileURLWithPath: pkg), expected: asset.digest) == true,
+    check(GitHub.fileMatchesDigest(at: URL(fileURLWithPath: pkg), expected: asset.digest) == true,
           "GitHub 해시 = 로컬 pkg 해시")
     var downloaded: URL?
     URLSession.shared.downloadTask(with: url) { location, _, _ in
@@ -195,7 +205,7 @@ func live(pkg: String, version: String) {
     }.resume()
     semaphore.wait()
     if let downloaded {
-        check(UpdateLogic.fileMatchesDigest(at: downloaded, expected: asset.digest) == true, "받은 파일 해시 일치(앱과 같은 확인)")
+        check(GitHub.fileMatchesDigest(at: downloaded, expected: asset.digest) == true, "받은 파일 해시 일치(앱과 같은 확인)")
         try? FileManager.default.removeItem(at: downloaded)
     } else {
         check(false, "파일 받기")

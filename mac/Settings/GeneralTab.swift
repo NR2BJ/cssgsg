@@ -82,42 +82,6 @@ struct GeneralTab: View {
                 .disabled(!model.config.mac.hud)
             }
 
-            Section {
-                LabeledContent(tr("Electron 앱", "Electron Apps", "Electron アプリ")) {
-                    ValueSlider(value: model.config.mac.shiftEnterDelayMs, range: 5...100, step: 5) { ms in
-                        model.update { $0.mac.shiftEnterDelayMs = ms }
-                    }
-                }
-                DisclosureGroup(tr("고급", "Advanced", "詳細")) {
-                    LabeledContent("Codex") {
-                        ValueSlider(value: model.config.mac.newlineReplayMs, range: 20...500, step: 10) { ms in
-                            model.update { $0.mac.newlineReplayMs = ms }
-                        }
-                    }
-                }
-            } header: {
-                Text(tr("Shift+Enter 줄바꿈 대기", "Shift+Enter Newline Delay", "Shift+Enter 改行の待ち時間"))
-            } footer: {
-                Text(tr("""
-                    조합 중인 글자를 확정한 뒤 줄바꿈을 넣기까지 기다리는 시간입니다. Discord·Slack 같은 Electron 앱에서 조합 중인 \
-                    글자가 사라지면 값을 높여 보세요. 조합 중에 누른 ⌘ 단축키도 이만큼 기다렸다가 앱에 다시 보냅니다.
-                    고급의 Codex 값은 따로 쓰입니다. Codex는 줄바꿈 글자를 넣으면 메시지를 보내 버려서, 확정한 뒤 이만큼 기다렸다가 \
-                    Shift+Enter를 다시 보냅니다. 확정만 되고 줄바꿈이 안 되면 값을 높이고, 잘 되면 낮춰서 되는 가장 작은 값을 찾으세요.
-                    """, """
-                    How long to wait between committing the composition and inserting the newline. Increase it if composing text \
-                    disappears in Electron apps such as Discord and Slack. ⌘ shortcuts pressed while composing are re-sent after the \
-                    same wait.
-                    The Codex value under Advanced is separate. Codex sends the message when a newline character is inserted, so cssgsg \
-                    commits, waits this long, and re-sends Shift+Enter. If you only get the commit and no newline, increase it; if it \
-                    works, lower it to find the smallest value that still works.
-                    """, """
-                    入力中の文字を確定してから改行を入れるまでの待ち時間です。Discord・Slack などの Electron アプリで入力中の文字が\
-                    消える場合は値を上げてください。入力中に押した ⌘ ショートカットも、同じだけ待ってからアプリへ送り直します。
-                    詳細の Codex の値は別に使われます。Codex は改行文字を入れるとメッセージを送信してしまうため、確定後この時間だけ\
-                    待ってから Shift+Enter を送り直します。確定だけで改行されない場合は値を上げ、うまくいく場合は下げて、動作する最小の\
-                    値を見つけてください。
-                    """))
-            }
         }
         .formStyle(.grouped)
     }

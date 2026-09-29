@@ -13,6 +13,7 @@
 #include "absl/synchronization/mutex.h"
 #include "base/strings/unicode.h"
 #include "base/system_util.h"
+#include "base/version.h"
 #include "config/config_handler.h"
 #include "data_manager/data_manager.h"
 #include "engine/engine.h"
@@ -151,6 +152,13 @@ const char* ViewOrNull(CssgsgMozc& m, const Output& o) {
 
 extern "C" {
 
+int32_t cssgsg_mozc_abi_version(void) { return CSSGSG_MOZC_ABI_VERSION; }
+
+const char* cssgsg_mozc_version(void) {
+  static const std::string* version = new std::string(mozc::Version::GetMozcVersion());
+  return version->c_str();
+}
+
 CssgsgMozc* cssgsg_mozc_new(const char* data_path, const char* profile_dir) {
   if (data_path == nullptr) return nullptr;
   if (profile_dir != nullptr && profile_dir[0] != '\0') {
@@ -198,7 +206,7 @@ void cssgsg_mozc_free(CssgsgMozc* m) {
 
 const char* cssgsg_mozc_start(CssgsgMozc* m, const char* reading) {
   if (m == nullptr || reading == nullptr || reading[0] == '\0') return nullptr;
-  absl::MutexLock lock(&m->mu);
+  absl::MutexLock lock(m->mu);
   Clear(*m);
   // 읽기를 한 글자씩 key_string으로 넣는다(key_code 없이). 조합기는 그 글자를 그대로 조합에 넣는다.
   for (const absl::string_view ch : mozc::Utf8AsChars(reading)) {
@@ -214,7 +222,7 @@ const char* cssgsg_mozc_start(CssgsgMozc* m, const char* reading) {
 
 const char* cssgsg_mozc_command(CssgsgMozc* m, int32_t command, int32_t arg) {
   if (m == nullptr) return nullptr;
-  absl::MutexLock lock(&m->mu);
+  absl::MutexLock lock(m->mu);
   Output o;
   bool ok = false;
   switch (command) {
@@ -241,7 +249,7 @@ const char* cssgsg_mozc_command(CssgsgMozc* m, int32_t command, int32_t arg) {
 
 const char* cssgsg_mozc_commit(CssgsgMozc* m) {
   if (m == nullptr) return "";
-  absl::MutexLock lock(&m->mu);
+  absl::MutexLock lock(m->mu);
   Output o;
   const bool ok = Session(*m, SessionCommand::SUBMIT, -1, &o);
   m->last.Clear();
@@ -250,13 +258,13 @@ const char* cssgsg_mozc_commit(CssgsgMozc* m) {
 
 void cssgsg_mozc_cancel(CssgsgMozc* m) {
   if (m == nullptr) return;
-  absl::MutexLock lock(&m->mu);
+  absl::MutexLock lock(m->mu);
   Clear(*m);
 }
 
 void cssgsg_mozc_reload(CssgsgMozc* m) {
   if (m == nullptr) return;
-  absl::MutexLock lock(&m->mu);
+  absl::MutexLock lock(m->mu);
   Clear(*m);
   Command c;
   c.mutable_input()->set_type(Input::RELOAD);
@@ -265,7 +273,7 @@ void cssgsg_mozc_reload(CssgsgMozc* m) {
 
 void cssgsg_mozc_set_learning(CssgsgMozc* m, int32_t enabled) {
   if (m == nullptr) return;
-  absl::MutexLock lock(&m->mu);
+  absl::MutexLock lock(m->mu);
   m->config.set_history_learning_level(enabled != 0 ? mozc::config::Config::DEFAULT_HISTORY
                                                     : mozc::config::Config::NO_HISTORY);
   ApplyConfig(*m);

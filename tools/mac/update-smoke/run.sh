@@ -8,7 +8,7 @@ ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 OUT="$ROOT/build/mac-smoke"
 mkdir -p "$OUT"
 swiftc -O -module-name updatesmoke \
-  "$ROOT/mac/Settings/Update/SemanticVersion.swift" "$ROOT/mac/Settings/Update/Updater.swift" \
+  "$ROOT/mac/Shared/SemanticVersion.swift" "$ROOT/mac/Shared/GitHubRelease.swift" "$ROOT/mac/Settings/Update/Updater.swift" \
   "$ROOT/mac/cssgsg/System/InputSourceSetup.swift" "$ROOT/mac/cssgsg/System/DeveloperLogger.swift" \
   "$ROOT/mac/Shared/Cssgsg.swift" \
   "$ROOT/tools/mac/update-smoke/main.swift" -o "$OUT/update-smoke"

@@ -1,13 +1,15 @@
 # cssgsg용 Mozc C API. tools/mozc/build.sh가 이 폴더를 Mozc 소스 트리의 src/cssgsg로 복사해서 빌드한다.
-load("@rules_cc//cc:cc_static_library.bzl", "cc_static_library")
 load("//:build_defs.bzl", "mozc_cc_binary", "mozc_cc_library")
 
 mozc_cc_library(
     name = "cssgsg_mozc",
     srcs = ["cssgsg_mozc.cc"],
     hdrs = ["cssgsg_mozc.h"],
+    # 라이브러리 안에서는 아무도 C API를 부르지 않는다. 공유 라이브러리에 남긴다.
+    alwayslink = True,
     deps = [
         "//base:system_util",
+        "//base:version",
         "//base/strings:unicode",
         "//config:config_handler",
         "//data_manager",
@@ -24,9 +26,25 @@ mozc_cc_library(
     ],
 )
 
-# 입력기에 링크할 정적 라이브러리 하나(Mozc와 의존성 전부).
-cc_static_library(
-    name = "cssgsg_mozc_static",
+# 입력기가 실행 중에 읽는 엔진(앱에 든 것, 또는 입력기가 받은 더 새것: .github/workflows/mozc-component.yml).
+# C API만 내보내서 Mozc와 그 의존성이 프로세스의 다른 것과 부딪치지 않는다(NRIME와 같다).
+mozc_cc_binary(
+    name = "libcssgsg_mozc.dylib",
+    linkopts = [
+        "-Wl,-install_name,@rpath/libcssgsg_mozc.dylib",
+        "-Wl,-dead_strip",
+        "-Wl,-exported_symbol,_cssgsg_mozc_abi_version",
+        "-Wl,-exported_symbol,_cssgsg_mozc_version",
+        "-Wl,-exported_symbol,_cssgsg_mozc_new",
+        "-Wl,-exported_symbol,_cssgsg_mozc_free",
+        "-Wl,-exported_symbol,_cssgsg_mozc_start",
+        "-Wl,-exported_symbol,_cssgsg_mozc_command",
+        "-Wl,-exported_symbol,_cssgsg_mozc_commit",
+        "-Wl,-exported_symbol,_cssgsg_mozc_cancel",
+        "-Wl,-exported_symbol,_cssgsg_mozc_set_learning",
+        "-Wl,-exported_symbol,_cssgsg_mozc_reload",
+    ],
+    linkshared = True,
     deps = [":cssgsg_mozc"],
 )
 

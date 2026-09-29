@@ -6,46 +6,7 @@
 //   메뉴 항목뿐이었다. 설정 앱에서는 릴리스 노트와 진행을 제대로 보인다.
 // - 같은 버전 재업로드 감지는 뺐다. 릴리스 스크립트가 이미 있는 태그를 거부하므로 버전은 늘 올라간다.
 import AppKit
-import CryptoKit
 import Foundation
-
-struct GitHubRelease: Codable {
-    let tagName: String
-    let body: String?
-    let htmlURL: String?
-    let draft: Bool?
-    let prerelease: Bool?
-    let assets: [GitHubAsset]
-
-    enum CodingKeys: String, CodingKey {
-        case tagName = "tag_name"
-        case body
-        case htmlURL = "html_url"
-        case draft
-        case prerelease
-        case assets
-    }
-
-    /// 태그 앞의 v를 뗀 버전(예: "0.1.1").
-    var version: String { tagName.hasPrefix("v") ? String(tagName.dropFirst()) : tagName }
-
-    var pkgAsset: GitHubAsset? { assets.first { $0.name.hasSuffix(".pkg") } }
-}
-
-struct GitHubAsset: Codable {
-    let name: String
-    let size: Int
-    let browserDownloadURL: String
-    /// GitHub가 계산한 내용 해시("sha256:<hex>"). pkg는 관리자 권한으로 설치하므로 받은 파일을 이것과 대조한다.
-    let digest: String?
-
-    enum CodingKeys: String, CodingKey {
-        case name
-        case size
-        case browserDownloadURL = "browser_download_url"
-        case digest
-    }
-}
 
 enum UpdateChannel: String, CaseIterable, Identifiable {
     case stable, beta
@@ -63,7 +24,8 @@ enum UpdateChannel: String, CaseIterable, Identifiable {
     var url: URL {
         switch self {
         case .stable: return URL(string: "https://api.github.com/repos/NR2BJ/cssgsg/releases/latest")!
-        case .beta: return URL(string: "https://api.github.com/repos/NR2BJ/cssgsg/releases?per_page=20")!
+        // 목록에는 Mozc 엔진 릴리스(mozc-…, pkg 없음)도 섞여 있어서 넉넉히 받는다.
+        case .beta: return URL(string: "https://api.github.com/repos/NR2BJ/cssgsg/releases?per_page=100")!
         }
     }
 }
@@ -138,20 +100,6 @@ enum UpdateLogic {
         String(String.UnicodeScalarView(version.unicodeScalars.filter {
             $0.isASCII && (CharacterSet.alphanumerics.contains($0) || $0 == "." || $0 == "-")
         }))
-    }
-
-    /// 파일의 SHA-256을 GitHub 해시("sha256:<hex>")와 비교한다. 해시가 없으면 nil, 읽지 못하면 false.
-    static func fileMatchesDigest(at url: URL, expected: String?) -> Bool? {
-        guard let expected, expected.lowercased().hasPrefix("sha256:") else { return nil }
-        let expectedHex = String(expected.dropFirst("sha256:".count)).lowercased()
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
-        defer { try? handle.close() }
-        var hasher = SHA256()
-        while let chunk = try? handle.read(upToCount: 1 << 20), !chunk.isEmpty {
-            hasher.update(data: chunk)
-        }
-        let actualHex = hasher.finalize().map { String(format: "%02x", $0) }.joined()
-        return actualHex == expectedHex
     }
 }
 
@@ -336,7 +284,7 @@ final class Updater: NSObject, ObservableObject, URLSessionDownloadDelegate {
             return
         }
         // 관리자 권한으로 설치할 파일이다. 해시가 없거나 다르면 설치하지 않는다.
-        guard UpdateLogic.fileMatchesDigest(at: destination, expected: release.pkgAsset?.digest) == true else {
+        guard GitHub.fileMatchesDigest(at: destination, expected: release.pkgAsset?.digest) == true else {
             try? FileManager.default.removeItem(at: destination)
             state = .failed(tr("받은 파일의 해시가 맞지 않습니다", "The download’s checksum doesn’t match",
                                "ダウンロードのハッシュが一致しません"))

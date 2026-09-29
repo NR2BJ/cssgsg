@@ -67,24 +67,12 @@ enum TextInputGeometry {
     static func caretRect(for client: (any IMKTextInput)?) -> CaretResult? {
         guard let client else { return rememberedResult(for: nil) }
 
-        // 1. Accessibility API — most accurate, works across all apps including Electron.
-        //    Only called on mode switch (not per-keystroke), so 10ms overhead is acceptable.
-        if let axRect = accessibilityCaretRect(), isUsableRect(axRect) {
-            let result = CaretResult(rect: axRect, source: .accessibility)
-            if axRect.origin.x > 1 {
-                rememberGoodResult(result, for: client)
-            }
-            DeveloperLogger.shared.log("Geometry", "AX success", metadata: [
-                "rect": String(format: "(%.0f,%.0f,%.0f,%.0f)", axRect.origin.x, axRect.origin.y, axRect.width, axRect.height),
-                "cached": axRect.origin.x > 1 ? "yes" : "no(x<=1)"
-            ])
-            return result
-        }
+        // cssgsg(NRIME 1.0.12와 같다): 앱의 답이 먼저, 손쉬운 사용(AX)은 마지막이다.
+        // AX를 먼저 보면서 애플이 아닌 앱마다 AXEnhancedUserInterface를 켰는데, Chromium·Electron·Firefox는 그것을
+        // "화면 읽기 프로그램이 돈다"로 알아듣고 그 뒤로 내내 접근성 트리를 전부 만든다(CPU와 타자 지연).
+        // 권한이 없던 동안은 AX가 늘 실패해서 실제로는 앱의 답이 이 일을 해 왔다. 그 순서를 그대로 둔다.
 
-        // AX failed — try attributes at caret index (fcitx5-macos approach)
-        DeveloperLogger.shared.log("Geometry", "AX failed, trying attributesAtCaret")
-
-        // 2. attributes at caret index — works during composition in Firefox/native apps
+        // 1. attributes at caret index — works during composition in Firefox/native apps
         if let index = caretIndex(for: client) {
             var lineHeightRect = NSRect.zero
             client.attributes(forCharacterIndex: index, lineHeightRectangle: &lineHeightRect)
@@ -103,7 +91,7 @@ enum TextInputGeometry {
             ])
         }
 
-        // 3. attributes at index 0 — simple fallback (Squirrel's approach).
+        // 2. attributes at index 0 — simple fallback (Squirrel's approach).
         var zeroRect = NSRect.zero
         client.attributes(forCharacterIndex: 0, lineHeightRectangle: &zeroRect)
         let zeroOnScreen = NSScreen.screens.contains { $0.frame.intersects(zeroRect.insetBy(dx: -50, dy: -50)) }
@@ -112,6 +100,19 @@ enum TextInputGeometry {
                 "rect": String(format: "(%.0f,%.0f,%.0f,%.0f)", zeroRect.origin.x, zeroRect.origin.y, zeroRect.width, zeroRect.height)
             ])
             return CaretResult(rect: zeroRect, source: .attributesAtZero)
+        }
+
+        // 3. Accessibility — only when the client could not say where its caret is.
+        if let axRect = accessibilityCaretRect(), isUsableRect(axRect) {
+            let result = CaretResult(rect: axRect, source: .accessibility)
+            if axRect.origin.x > 1 {
+                rememberGoodResult(result, for: client)
+            }
+            DeveloperLogger.shared.log("Geometry", "AX success", metadata: [
+                "rect": String(format: "(%.0f,%.0f,%.0f,%.0f)", axRect.origin.x, axRect.origin.y, axRect.width, axRect.height),
+                "cached": axRect.origin.x > 1 ? "yes" : "no(x<=1)"
+            ])
+            return result
         }
 
         DeveloperLogger.shared.log("Geometry", "All methods failed", metadata: [
@@ -210,7 +211,7 @@ enum TextInputGeometry {
     /// Uses PID-direct access with 10ms timeout.
     /// Applies Input Source Pro's techniques:
     ///   - length:1 to work around macOS zero-length kAXBoundsForRange bug
-    ///   - AXEnhancedUserInterface for Electron/Chromium apps
+    ///   - (cssgsg: never sets AXEnhancedUserInterface — it keeps Chromium/Electron/Firefox in full accessibility mode)
     /// Public wrapper for InlineIndicator's direct AX access.
     static func accessibilityCaretRectPublic() -> NSRect? {
         accessibilityCaretRect()
@@ -222,11 +223,7 @@ enum TextInputGeometry {
 
         let appElement = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(appElement, 0.01) // 10ms — fast timeout, preCommitCapture handles composition
-
-        // Activate AX on Electron/Chromium apps (they hide their AX tree by default)
-        if let bundleId = frontApp.bundleIdentifier, !bundleId.hasPrefix("com.apple.") {
-            AXUIElementSetAttributeValue(appElement, "AXEnhancedUserInterface" as CFString, true as CFTypeRef)
-        }
+        // cssgsg: AXEnhancedUserInterface는 켜지 않는다(위 caretRect 설명). 켜진 트리가 없는 앱에서는 그냥 실패한다.
 
         var focusedElementValue: AnyObject?
         guard AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedElementValue) == .success else {

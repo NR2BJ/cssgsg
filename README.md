@@ -21,11 +21,13 @@
   - [x] 배포: pkg + GitHub 릴리스 + 설정 앱 정보 탭의 업데이트(정식·베타 채널, NRIME 방식). 자체 서명 인증서로 서명해서 업데이트해도 권한이 남는다
   - [~] M2b: 모드 HUD(커서 근처 G/ㅊ/月, 설정 `[mac]`) 완료. 입력 소스 복구, 비밀번호 칸 Graphite(나중에)
   - [x] M2c: 설정 앱(0.4.0, 0.5.0에서 다시 짬). 메뉴 막대 cssgsg → "설정…"(메뉴는 설정·다시 시작·종료뿐). 화면 언어 한국어·English·日本語
-    - 일반: 단축키 녹화(영어 ↔ 비영어, 한 ↔ 일, 한자), 탭 인식 시간, 후보 글자 크기, HUD, 조합 중 Shift+Enter 줄바꿈 대기 조정
-    - 한국어: 배열, 한자 기억. 일본어: 변환 키(Space·Tab), 기호(구두점·공백 전각/반각·・·¥), 가타카나, 개인 사전(Mozc), 변환 단축키 설명서
-    - 배열 학습(배열마다 따로), 정보(버전, 입력 소스·키 보내기 권한, 업데이트, 화면 언어, 파일)
+    - 일반: 단축키 녹화(영어 ↔ 비영어, 한 ↔ 일, 한자), 탭 인식 시간, 후보 글자 크기, HUD
+    - 한국어: 배열, 한자 기억. 일본어: 변환 키(Space·Tab), 기호(구두점·공백 전각/반각·・·¥), 가타카나, 개인 사전(Mozc),
+      변환 엔진(Mozc 버전·업데이트), 변환 단축키 설명서
+    - 배열 학습(배열마다 따로), 정보(버전, 입력 소스, 입력기 권한, 업데이트, 화면 언어, 파일)
     - 바꾸면 입력기가 바로 다시 읽는다(다시 시작 없음). 원본은 늘 `config.toml`이고 직접 고쳐도 된다
-- [x] 일본어 한자 변환: Mozc를 입력기 프로세스 안에 정적 링크(0.2.0, [mozc/README.md](mozc/README.md))
+- [x] 일본어 한자 변환: Mozc를 입력기 프로세스 안에서 쓴다(0.2.0, [mozc/README.md](mozc/README.md)).
+  0.6.0부터 엔진은 실행 중에 읽는 dylib이고, 입력기와 따로 업데이트된다(아래 "Mozc 엔진 업데이트")
 - [x] 한국어 한자 변환(0.3.1, 왼쪽 Option+Return(설정에서 바꾼다), [CONCEPT.md](CONCEPT.md) §5.4): 조합 중인 글자 하나를 libhangul 사전으로 바꾼다.
   후보창에 뜻(國 나라 국)을 같이 보이고, 자음 하나 + Option+Return은 기호표(ㅁ → ※☆★…). 고른 후보를 기억한다
 - [ ] Windows TSF (나중)
@@ -40,9 +42,11 @@ cli/        cssgsg-cli: 터미널에서 쳐보는 도구
 config-ffi/ 설정 앱용 C ABI: config.toml ↔ JSON(코어 Config를 그대로 쓴다. 설정 앱은 입력기 코어 대신 이것만 링크)
 mac/        macOS 입력기(cssgsg/, Swift + InputMethodKit)와 설정 앱(Settings/, SwiftUI), 둘이 같이 쓰는 Shared/.
             project.yml → xcodegen → cssgsg.xcodeproj(생성물, 커밋 안 함)
-mozc/       Mozc C API 래퍼(cssgsg용). 소스·빌드는 build/mozc, build/mozc-out(tools/mozc/build.sh)
+mozc/       Mozc C API 래퍼(cssgsg용, libcssgsg_mozc.dylib). 소스·빌드는 build/mozc, build/mozc-out(tools/mozc/build.sh)
+.github/    Mozc 엔진 워크플로(mozc-component.yml): upstream Mozc가 바뀌면 GitHub에서 엔진을 빌드해 낸다
 tools/      ffi-smoke(C 헤더 확인), ohi-oracle(오이 차분 비교), crosscheck(배열 데이터 교차 검증),
-            mac(pkg·릴리스·서명 스크립트, 셸·업데이트·설정 앱 스모크 테스트), learn(학습 페이지 빌드)
+            mac(pkg·릴리스·서명 스크립트, 셸·업데이트·설정 앱·Mozc 엔진 스모크 테스트), mozc(엔진 빌드·묶기),
+            learn(학습 페이지 빌드)
 docs/       verification.md(검증 현황), mac-checklist.md(설치 뒤 확인 목록), releases/(릴리스 노트)
 learn/      배열 학습 페이지(설정 앱 학습 탭). template.html → tools/learn/build.mjs → index.html
 ```
@@ -78,8 +82,23 @@ curl -fL -o /tmp/cssgsg.pkg https://github.com/NR2BJ/cssgsg/releases/latest/down
 - 브라우저로 받은 pkg는 서명이 없어서 Gatekeeper가 막는다. 그때는 시스템 설정 → 개인정보 보호 및 보안에서 "그래도 열기"를 누른다(위 명령은 해당 없음).
 - 업데이트: 메뉴 막대 cssgsg → 설정… → 정보 탭. 정식·베타 채널을 고르고(베타는 시험판도 받는다), 탭을 열 때마다 저절로 확인한다.
   관리자 암호를 한 번 묻고, 끝나면 입력기와 설정 앱이 다시 뜬다. 로그아웃은 필요 없다. (0.4.0까지는 메뉴 막대 메뉴의 "업데이트 확인")
-- 처음 실행 때 한 번 "손쉬운 사용"(키 이벤트 보내기) 권한을 물어본다. 없어도 입력은 되고, 조합 중 ⌘/Option+키 재전송과 Codex 줄바꿈만 빠진다.
-  릴리스는 고정 인증서로 서명하므로 업데이트해도 권한이 남는다. 권한 상태와 허용 단추는 설정 앱 정보 탭에 있다.
+- 입력기 권한: 시스템 설정 → 개인정보 보호 및 보안 → 손쉬운 사용(macOS 27: 기기 제어 및 데이터 접근)에서 cssgsg를 켠다.
+  없어도 입력은 되고, 조합을 확정한 뒤 ⌘+키 재전송과 Codex 줄바꿈만 빠진다. 입력기는 스스로 묻지 않는다(0.6.0부터).
+  설정 앱 정보 탭 "입력기 권한"에 입력기가 마지막으로 확인한 상태와 "다시 확인 / 권한 요청"·"시스템 설정 열기" 단추가 있다.
+  릴리스는 고정 인증서로 서명하므로 업데이트해도 권한이 남는다. 켜져 있는데도 꺼짐으로 보이면 목록에서 지우고(−) 다시 추가한다.
+
+#### Mozc 엔진 업데이트
+
+Mozc(일본어 한자 변환 엔진)는 cssgsg와 따로 업데이트된다(0.6.0, NRIME 1.0.12와 같다).
+
+- `.github/workflows/mozc-component.yml`이 매주 월요일 upstream Mozc를 보고, 버전이나 사전 데이터가 바뀌었으면 GitHub 컴퓨터에서 엔진을
+  빌드하고 시험한 뒤 `mozc-<C API 판>-<yyyymmdd>-<커밋 7자리>` 태그의 prerelease로 `cssgsg-mozc.zip`을 낸다(손으로도 돌린다).
+  앱 업데이트는 이 릴리스를 보지 않는다(pkg가 없다).
+- 입력기는 뜨고 5분 뒤, 그다음은 하루 한 번 GitHub 릴리스 목록을 확인한다(보내는 것은 목록 요청뿐). 더 새 엔진이 있으면 받아서
+  GitHub가 적은 SHA-256과 묶음 안 파일별 해시를 확인하고 `~/Library/Application Support/cssgsg/mozc-engines/<커밋>/`에 둔다.
+  다음에 입력기가 뜰 때부터 쓴다. 설정 앱 → 일본어 → 변환 엔진에서 지금 확인하고 지금 적용할 수 있다.
+- 받은 엔진이 읽히지 않거나, 읽다가 입력기가 죽거나, 10분 안에 깨끗이 끝나지 않은 시작이 세 번이면 그 엔진은 다시 쓰지 않고
+  앱에 든 엔진을 쓴다. 학습과 개인 사전(`~/Library/Application Support/cssgsg/mozc/`)은 엔진이 바뀌어도 그대로다.
 
 문제를 재현하려면 개발자 기록을 켠다(키 코드·수식키·시각만 남고 글자 내용은 남지 않는다).
 
@@ -122,6 +141,7 @@ bash tools/mac/shell-smoke/run.sh                  # 맥 셸 Swift 계층(진짜
 bash tools/mac/update-smoke/run.sh                 # 업데이트 코드: 버전 순서, 채널(정식·베타), GitHub 응답, 해시, 설치 스크립트
 bash tools/mac/settings-smoke/run.sh               # 설정 앱: 단축키 녹화(가짜 키 이벤트, 좌우), 화면 글자, 사전 읽기 정리 (--shots: 화면 스냅숏)
 cargo test -p cssgsg-core --features mozc --test mozc   # 일본어 한자 변환(Mozc, 먼저 bash tools/mozc/build.sh)
+bash tools/mac/mozc-smoke/run.sh                   # Mozc 엔진: 고르기·지키기·업데이트 확인·설치, 엔진 묶음을 받아 읽기
 ```
 
 학습 페이지를 고쳤으면 `node tools/learn/build.mjs`로 `learn/index.html`을 다시 만든다.

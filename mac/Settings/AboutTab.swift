@@ -39,40 +39,16 @@ struct AboutTab: View {
                         }
                     }
                 }
-                LabeledContent(Self.permissionName) {
-                    switch model.postEventAllowed {
-                    case true?:
-                        Label(tr("허용됨", "Allowed", "許可済み"), systemImage: "checkmark.circle.fill").foregroundStyle(.green)
-                    case false?:
-                        HStack {
-                            Text(tr("꺼짐", "Off", "オフ")).foregroundStyle(.orange)
-                            Button(tr("권한 요청…", "Request…", "許可を要求…")) { model.requestPostEventAccess() }
-                        }
-                    case nil where model.imeRunning:
-                        Text(tr("아직 확인 안 됨", "Not checked yet", "未確認")).foregroundStyle(.secondary)
-                    case nil:
-                        Text(tr("알 수 없음 (입력기가 실행 중이 아님)", "Unknown (input method not running)", "不明（入力メソッドが起動していません）"))
-                            .foregroundStyle(.secondary)
-                    }
-                }
                 Link("GitHub: NR2BJ/cssgsg", destination: URL(string: "https://github.com/NR2BJ/cssgsg")!)
             } header: {
                 Text("cssgsg")
             } footer: {
-                Text(tr("""
-                    입력 소스는 시스템 설정 → 키보드 → 입력 소스 편집… → + → 영어 → cssgsg에서 추가합니다.
-                    조합을 확정한 뒤 ⌘+키나 Codex의 Shift+Enter를 앱에 다시 보내려면 권한이 필요합니다. "꺼짐"이면 \
-                    시스템 설정 → 개인정보 보호 및 보안 → \(Self.permissionName)에서 cssgsg를 켜세요.
-                    """, """
-                    Add the input source in System Settings → Keyboard → Input Sources → Edit… → + → English → cssgsg.
-                    Permission is needed to re-send ⌘+key or Codex Shift+Enter to the app after committing. If it shows Off, turn on \
-                    cssgsg in System Settings → Privacy & Security → \(Self.permissionName).
-                    """, """
-                    入力ソースは システム設定 → キーボード → 入力ソースを編集… → + → 英語 → cssgsg で追加します。
-                    確定後に ⌘+キーや Codex の Shift+Enter をアプリへ送り直すには許可が必要です。「オフ」の場合は、\
-                    システム設定 → プライバシーとセキュリティ → \(Self.permissionName) で cssgsg をオンにしてください。
-                    """))
+                Text(tr("입력 소스는 시스템 설정 → 키보드 → 입력 소스 편집… → + → 영어 → cssgsg에서 추가합니다.",
+                        "Add the input source in System Settings → Keyboard → Input Sources → Edit… → + → English → cssgsg.",
+                        "入力ソースは システム設定 → キーボード → 入力ソースを編集… → + → 英語 → cssgsg で追加します。"))
             }
+
+            PermissionSection(model: model, name: Self.permissionName)
 
             UpdateSection(updater: updater)
 
@@ -114,6 +90,62 @@ struct AboutTab: View {
         .onAppear {
             model.refreshIMEStatus()
             updater.checkIfDue()
+        }
+    }
+}
+
+/// 입력기 권한(NRIME와 같다). 입력기가 자기 권한을 확인해 적어 둔 것을 보이고, 다시 확인하거나 청하게 한다.
+/// 권한이 풀리면 macOS는 cssgsg를 허용됨으로 둔 채 보낸 키를 소리 없이 버린다. 그래서 입력기가 본 대로 보인다.
+struct PermissionSection: View {
+    @ObservedObject var model: SettingsModel
+    let name: String
+
+    var body: some View {
+        Section {
+            LabeledContent(name) {
+                switch model.permission?.granted {
+                case true?:
+                    Label(tr("허용됨", "Allowed", "許可済み"), systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                case false?:
+                    Label(tr("꺼짐", "Off", "オフ"), systemImage: "exclamationmark.circle.fill").foregroundStyle(.orange)
+                case nil where model.imeRunning:
+                    Text(tr("아직 확인 안 됨", "Not checked yet", "未確認")).foregroundStyle(.secondary)
+                case nil:
+                    Text(tr("알 수 없음 (입력기가 실행 중이 아님)", "Unknown (input method not running)",
+                            "不明（入力メソッドが起動していません）"))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            HStack {
+                if let checked = model.permission?.checkedAt {
+                    Text(tr("입력기가 마지막으로 확인한 시각: ", "Last checked by the input method: ", "入力メソッドの最終確認: ")
+                         + checked.formatted(date: .abbreviated, time: .shortened))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button(tr("다시 확인 / 권한 요청", "Check Again / Request", "再確認 / 許可を要求")) { model.recheckPermission() }
+                    .disabled(!model.imeRunning)
+                Button(tr("시스템 설정 열기", "Open System Settings", "システム設定を開く")) { model.openPermissionSettings() }
+            }
+        } header: {
+            Text(tr("입력기 권한", "Input Method Permission", "入力メソッドの許可"))
+        } footer: {
+            Text(tr("""
+                조합을 확정한 뒤 ⌘+키나 Codex의 Shift+Enter를 앱에 다시 보내려면 필요합니다. "꺼짐"이면 시스템 설정 → \
+                개인정보 보호 및 보안 → \(name)에서 cssgsg를 켜세요. 목록에 없으면 "다시 확인 / 권한 요청"을 누르거나 \
+                + 단추로 /Library/Input Methods/cssgsg.app을 추가하세요. 켜져 있는데도 "꺼짐"이면 목록에서 지운 뒤(−) 다시 추가하세요.
+                """, """
+                Needed to re-send ⌘+key or Codex Shift+Enter to the app after committing. If it shows Off, turn on cssgsg in \
+                System Settings → Privacy & Security → \(name). If cssgsg isn’t listed, press Check Again / Request, or add \
+                /Library/Input Methods/cssgsg.app with the + button. If it’s on but still shows Off, remove it from the list (−) \
+                and add it again.
+                """, """
+                確定後に ⌘+キーや Codex の Shift+Enter をアプリへ送り直すために必要です。「オフ」の場合は、システム設定 → \
+                プライバシーとセキュリティ → \(name) で cssgsg をオンにしてください。一覧にない場合は「再確認 / 許可を要求」を\
+                押すか、+ ボタンで /Library/Input Methods/cssgsg.app を追加してください。オンなのに「オフ」と表示される場合は、\
+                一覧から削除（−）してから追加し直してください。
+                """))
         }
     }
 }

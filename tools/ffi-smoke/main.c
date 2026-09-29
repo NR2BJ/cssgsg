@@ -53,24 +53,18 @@ int main(void) {
 
     /* 맥 셸 설정: 기본값과 [mac] 표 */
     CssgsgMacSettings m = cssgsg_engine_mac_settings(e);
-    CHECK(m.hud == 1 && m.hud_at_mouse == 0 && m.newline_replay_ms == 120);
-    CHECK(m.candidate_font_size == 14 && m.shift_enter_delay_ms == 15);
+    CHECK(m.hud == 1 && m.hud_at_mouse == 0 && m.candidate_font_size == 14);
     m = cssgsg_engine_mac_settings(NULL);
-    CHECK(m.hud == 1 && m.newline_replay_ms == 120 && m.candidate_font_size == 14 && m.shift_enter_delay_ms == 15);
-    /* 줄바꿈 대기: Electron과 Codex를 따로 적는다 */
-    CssgsgEngine *c = cssgsg_engine_new("[mac]\nhud = false\nhud_position = \"mouse\"\n"
-                                        "candidate_font_size = 18\nshift_enter_delay_ms = 5\nnewline_replay_ms = 80");
+    CHECK(m.hud == 1 && m.hud_at_mouse == 0 && m.candidate_font_size == 14);
+    CssgsgEngine *c = cssgsg_engine_new("[mac]\nhud = false\nhud_position = \"mouse\"\ncandidate_font_size = 18");
     CHECK(c != NULL);
     m = cssgsg_engine_mac_settings(c);
-    CHECK(m.hud == 0 && m.hud_at_mouse == 1 && m.newline_replay_ms == 80);
-    CHECK(m.candidate_font_size == 18 && m.shift_enter_delay_ms == 5);
+    CHECK(m.hud == 0 && m.hud_at_mouse == 1 && m.candidate_font_size == 18);
     cssgsg_engine_free(c);
-    CHECK(cssgsg_engine_new("[mac]\nshift_enter_delay_ms = 101") == NULL);
-    CHECK(cssgsg_engine_new("[mac]\nnewline_replay_ms = 5") == NULL);
-    /* 0.5.1~0.5.3 파일의 조정값(15ms에 더하던 것)은 대기 시간으로 옮긴다 */
-    c = cssgsg_engine_new("[mac]\nnewline_delay_offset_ms = 10\nnewline_replay_ms = 150");
-    CHECK(c != NULL && cssgsg_engine_mac_settings(c).newline_replay_ms == 150);
-    CHECK(cssgsg_engine_mac_settings(c).shift_enter_delay_ms == 25);
+    CHECK(cssgsg_engine_new("[mac]\ncandidate_font_size = 40") == NULL);
+    /* 0.5.x의 줄바꿈 대기는 읽고 버린다(0.6.0부터 기다리지 않는다) */
+    c = cssgsg_engine_new("[mac]\nshift_enter_delay_ms = 25\nnewline_replay_ms = 150\nnewline_delay_offset_ms = 10");
+    CHECK(c != NULL);
     cssgsg_engine_free(c);
 
     /* 빠른 탭 전환 보정: 오른쪽 Shift를 누른 채 친 글자는 잡아 두고 타이머를 청한다(timer_ms). */

@@ -89,11 +89,8 @@ pub struct CssgsgMacSettings {
     pub hud: u8,
     /// 1이면 HUD를 마우스 옆에, 0이면 커서 위에.
     pub hud_at_mouse: u8,
-    pub newline_replay_ms: u32,
     /// 후보창 글자 크기(포인트).
     pub candidate_font_size: u32,
-    /// 조합 중 Shift+Enter·⌘+키 재전송 전에 기다리는 시간(밀리초).
-    pub shift_enter_delay_ms: u32,
 }
 
 pub struct CssgsgEngine {
@@ -426,35 +423,55 @@ pub unsafe extern "C" fn cssgsg_engine_hanja_learning_save(e: *mut CssgsgEngine)
     e.learning_tsv.as_ptr()
 }
 
-/// Mozc(일본어 한자 변환)를 켠다. 성공하면 1. `mozc` 기능 없이 빌드했거나 데이터를 못 읽으면 0(변환기는 그대로).
+/// 이 코어가 읽을 수 있는 Mozc 엔진 C API 판(mozc/cssgsg/cssgsg_mozc.h의 CSSGSG_MOZC_ABI_VERSION).
+/// `mozc` 기능 없이 빌드했으면 0. 셸은 이 판의 엔진만 받고 읽는다.
+#[unsafe(no_mangle)]
+pub extern "C" fn cssgsg_mozc_abi() -> i32 {
+    #[cfg(feature = "mozc")]
+    {
+        crate::mozc::SUPPORTED_ABI
+    }
+    #[cfg(not(feature = "mozc"))]
+    {
+        0
+    }
+}
+
+/// Mozc(일본어 한자 변환)를 켠다: 엔진 라이브러리를 읽고 만든 뒤 낱말 하나를 변환해 본다. 성공하면 1.
+/// 실패하면 0이고 변환기는 그대로다. 까닭은 `cssgsg_last_error`(`mozc` 기능 없이 빌드했을 때도).
 ///
 /// # Safety
-/// `e`는 `cssgsg_engine_new`가 돌려준 살아 있는 포인터, 두 문자열은 NUL로 끝나야 한다.
+/// `e`는 `cssgsg_engine_new`가 돌려준 살아 있는 포인터, 세 문자열은 NUL로 끝나야 한다.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn cssgsg_engine_use_mozc(
     e: *mut CssgsgEngine,
+    library_path: *const c_char,
     data_path: *const c_char,
     profile_dir: *const c_char,
 ) -> u8 {
     // SAFETY: 위 약속대로 살아 있는 엔진이다.
     let Some(e) = (unsafe { e.as_mut() }) else { return 0 };
-    if data_path.is_null() || profile_dir.is_null() {
+    if library_path.is_null() || data_path.is_null() || profile_dir.is_null() {
         set_error("mozc: 경로가 NULL");
         return 0;
     }
     #[cfg(feature = "mozc")]
     {
         // SAFETY: NUL로 끝나는 문자열이다.
-        let (data, profile) = unsafe {
-            (CStr::from_ptr(data_path).to_string_lossy(), CStr::from_ptr(profile_dir).to_string_lossy())
+        let (library, data, profile) = unsafe {
+            (
+                CStr::from_ptr(library_path).to_string_lossy(),
+                CStr::from_ptr(data_path).to_string_lossy(),
+                CStr::from_ptr(profile_dir).to_string_lossy(),
+            )
         };
-        match crate::mozc::MozcConverter::new(&data, &profile) {
-            Some(converter) => {
+        match crate::mozc::MozcConverter::load(&library, &data, &profile) {
+            Ok(converter) => {
                 e.engine.set_converter(Box::new(converter));
                 1
             }
-            None => {
-                set_error("mozc: 엔진을 만들지 못했다(데이터 경로 확인)");
+            Err(err) => {
+                set_error(&format!("mozc: {err}"));
                 0
             }
         }
@@ -479,9 +496,7 @@ pub unsafe extern "C" fn cssgsg_engine_mac_settings(e: *const CssgsgEngine) -> C
     CssgsgMacSettings {
         hud: mac.hud as u8,
         hud_at_mouse: (mac.hud_position == crate::config::HudPosition::Mouse) as u8,
-        newline_replay_ms: mac.newline_replay_ms,
         candidate_font_size: mac.candidate_font_size,
-        shift_enter_delay_ms: mac.shift_enter_delay_ms,
     }
 }
 
@@ -599,15 +614,10 @@ mod tests {
         unsafe {
             let e = cssgsg_engine_new(ptr::null());
             cssgsg_engine_set_mode(e, 1);
-            let cfg = CString::new("[mac]\nhud = false\nshift_enter_delay_ms = 45\nnewline_replay_ms = 200")
-                .unwrap();
+            let cfg = CString::new("[mac]\nhud = false\ncandidate_font_size = 20").unwrap();
             assert_eq!(cssgsg_engine_set_config(e, cfg.as_ptr()), 1);
             let m = cssgsg_engine_mac_settings(e);
-            assert_eq!(
-                (m.hud, m.shift_enter_delay_ms, m.newline_replay_ms),
-                (0, 45, 200),
-                "Electron·Codex 대기를 따로 적는다"
-            );
+            assert_eq!((m.hud, m.candidate_font_size), (0, 20));
             assert_eq!(cssgsg_engine_mode(e), 1, "모드는 그대로");
             let bad = CString::new("ko_layout = \"nope\"").unwrap();
             assert_eq!(cssgsg_engine_set_config(e, bad.as_ptr()), 0);

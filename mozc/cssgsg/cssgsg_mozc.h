@@ -1,4 +1,6 @@
 /* cssgsg용 Mozc C API. 입력기 프로세스 안에서 Mozc 엔진(SessionHandler)을 직접 쓴다(mozc_server 없음).
+ * libcssgsg_mozc.dylib로 빌드해 실행 중에 읽는다(dlopen). 그래서 입력기를 새로 내지 않아도 더 새 Mozc로
+ * 바꿀 수 있다(GitHub 워크플로가 빌드하고 입력기가 받아 쓴다, NRIME 1.0.12와 같다).
  *
  * 흐름: 코어가 가진 가나 읽기를 한 글자씩 key_string으로 넣고(가나 직접 입력과 같은 경로) Space로 변환한다.
  * 문절 이동·길이는 MSIME 키맵의 ←→ / Shift+←→, 후보 선택은 SELECT_CANDIDATE, 확정은 SUBMIT(이때 Mozc가 학습한다).
@@ -17,6 +19,12 @@ extern "C" {
 #endif
 
 typedef struct CssgsgMozc CssgsgMozc;
+
+/* 이 C API의 판. 입력기는 아는 판의 라이브러리만 읽는다. 아래 함수가 바뀌면 올린다. */
+#define CSSGSG_MOZC_ABI_VERSION 1
+int32_t cssgsg_mozc_abi_version(void);
+/* Mozc 버전(예: "3.34.6239.101"). */
+const char *cssgsg_mozc_version(void);
 
 enum {
   CSSGSG_MOZC_NEXT = 0,

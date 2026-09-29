@@ -35,10 +35,23 @@ targets:
       - path: ../THIRD_PARTY_NOTICES.txt
         buildPhase: resources
         type: file
-      # Mozc 사전 데이터(tools/mozc/build.sh가 만든다)
+      # Mozc 엔진(실행 중에 읽는다)과 같이 빌드한 사전 데이터, 그 판("<커밋> <커밋 날짜> <버전>").
+      # tools/mozc/build.sh가 만든다(build-core.sh가 없으면 먼저 부른다). 입력기가 받은 더 새 엔진이 있으면 그것을 쓴다.
+      # optional: 막 받은 저장소에는 아직 없다(프로젝트를 만든 뒤 빌드 전에 생긴다).
+      - path: ../build/mozc-out/lib/libcssgsg_mozc.dylib
+        buildPhase:
+          copyFiles:
+            destination: frameworks
+        type: file
+        optional: true
       - path: ../build/mozc-out/data/mozc.data
         buildPhase: resources
         type: file
+        optional: true
+      - path: ../build/mozc-out/MOZC_VERSION
+        buildPhase: resources
+        type: file
+        optional: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.cssgsg.inputmethod.app
@@ -47,8 +60,8 @@ targets:
         SWIFT_OBJC_BRIDGING_HEADER: cssgsg/cssgsg-Bridging-Header.h
         HEADER_SEARCH_PATHS: $(SRCROOT)/../core/include
         LIBRARY_SEARCH_PATHS: $(SRCROOT)/../build/cargo/release
-        # 코어(libcssgsg_core.a)에 Mozc(C++)가 묶여 있다
-        OTHER_LDFLAGS: -lcssgsg_core -lc++
+        # 코어. Mozc는 링크하지 않는다(엔진 dylib를 실행 중에 읽는다)
+        OTHER_LDFLAGS: -lcssgsg_core
         COMBINE_HIDPI_IMAGES: true
         # 입력기는 서명 없이(ad-hoc) 쓴다
         CODE_SIGN_IDENTITY: "-"

@@ -146,10 +146,7 @@ mod tests {
         assert!(json.contains(r#""ko_layout":"chamshin-v18""#), "{json}");
         assert!(json.contains(r#""toggle_english":"tap:shift_right""#), "{json}");
         assert!(json.contains(r#""hanja":"alt_left+enter""#), "{json}");
-        assert!(
-            json.contains(r#""shift_enter_delay_ms":15"#) && json.contains(r#""newline_replay_ms":120"#),
-            "{json}"
-        );
+        assert!(json.contains(r#""candidate_font_size":14"#) && !json.contains("delay"), "{json}");
         assert!(!json.contains("taps"), "옛 탭 표는 JSON에 내보내지 않는다");
         // 기본 설정 파일은 모두 주석이고, 다시 읽으면 같은 JSON이다.
         let text = toml_from_json(&json).unwrap();
@@ -185,9 +182,9 @@ mod tests {
         assert!(json_from_toml(Some("ko_layout = \"qwerty\"")).unwrap_err().contains("qwerty"));
         assert!(toml_from_json("{").is_err());
         assert!(
-            toml_from_json(r#"{"mac":{"shift_enter_delay_ms":200}}"#)
+            toml_from_json(r#"{"mac":{"candidate_font_size":40}}"#)
                 .unwrap_err()
-                .contains("shift_enter_delay_ms")
+                .contains("candidate_font_size")
         );
         assert!(toml_from_json(r#"{"shortcuts":{"hanja":"meta_left+enter"}}"#).unwrap_err().contains("⌘"));
         assert!(toml_from_json(r#"{"surprise":1}"#).is_err(), "모르는 키");

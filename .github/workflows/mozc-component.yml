@@ -1,0 +1,79 @@
+# 입력기가 스스로 받아 쓰는 Mozc 엔진(MozcUpdater)을 빌드해 낸다. 그래서 cssgsg를 새로 내지 않아도, 누구의 맥도 없이
+# Mozc가 올라간다: 매주 월요일, 그리고 손으로 돌릴 때. NRIME의 같은 워크플로를 옮겼다.
+#
+# upstream Mozc의 버전이나 사전 데이터가 가장 최근에 낸 엔진 뒤로 바뀌었으면(tools/mozc/component-needed.sh) 빌드하고,
+# 코어의 Mozc 시험과 입력기의 엔진 코드 시험(tools/mac/mozc-smoke)을 통과하면 mozc-<판>-<yyyymmdd>-<커밋 7자리>
+# 태그의 prerelease로 cssgsg-mozc.zip을 낸다. 앱 업데이트는 이 릴리스를 보지 않는다(pkg가 없다).
+name: Mozc component
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Mozc의 버전과 데이터가 그대로여도 빌드한다
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mozc-component
+  cancel-in-progress: false
+
+jobs:
+  component:
+    runs-on: macos-15
+    timeout-minutes: 180
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Decide
+        id: decide
+        run: bash tools/mozc/component-needed.sh "${{ inputs.force || false }}" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Restore Bazel caches
+        if: steps.decide.outputs.build == 'true'
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/cssgsg-bazel-disk
+            ~/Library/Caches/bazel/_bazel_runner/cache/repos
+          key: mozc-bazel-${{ steps.decide.outputs.commit }}
+          restore-keys: mozc-bazel-
+
+      - name: Build
+        if: steps.decide.outputs.build == 'true'
+        env:
+          MOZC_COMMIT: ${{ steps.decide.outputs.commit }}
+        run: |
+          command -v bazelisk >/dev/null || brew install bazelisk
+          # 컴파일한 것이 실행 사이에 남아서, 새 Mozc는 바뀐 것만 다시 빌드한다.
+          export MOZC_BAZEL_FLAGS="--disk_cache=$HOME/.cache/cssgsg-bazel-disk"
+          bash tools/mozc/build.sh
+          bash tools/mozc/package-component.sh
+
+      - name: Test with cssgsg
+        if: steps.decide.outputs.build == 'true'
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+          cargo test -q -p cssgsg-core --features mozc --test mozc
+          bash tools/mac/mozc-smoke/run.sh
+
+      - name: Publish
+        if: steps.decide.outputs.build == 'true'
+        run: |
+          TAG="$(cat build/mozc-component/TAG)"
+          TITLE="$(cat build/mozc-component/TITLE)"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "$TAG is already published"
+            exit 0
+          fi
+          gh release create "$TAG" build/mozc-component/cssgsg-mozc.zip \
+            --prerelease --target "$GITHUB_SHA" --title "$TITLE" \
+            --notes "Mozc engine for cssgsg, built from google/mozc@${{ steps.decide.outputs.commit }} (${{ steps.decide.outputs.reason }}). The input method downloads it by itself and uses it from its next start; this is not an app release. / cssgsg가 스스로 받아 쓰는 Mozc 엔진입니다. 입력기가 다음에 시작될 때부터 쓰며, 앱 릴리스가 아닙니다."

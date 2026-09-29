@@ -3,7 +3,8 @@
 # 담는 것: /Library/Input Methods/cssgsg.app(입력기)과 그 옆의 cssgsgSettings.app(설정 앱, NRIME처럼 따로).
 #
 # NRIME(Tools/build_pkg.sh)에서 겪은 것을 따른다.
-# - 서명은 빌드 때 한다(postinstall에서 하면 권한 창이 뜬다). 안에 든 번들이 없어서 앱 하나만 서명한다(--deep 금지).
+# - 서명은 빌드 때 한다(postinstall에서 하면 권한 창이 뜬다). 안에 든 코드(Mozc 엔진 dylib)를 먼저, 앱을 나중에
+#   서명한다(--deep 금지).
 # - cp -R 대신 ditto(._* 파일이 섞이지 않게).
 # - BundleIsRelocatable=false. 기본값(true)이면 설치기가 디스크 전체에서 옛 번들을 찾다가 Documents 권한 창을 띄운다.
 #
@@ -57,6 +58,10 @@ else
     exit 1
   fi
 fi
+# 안에 든 코드 먼저: 입력기가 실행 중에 읽는 Mozc 엔진.
+ENGINE="$APP/Contents/Frameworks/libcssgsg_mozc.dylib"
+[ -f "$ENGINE" ] || { echo "Mozc 엔진이 앱에 없다: $ENGINE"; exit 1; }
+codesign --force --sign "$SIGN_ID" --timestamp=none "$ENGINE"
 # 두 앱은 서로 안에 들어 있지 않으니 따로 서명한다.
 for bundle in "$APP" "$SETTINGS_APP"; do
   codesign --force --sign "$SIGN_ID" --timestamp=none "$bundle"

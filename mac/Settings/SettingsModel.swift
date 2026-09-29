@@ -37,10 +37,6 @@ struct CssgsgConfig: Codable, Equatable {
         var hud: Bool
         var hudPosition: String
         var candidateFontSize: Int
-        /// Electron 앱: 확정한 뒤 줄바꿈을 넣기까지(밀리초, 5~100). ⌘+키 재전송도 같다.
-        var shiftEnterDelayMs: Int
-        /// Codex류 앱: Shift+Enter를 다시 보내기까지(밀리초, 20~1000, 위와 따로 쓰인다).
-        var newlineReplayMs: Int
     }
 }
 
@@ -92,9 +88,14 @@ final class SettingsModel: ObservableObject {
     @Published private(set) var hanjaLearningCount = 0
     @Published private(set) var inputSourceAdded = false
     @Published private(set) var developerMode = false
-    /// 입력기의 키 보내기(손쉬운 사용) 권한. 모르면 nil(입력기가 떠 있지 않거나 아직 적지 않았다).
-    @Published private(set) var postEventAllowed: Bool?
+    /// 입력기가 마지막으로 확인한 권한(PermissionStatus). 아직 적지 않았으면 nil.
+    @Published private(set) var permission: PermissionStatus?
     @Published private(set) var imeRunning = false
+    /// 입력기가 쓰는 Mozc 엔진과 받아 둔 새 엔진(MozcStatus). 아직 적지 않았으면 nil.
+    @Published private(set) var mozc: MozcStatus?
+    /// "지금 확인"을 누르고 입력기의 답을 기다리는 중.
+    @Published private(set) var mozcChecking = false
+    private var observers: [NSObjectProtocol] = []
 
     static let defaults: CssgsgConfig = {
         guard case let .success(config) = ConfigBridge.parse(nil) else {
@@ -106,6 +107,20 @@ final class SettingsModel: ObservableObject {
     init() {
         config = Self.defaults
         reload()
+        // 입력기가 권한이나 Mozc 상태를 다시 적으면 바로 다시 읽는다.
+        let center = DistributedNotificationCenter.default()
+        observers.append(center.addObserver(forName: PermissionStatus.changedNotification, object: nil, queue: .main) {
+            [weak self] _ in
+            MainActor.assumeIsolated { self?.readPermission() }
+        })
+        observers.append(center.addObserver(forName: MozcStatus.changedNotification, object: nil, queue: .main) {
+            [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.mozcChecking = false
+                self?.readMozcStatus()
+            }
+        })
+        readMozcStatus()
     }
 
     /// 파일과 시스템 상태를 다시 읽는다(창이 앞으로 올 때, 바꾸기 전).
@@ -191,25 +206,25 @@ final class SettingsModel: ObservableObject {
 
     // MARK: - 입력기 상태
 
-    /// 입력기에게 상태(키 보내기 권한)를 다시 적어 달라고 하고, 조금 뒤 읽는다. 입력기가 떠 있지 않으면 nil.
-    /// 그동안은 입력기가 지난번에 적어 둔 값을 보인다.
+    /// 입력기에게 권한을 다시 확인해 적어 달라고 한다(적으면 알림이 온다). 그동안은 지난번 값을 보인다.
     func refreshIMEStatus() {
         imeRunning = !NSRunningApplication.runningApplications(withBundleIdentifier: Cssgsg.imeBundleID).isEmpty
-        guard imeRunning else {
-            postEventAllowed = nil
-            return
-        }
-        postEventAllowed = Cssgsg.imePreference(Cssgsg.postEventAllowedKey) as Bool?
-        Cssgsg.Notice.statusRequest.post()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
-            self?.postEventAllowed = Cssgsg.imePreference(Cssgsg.postEventAllowedKey) as Bool?
-        }
+        readPermission()
+        if imeRunning { Cssgsg.Notice.statusRequest.post() }
     }
 
-    /// 키 보내기 권한: 입력기가 시스템 창을 청하고(처음 한 번만 뜬다), 손쉬운 사용 설정을 연다.
+    private func readPermission() {
+        permission = Cssgsg.imeStatus(PermissionStatus.self, key: PermissionStatus.defaultsKey)
+    }
+
+    /// "다시 확인 / 권한 요청": 입력기가 없는 권한을 청하고(시스템 창) 다시 확인한다.
     /// 권한은 입력기 프로세스가 받아야 해서 설정 앱이 직접 청하지 않는다. 켜는 것은 사용자가 한다.
-    func requestPostEventAccess() {
+    func recheckPermission() {
         Cssgsg.Notice.requestPostEventAccess.post()
+    }
+
+    /// 시스템 설정 → 개인정보 보호 및 보안 → 기기 제어 및 데이터 접근(macOS 26 이하: 손쉬운 사용).
+    func openPermissionSettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
             NSWorkspace.shared.open(url)
         }
@@ -230,12 +245,42 @@ final class SettingsModel: ObservableObject {
     }
 
     /// Mozc가 기억한 변환(문절 나누기, 고른 후보, 전각·반각)을 지우고 입력기를 다시 시작한다.
-    /// 파일은 입력기가 mmap으로 들고 있어서 지운 뒤 끝내면 되살아나지 않는다. 다음 키 입력 때 macOS가 다시 띄운다.
+    /// 파일은 입력기가 mmap으로 들고 있어서 지운 뒤 끝내면 되살아나지 않는다.
     func clearMozcLearning() {
         for name in ["segment.db", "boundary.db", "cform.db", ".history.db"] {
             try? FileManager.default.removeItem(at: Cssgsg.mozcProfileURL.appendingPathComponent(name))
         }
         Cssgsg.Notice.restart.post()
+    }
+
+    // MARK: - Mozc 엔진 (입력기가 따로 업데이트한다, MozcUpdater)
+
+    func readMozcStatus() {
+        mozc = Cssgsg.imeStatus(MozcStatus.self, key: MozcStatus.defaultsKey)
+    }
+
+    /// "지금 확인": 입력기가 확인하고 상태를 다시 적는다(알림이 오면 다시 읽는다). 입력기가 없으면 아무 일도 없다.
+    func checkMozcUpdate() {
+        guard !NSRunningApplication.runningApplications(withBundleIdentifier: Cssgsg.imeBundleID).isEmpty else { return }
+        mozcChecking = true
+        Cssgsg.Notice.mozcCheckForUpdate.post()
+        // 답이 없으면(입력기가 막 끝났다) 기다림 표시만 거둔다.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 60) { [weak self] in self?.mozcChecking = false }
+    }
+
+    /// "지금 적용": 입력기를 다시 띄운다. 뜰 때 받아 둔 새 엔진을 읽는다.
+    func applyMozcUpdate() {
+        Cssgsg.Notice.restart.post()
+    }
+
+    /// 앱에 든 엔진의 판(입력기 옆 cssgsg.app의 MOZC_VERSION, "<커밋> <날짜> <버전>"). 입력기가 아직 적지 않았을 때 보인다.
+    static var bundledMozc: MozcStatus.Build? {
+        let file = Bundle.main.bundleURL.deletingLastPathComponent()
+            .appendingPathComponent("cssgsg.app/Contents/Resources/MOZC_VERSION")
+        guard let line = try? String(contentsOf: file, encoding: .utf8) else { return nil }
+        let parts = line.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard parts.count >= 3 else { return nil }
+        return MozcStatus.Build(version: parts[2], date: parts[1], commit: parts[0])
     }
 
     // MARK: - 개발자 기록 (입력기의 기본값 저장소 developerMode)
