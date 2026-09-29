@@ -70,12 +70,12 @@ enum ShortcutText {
 
     static func actionName(_ path: WritableKeyPath<CssgsgConfig.Shortcuts, String>) -> String {
         if path == \CssgsgConfig.Shortcuts.toggleEnglish {
-            return tr("영어 ↔ 비영어", "English ↔ non-English", "英語 ↔ 英語以外")
+            return tr("영어 ↔ 비영어", "English ↔ Non-English", "英語 ↔ 英語以外")
         }
         if path == \CssgsgConfig.Shortcuts.toggleNonEnglish {
             return tr("한국어 ↔ 일본어", "Korean ↔ Japanese", "韓国語 ↔ 日本語")
         }
-        return tr("한자 변환", "Hanja conversion", "ハンジャ変換（韓国語の漢字）")
+        return tr("한자 변환", "Hanja Conversion", "ハンジャ変換（韓国語の漢字）")
     }
 }
 
@@ -106,7 +106,7 @@ struct ShortcutRow: View {
                             }
                         }
                     } label: {
-                        Text(recorder.active ? tr("키를 누른다… (Esc 취소)", "Press keys… (Esc to cancel)", "キーを押す…（Esc で取消）")
+                        Text(recorder.active ? tr("키를 누르세요… (Esc: 취소)", "Press keys… (Esc: cancel)", "キーを押してください…（Esc：取消）")
                              : ShortcutText.label(value))
                             .frame(minWidth: 180)
                             .foregroundStyle(recorder.active ? Color.accentColor : (value.isEmpty ? Color.secondary : Color.primary))
@@ -119,7 +119,7 @@ struct ShortcutRow: View {
                     }
                     .buttonStyle(.borderless)
                     .foregroundStyle(.secondary)
-                    .help(tr("단축키 없음", "No shortcut", "ショートカットなし"))
+                    .help(tr("단축키 지우기", "Clear shortcut", "ショートカットを消去"))
                     .disabled(value.isEmpty)
                     Button {
                         recorder.stop()
@@ -129,8 +129,8 @@ struct ShortcutRow: View {
                     }
                     .buttonStyle(.borderless)
                     .foregroundStyle(.secondary)
-                    .help(tr("기본값: \(ShortcutText.label(defaultValue))", "Default: \(ShortcutText.label(defaultValue))",
-                             "既定: \(ShortcutText.label(defaultValue))"))
+                    .help(tr("기본값으로 되돌리기: \(ShortcutText.label(defaultValue))", "Reset to default: \(ShortcutText.label(defaultValue))",
+                             "既定に戻す: \(ShortcutText.label(defaultValue))"))
                     .disabled(value == defaultValue)
                 }
                 if let problem {
@@ -203,13 +203,13 @@ final class ShortcutRecording: ObservableObject {
             guard !event.isARepeat, let pointer = cssgsg_config_key_name(event.keyCode) else { return }
             let key = String(cString: pointer)
             if modifiers.isEmpty && (ShortcutText.needsModifier.contains(key) || key.count == 1) {
-                rejected?(tr("\(ShortcutText.keyLabel(key))만으로는 쓸 수 없다(그 키를 칠 수 없게 된다). 수식키와 같이 누른다.",
-                             "\(ShortcutText.keyLabel(key)) alone can’t be a shortcut (you couldn’t type it). Hold a modifier with it.",
-                             "\(ShortcutText.keyLabel(key)) だけではショートカットにできません（その文字が打てなくなります）。修飾キーと一緒に押します。"))
+                rejected?(tr("\(ShortcutText.keyLabel(key))만으로는 단축키를 만들 수 없습니다(그 키를 칠 수 없게 됩니다). 수식키와 함께 누르세요.",
+                             "\(ShortcutText.keyLabel(key)) alone can’t be a shortcut (you couldn’t type it anymore). Hold a modifier with it.",
+                             "\(ShortcutText.keyLabel(key)) だけではショートカットにできません（その文字が打てなくなります）。修飾キーと一緒に押してください。"))
                 return
             }
             if modifiers.contains(where: { $0.hasPrefix("meta") }) {
-                rejected?(tr("⌘ 조합은 쓸 수 없다. Chrome·Discord 같은 앱은 ⌘+키를 입력기에 보내지 않는다. ⌘는 탭으로는 쓸 수 있다.",
+                rejected?(tr("⌘ 조합은 쓸 수 없습니다. Chrome·Discord 같은 앱은 ⌘+키를 입력기에 보내지 않습니다. ⌘ 탭은 쓸 수 있습니다.",
                              "⌘ combinations can’t be used: apps like Chrome and Discord don’t pass ⌘+key to input methods. A ⌘ tap works.",
                              "⌘ の組み合わせは使えません。Chrome や Discord などは ⌘+キーを入力メソッドに渡しません。⌘ のタップは使えます。"))
                 return

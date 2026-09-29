@@ -77,19 +77,22 @@ impl<'a> Reader<'a> {
     fn varint(&mut self) -> Result<u64, String> {
         let mut value = 0u64;
         for shift in (0..64).step_by(7) {
-            let &b = self.buf.get(self.pos).ok_or("사전 파일이 중간에 끊겼다")?;
+            let &b = self.buf.get(self.pos).ok_or("사전 파일이 중간에 끊겼습니다")?;
             self.pos += 1;
             value |= u64::from(b & 0x7F) << shift;
             if b & 0x80 == 0 {
                 return Ok(value);
             }
         }
-        Err("사전 파일의 수가 너무 길다".into())
+        Err("사전 파일의 숫자가 너무 깁니다".into())
     }
 
     fn take(&mut self, n: usize) -> Result<&'a [u8], String> {
-        let end =
-            self.pos.checked_add(n).filter(|&e| e <= self.buf.len()).ok_or("사전 파일이 중간에 끊겼다")?;
+        let end = self
+            .pos
+            .checked_add(n)
+            .filter(|&e| e <= self.buf.len())
+            .ok_or("사전 파일이 중간에 끊겼습니다")?;
         let bytes = &self.buf[self.pos..end];
         self.pos = end;
         Ok(bytes)
@@ -109,14 +112,14 @@ impl<'a> Reader<'a> {
                 Field::Fixed
             }
             2 => {
-                let n = usize::try_from(self.varint()?).map_err(|_| "사전 파일의 길이가 너무 크다")?;
+                let n = usize::try_from(self.varint()?).map_err(|_| "사전 파일의 길이 값이 너무 큽니다")?;
                 Field::Bytes(self.take(n)?)
             }
             5 => {
                 self.take(4)?;
                 Field::Fixed
             }
-            w => return Err(format!("사전 파일에 모르는 형식({w})이 있다")),
+            w => return Err(format!("사전 파일에 알 수 없는 형식({w})이 있습니다")),
         };
         Ok(Some((tag >> 3, field, &self.buf[start..self.pos])))
     }
@@ -142,7 +145,7 @@ fn put_bytes_field(out: &mut Vec<u8>, number: u64, bytes: &[u8]) {
 }
 
 fn text(bytes: &[u8]) -> Result<String, String> {
-    String::from_utf8(bytes.to_vec()).map_err(|_| "사전 파일의 글자가 UTF-8이 아니다".to_string())
+    String::from_utf8(bytes.to_vec()).map_err(|_| "사전 파일의 글자가 UTF-8이 아닙니다".to_string())
 }
 
 // ---------------------------------------------------------------- 풀기·묶기
@@ -245,17 +248,17 @@ impl Entry {
     pub fn validate(&self) -> Result<(), String> {
         for (name, v) in [("읽기", &self.key), ("단어", &self.value), ("메모", &self.comment)] {
             if v.chars().count() > MAX_FIELD_LEN {
-                return Err(format!("{name}가 너무 길다({MAX_FIELD_LEN}자까지)"));
+                return Err(format!("{name}가 너무 깁니다({MAX_FIELD_LEN}자까지)"));
             }
             if v.contains(['\t', '\n', '\r']) {
-                return Err(format!("{name}에 탭이나 줄바꿈이 있다"));
+                return Err(format!("{name}에 탭이나 줄바꿈이 있습니다"));
             }
         }
         if self.key.is_empty() || self.value.is_empty() {
-            return Err("읽기와 단어를 모두 적어야 한다".into());
+            return Err("읽기와 단어를 모두 입력하세요".into());
         }
         if self.pos > 44 {
-            return Err(format!("모르는 품사 번호 {}", self.pos));
+            return Err(format!("알 수 없는 품사 번호입니다: {}", self.pos));
         }
         Ok(())
     }
@@ -268,7 +271,7 @@ pub fn load(path: &str) -> Result<Storage, String> {
     match std::fs::read(path) {
         Ok(bytes) => Storage::decode(&bytes),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Storage::default()),
-        Err(e) => Err(format!("사전 파일을 읽지 못했다: {e}")),
+        Err(e) => Err(format!("사전 파일을 읽지 못했습니다: {e}")),
     }
 }
 
@@ -292,11 +295,11 @@ pub fn save(path: &str, dictionaries: Vec<Dictionary>) -> Result<(), String> {
     }
     let path = std::path::Path::new(path);
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("사전 폴더를 만들지 못했다: {e}"))?;
+        std::fs::create_dir_all(dir).map_err(|e| format!("사전 폴더를 만들지 못했습니다: {e}"))?;
     }
     let tmp = path.with_extension("db.cssgsg-tmp");
-    std::fs::write(&tmp, storage.encode()).map_err(|e| format!("사전 파일을 쓰지 못했다: {e}"))?;
-    std::fs::rename(&tmp, path).map_err(|e| format!("사전 파일을 바꾸지 못했다: {e}"))
+    std::fs::write(&tmp, storage.encode()).map_err(|e| format!("사전 파일을 쓰지 못했습니다: {e}"))?;
+    std::fs::rename(&tmp, path).map_err(|e| format!("사전 파일을 바꾸지 못했습니다: {e}"))
 }
 
 /// 겹치지 않는 새 사전 번호(0이 아닌 값).

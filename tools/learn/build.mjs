@@ -123,7 +123,7 @@ function graphiteBoard() {
         main: k.base,
         mainClass: same ? "is-plain" : "is-latin",
         shift: `<tspan class="${shiftSame ? "is-plain" : "is-sym"}">${esc(k.shift)}</tspan>`,
-        title: same ? `쿼티와 같다 (${k.base})` : `${k.base}, Shift ${k.shift}`,
+        title: same ? `쿼티와 같음 (${k.base})` : `${k.base}, Shift ${k.shift}`,
       };
     },
   });
@@ -180,7 +180,7 @@ function postfixTable(l) {
       return `<tr><th scope="row">${name}</th>${cells.join("")}${"<td></td>".repeat(5 - cells.length)}</tr>`;
     })
     .join("");
-  return `<div class="table-scroll"><table class="grid-table"><caption>゛를 칠 때마다 오른쪽으로 바뀐다</caption><tbody>${body}</tbody></table></div>`;
+  return `<div class="table-scroll"><table class="grid-table"><caption>゛를 칠 때마다 오른쪽 글자로 바뀝니다</caption><tbody>${body}</tbody></table></div>`;
 }
 
 function starDakuTable(l) {

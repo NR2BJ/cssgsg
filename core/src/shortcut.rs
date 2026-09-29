@@ -91,10 +91,10 @@ impl Shortcut {
         if let Some(name) = text.strip_prefix("tap:") {
             return modifier_from_name(name)
                 .map(Shortcut::Tap)
-                .ok_or_else(|| format!("탭 키는 수식키여야 한다: {name:?}"));
+                .ok_or_else(|| format!("탭 키는 수식키여야 합니다: {name:?}"));
         }
         let parts: Vec<&str> = text.split('+').map(str::trim).collect();
-        let (&key_name, mod_names) = parts.split_last().ok_or("빈 단축키")?;
+        let (&key_name, mod_names) = parts.split_last().ok_or("빈 단축키입니다")?;
         let mut mods = ComboMods::default();
         for &name in mod_names {
             if let Some(&(_, left, right)) = FAMILIES.iter().find(|(n, _, _)| *n == name) {
@@ -103,14 +103,16 @@ impl Shortcut {
                 mods.sides |= key.modifier_bit();
             } else {
                 return Err(format!(
-                    "모르는 수식키 {name:?} (control_left, alt_right … 또는 좌우를 가리지 않는 control, alt, shift, meta)"
+                    "알 수 없는 수식키입니다: {name:?} (control_left, alt_right … 또는 좌우를 가리지 않는 control, alt, shift, meta)"
                 ));
             }
         }
         if mods.sides & mods.either != 0 {
-            return Err(format!("같은 수식키를 좌우를 가려서도, 안 가려서도 적었다: {text:?}"));
+            return Err(format!(
+                "같은 수식키를 좌우를 가린 이름과 가리지 않은 이름으로 함께 적을 수 없습니다: {text:?}"
+            ));
         }
-        let key = key_from_name(key_name).ok_or_else(|| format!("모르는 키 이름 {key_name:?}"))?;
+        let key = key_from_name(key_name).ok_or_else(|| format!("알 수 없는 키 이름입니다: {key_name:?}"))?;
         Ok(Shortcut::Combo(mods, key))
     }
 
@@ -122,11 +124,13 @@ impl Shortcut {
             && (key.is_printable()
                 || matches!(key, Key::SPACE | Key::ENTER | Key::TAB | Key::BACKSPACE | Key::ESCAPE))
         {
-            return Err(format!("수식키 없이 {self}만 단축키로 쓸 수 없다(그 키를 칠 수 없게 된다)"));
+            return Err(format!(
+                "수식키 없이 {self}만으로는 단축키를 만들 수 없습니다(그 키를 칠 수 없게 됩니다)"
+            ));
         }
         if mods.uses_family_of(Key::META_LEFT) {
             return Err(format!(
-                "⌘(meta) 조합은 쓸 수 없다: {self} (Chrome·Discord 같은 앱은 ⌘+키를 입력기에 보내지 않는다)"
+                "⌘(meta) 조합은 쓸 수 없습니다: {self} (Chrome·Discord 같은 앱은 ⌘+키를 입력기에 보내지 않습니다)"
             ));
         }
         Ok(())

@@ -99,7 +99,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let button = statusItem?.button else { return }
         button.image = Self.statusIcon(mode.label)
         button.title = ""
-        button.toolTip = "cssgsg: \(["영어 (Graphite)", "한국어 (참신세벌식)", "일본어 (新月配列)"][Int(mode.rawValue)])"
+        let names = [
+            tr("영어 (Graphite)", "English (Graphite)", "英語 (Graphite)"),
+            tr("한국어 (참신세벌식)", "Korean (Chamshin Sebeolsik)", "韓国語 (チャムシン3ボル式)"),
+            tr("일본어 (新月配列)", "Japanese (Shingetsu)", "日本語 (新月配列)"),
+        ]
+        button.toolTip = "cssgsg: \(names[Int(mode.rawValue)])"
     }
 
     /// 메뉴 막대 아이콘을 글자로 그린다(Retina 자동 대응, 템플릿 이미지).

@@ -7,7 +7,7 @@ struct LearnTab: View {
         if LearnPage.shared.url != nil {
             LearnWebView()
         } else {
-            Text(tr("학습 페이지를 찾을 수 없다", "The learning page is missing", "学習ページが見つかりません"))
+            Text(tr("학습 페이지를 찾을 수 없습니다.", "The learning page is missing.", "学習ページが見つかりません。"))
                 .foregroundStyle(.secondary)
         }
     }

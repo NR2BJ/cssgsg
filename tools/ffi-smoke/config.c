@@ -22,12 +22,12 @@ int main(void) {
     CHECK(toml != NULL && strstr(toml, "\nfull_width_space = true\n") != NULL);
     /* 파일 → JSON: 적은 값과 기본값 */
     json = cssgsg_config_json("[mac]\nhud = false\n");
-    CHECK(json != NULL && strstr(json, "\"hud\":false") != NULL && strstr(json, "\"newline_delay_offset_ms\":0") != NULL);
+    CHECK(json != NULL && strstr(json, "\"hud\":false") != NULL && strstr(json, "\"shift_enter_delay_ms\":15") != NULL);
     /* 오류 */
     CHECK(cssgsg_config_json("tap_threshold_ms = 1") == NULL);
     CHECK(strstr(cssgsg_config_error(), "tap_threshold_ms") != NULL);
-    CHECK(cssgsg_config_toml("{\"mac\":{\"newline_delay_offset_ms\":80}}") == NULL);
-    CHECK(strstr(cssgsg_config_error(), "newline_delay_offset_ms") != NULL);
+    CHECK(cssgsg_config_toml("{\"mac\":{\"shift_enter_delay_ms\":200}}") == NULL);
+    CHECK(strstr(cssgsg_config_error(), "shift_enter_delay_ms") != NULL);
     /* 단축키는 글자열이고, 틀린 것은 까닭과 함께 거부한다 */
     json = cssgsg_config_json(NULL);
     CHECK(json != NULL && strstr(json, "\"toggle_english\":\"tap:shift_right\"") != NULL

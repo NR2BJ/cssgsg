@@ -37,13 +37,10 @@ struct CssgsgConfig: Codable, Equatable {
         var hud: Bool
         var hudPosition: String
         var candidateFontSize: Int
-        /// Electron 앱 줄바꿈 대기 조정(-10~50): 기본 15ms에 더한다(코어 MacConfig).
-        var newlineDelayOffsetMs: Int
-        /// Codex류 앱: Shift+Enter를 다시 보내기까지(밀리초, 따로 쓰인다).
+        /// Electron 앱: 확정한 뒤 줄바꿈을 넣기까지(밀리초, 5~100). ⌘+키 재전송도 같다.
+        var shiftEnterDelayMs: Int
+        /// Codex류 앱: Shift+Enter를 다시 보내기까지(밀리초, 20~1000, 위와 따로 쓰인다).
         var newlineReplayMs: Int
-
-        /// 코어 MacConfig::shift_enter_delay_ms와 같은 계산(화면에 보이기만 한다).
-        var electronDelayMs: Int { max(5, 15 + newlineDelayOffsetMs) }
     }
 }
 
@@ -70,8 +67,8 @@ enum ConfigBridge {
         let encoder = JSONEncoder()
         encoder.keyEncodingStrategy = .convertToSnakeCase
         guard let data = try? encoder.encode(config), let json = String(data: data, encoding: .utf8) else {
-            return .failure(ConfigProblem(message: tr("설정을 JSON으로 바꾸지 못했다", "Could not encode the settings",
-                                                      "設定を JSON に変換できません")))
+            return .failure(ConfigProblem(message: tr("설정을 JSON으로 바꾸지 못했습니다.", "Couldn’t encode the settings.",
+                                                      "設定を JSON に変換できませんでした。")))
         }
         guard let pointer = json.withCString({ cssgsg_config_toml($0) }) else { return .failure(.lastError) }
         return .success(String(cString: pointer))
@@ -137,8 +134,9 @@ final class SettingsModel: ObservableObject {
         let others: [WritableKeyPath<CssgsgConfig.Shortcuts, String>] =
             [\.toggleEnglish, \.toggleNonEnglish, \.hanja].filter { $0 != path }
         if !value.isEmpty, let taken = others.first(where: { config.shortcuts[keyPath: $0] == value }) {
-            return tr("이미 ‘\(ShortcutText.actionName(taken))’에 쓰고 있다.", "Already used for “\(ShortcutText.actionName(taken))”.",
-                      "すでに「\(ShortcutText.actionName(taken))」に使っています。")
+            return tr("이미 ‘\(ShortcutText.actionName(taken))’에 쓰고 있는 단축키입니다.",
+                      "Already used for “\(ShortcutText.actionName(taken))”.",
+                      "すでに「\(ShortcutText.actionName(taken))」で使っているショートカットです。")
         }
         var next = config
         next.shortcuts[keyPath: path] = value

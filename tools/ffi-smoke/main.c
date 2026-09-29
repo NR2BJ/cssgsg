@@ -57,18 +57,18 @@ int main(void) {
     CHECK(m.candidate_font_size == 14 && m.shift_enter_delay_ms == 15);
     m = cssgsg_engine_mac_settings(NULL);
     CHECK(m.hud == 1 && m.newline_replay_ms == 120 && m.candidate_font_size == 14 && m.shift_enter_delay_ms == 15);
-    /* 줄바꿈 대기: Electron은 15 + 조정(-10~50), Codex는 따로 적은 값 */
+    /* 줄바꿈 대기: Electron과 Codex를 따로 적는다 */
     CssgsgEngine *c = cssgsg_engine_new("[mac]\nhud = false\nhud_position = \"mouse\"\n"
-                                        "candidate_font_size = 18\nnewline_delay_offset_ms = -10\nnewline_replay_ms = 80");
+                                        "candidate_font_size = 18\nshift_enter_delay_ms = 5\nnewline_replay_ms = 80");
     CHECK(c != NULL);
     m = cssgsg_engine_mac_settings(c);
     CHECK(m.hud == 0 && m.hud_at_mouse == 1 && m.newline_replay_ms == 80);
     CHECK(m.candidate_font_size == 18 && m.shift_enter_delay_ms == 5);
     cssgsg_engine_free(c);
-    CHECK(cssgsg_engine_new("[mac]\nnewline_delay_offset_ms = 99") == NULL);
+    CHECK(cssgsg_engine_new("[mac]\nshift_enter_delay_ms = 101") == NULL);
     CHECK(cssgsg_engine_new("[mac]\nnewline_replay_ms = 5") == NULL);
-    /* 0.5.0 파일: Electron 절댓값은 조정값으로 옮기고 Codex 값은 그대로 */
-    c = cssgsg_engine_new("[mac]\nshift_enter_delay_ms = 25\nnewline_replay_ms = 150");
+    /* 0.5.1~0.5.3 파일의 조정값(15ms에 더하던 것)은 대기 시간으로 옮긴다 */
+    c = cssgsg_engine_new("[mac]\nnewline_delay_offset_ms = 10\nnewline_replay_ms = 150");
     CHECK(c != NULL && cssgsg_engine_mac_settings(c).newline_replay_ms == 150);
     CHECK(cssgsg_engine_mac_settings(c).shift_enter_delay_ms == 25);
     cssgsg_engine_free(c);

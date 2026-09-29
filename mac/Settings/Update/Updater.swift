@@ -258,7 +258,7 @@ final class Updater: NSObject, ObservableObject, URLSessionDownloadDelegate {
     private func finishCheck(_ channel: UpdateChannel, _ data: Data?, _ response: HTTPURLResponse?, _ error: Error?,
                              userInitiated: Bool) {
         guard let response, error == nil else {
-            state = userInitiated ? .failed(tr("서버에 연결하지 못했다", "Could not reach the server", "サーバーに接続できません")) : .idle
+            state = userInitiated ? .failed(tr("서버에 연결하지 못했습니다", "Couldn’t reach the server", "サーバーに接続できませんでした")) : .idle
             return
         }
         let now = Date()
@@ -269,7 +269,7 @@ final class Updater: NSObject, ObservableObject, URLSessionDownloadDelegate {
             evaluate(cachedReleases(channel))
         case 200:
             guard let data, let releases = UpdateLogic.decode(data, channel: channel) else {
-                state = .failed(tr("릴리스 정보를 읽지 못했다", "Could not read the release info", "リリース情報を読めません"))
+                state = .failed(tr("릴리스 정보를 읽지 못했습니다", "Couldn’t read the release info", "リリース情報を読めませんでした"))
                 return
             }
             // 본문을 읽은 뒤에만 ETag를 남긴다. 그래야 304가 늘 읽어 둔 응답을 가리킨다.
@@ -281,8 +281,8 @@ final class Updater: NSObject, ObservableObject, URLSessionDownloadDelegate {
         case 404:
             state = .upToDate  // 아직 릴리스가 없다
         default:
-            state = userInitiated ? .failed(tr("GitHub 응답 \(response.statusCode)", "GitHub responded \(response.statusCode)",
-                                               "GitHub の応答 \(response.statusCode)")) : .idle
+            state = userInitiated ? .failed(tr("GitHub가 \(response.statusCode)로 응답했습니다", "GitHub responded \(response.statusCode)",
+                                               "GitHub が \(response.statusCode) を返しました")) : .idle
         }
     }
 
@@ -332,13 +332,13 @@ final class Updater: NSObject, ObservableObject, URLSessionDownloadDelegate {
             try? FileManager.default.removeItem(at: destination)
             try FileManager.default.moveItem(at: location, to: destination)
         } catch {
-            state = .failed(tr("받은 파일을 저장하지 못했다", "Could not save the download", "ダウンロードを保存できません"))
+            state = .failed(tr("받은 파일을 저장하지 못했습니다", "Couldn’t save the download", "ダウンロードを保存できませんでした"))
             return
         }
         // 관리자 권한으로 설치할 파일이다. 해시가 없거나 다르면 설치하지 않는다.
         guard UpdateLogic.fileMatchesDigest(at: destination, expected: release.pkgAsset?.digest) == true else {
             try? FileManager.default.removeItem(at: destination)
-            state = .failed(tr("받은 파일의 해시가 맞지 않는다", "The download's checksum does not match",
+            state = .failed(tr("받은 파일의 해시가 맞지 않습니다", "The download’s checksum doesn’t match",
                                "ダウンロードのハッシュが一致しません"))
             return
         }
@@ -347,7 +347,7 @@ final class Updater: NSObject, ObservableObject, URLSessionDownloadDelegate {
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         guard task === downloadTask, let error, (error as NSError).code != NSURLErrorCancelled else { return }
-        state = .failed(tr("내려받지 못했다", "Download failed", "ダウンロードに失敗しました"))
+        state = .failed(tr("내려받지 못했습니다", "Download failed", "ダウンロードに失敗しました"))
     }
 
     private func runInstaller(pkg: URL, release: GitHubRelease) {
@@ -370,8 +370,8 @@ final class Updater: NSObject, ObservableObject, URLSessionDownloadDelegate {
                     try? FileManager.default.removeItem(at: pkg)
                     self.state = .idle
                 } else {
-                    self.state = .failed(tr("설치를 취소했거나 실패했다", "Installation was cancelled or failed",
-                                            "インストールが取り消されたか失敗しました"))
+                    self.state = .failed(tr("설치를 취소했거나 설치하지 못했습니다", "Installation was cancelled or failed",
+                                            "インストールが取り消されたか、失敗しました"))
                 }
             }
         }

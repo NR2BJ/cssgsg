@@ -133,16 +133,16 @@ final class UserDictionaryModel: ObservableObject {
     func problem(with entry: UserDictEntry) -> String? {
         let fields = [entry.key, entry.value, entry.comment]
         if entry.key.isEmpty || entry.value.isEmpty {
-            return tr("읽기와 단어를 쓴다.", "Enter a reading and a word.", "読みと単語を入力します。")
+            return tr("읽기와 단어를 입력하세요.", "Enter a reading and a word.", "読みと単語を入力してください。")
         }
         if fields.contains(where: { $0.count > 300 }) {
-            return tr("300자까지 쓸 수 있다.", "Up to 300 characters.", "300 文字までです。")
+            return tr("300자까지 입력할 수 있습니다.", "Up to 300 characters.", "300 文字まで入力できます。")
         }
         if fields.contains(where: { $0.contains(where: { $0 == "\t" || $0.isNewline }) }) {
-            return tr("탭이나 줄바꿈은 쓸 수 없다.", "Tabs and line breaks aren’t allowed.", "タブや改行は使えません。")
+            return tr("탭이나 줄바꿈은 쓸 수 없습니다.", "Tabs and line breaks aren’t allowed.", "タブや改行は使えません。")
         }
         if entries.contains(where: { $0.id != entry.id && $0.key == entry.key && $0.value == entry.value && $0.pos == entry.pos }) {
-            return tr("같은 낱말이 이미 있다.", "The same word is already there.", "同じ単語がすでにあります。")
+            return tr("같은 단어가 이미 있습니다.", "The same word is already there.", "同じ単語がすでにあります。")
         }
         return nil
     }
@@ -213,7 +213,7 @@ struct UserDictionarySection: View {
     var body: some View {
         Section {
             HStack {
-                TextField(tr("찾기", "Search", "検索"), text: $search)
+                TextField(tr("검색", "Search", "検索"), text: $search)
                     .textFieldStyle(.roundedBorder)
                 Button(tr("추가…", "Add…", "追加…")) {
                     editing = UserDictEntry(key: "", value: "", comment: "", pos: 1)
@@ -222,15 +222,15 @@ struct UserDictionarySection: View {
             Table(shown, selection: $selection) {
                 TableColumn(tr("읽기", "Reading", "読み"), value: \.key)
                 TableColumn(tr("단어", "Word", "単語"), value: \.value)
-                TableColumn(tr("품사", "Part of speech", "品詞")) { Text(MozcPOS.name($0.pos)) }
+                TableColumn(tr("품사", "Part of Speech", "品詞")) { Text(MozcPOS.name($0.pos)) }
                 TableColumn(tr("메모", "Note", "メモ"), value: \.comment)
             }
             .contextMenu(forSelectionType: UserDictEntry.ID.self) { ids in
                 if ids.count == 1, let id = ids.first, let entry = dictionary.entries.first(where: { $0.id == id }) {
-                    Button(tr("고치기…", "Edit…", "編集…")) { editing = entry }
+                    Button(tr("편집…", "Edit…", "編集…")) { editing = entry }
                 }
                 if !ids.isEmpty {
-                    Button(tr("지우기…", "Delete…", "削除…"), role: .destructive) { confirmDelete = ids }
+                    Button(tr("삭제…", "Delete…", "削除…"), role: .destructive) { confirmDelete = ids }
                 }
             } primaryAction: { ids in
                 if let id = ids.first, let entry = dictionary.entries.first(where: { $0.id == id }) { editing = entry }
@@ -241,28 +241,28 @@ struct UserDictionarySection: View {
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button(tr("고치기…", "Edit…", "編集…")) {
+                Button(tr("편집…", "Edit…", "編集…")) {
                     editing = dictionary.entries.first { selection.contains($0.id) }
                 }
                 .disabled(selection.count != 1)
-                Button(tr("지우기…", "Delete…", "削除…")) { confirmDelete = selection }
+                Button(tr("삭제…", "Delete…", "削除…")) { confirmDelete = selection }
                     .disabled(selection.isEmpty)
             }
             if let message = problem ?? dictionary.problem {
                 Label(message, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
             }
         } header: {
-            Text(tr("개인 사전", "User dictionary", "ユーザー辞書"))
+            Text(tr("개인 사전", "User Dictionary", "ユーザー辞書"))
         } footer: {
             Text(tr("""
-                변환 후보에 낱말을 더한다(Mozc 사용자 사전). 읽기는 히라가나로 쓴다(가타카나는 히라가나로 바꿔 넣는다). \
-                고치면 바로 적용된다. 두 번 누르면 고친다.
+                변환 후보에 단어를 추가합니다(Mozc 사용자 사전). 읽기는 히라가나로 입력하세요. 가타카나는 히라가나로 바뀌고, \
+                작은 가나(ゃ·っ·ぁ 등)와 장음 부호 ー도 쓸 수 있습니다. 바꾸면 바로 적용되고, 두 번 클릭하면 편집합니다.
                 """, """
-                Adds words to the conversion candidates (Mozc user dictionary). Write readings in hiragana (katakana is converted). \
-                Changes apply immediately. Double-click to edit.
+                Adds words to the conversion candidates (Mozc user dictionary). Enter readings in hiragana; katakana is converted, \
+                and small kana (ゃ·っ·ぁ …) and the long-vowel mark ー work too. Changes apply immediately. Double-click to edit.
                 """, """
-                変換候補に単語を加えます（Mozc のユーザー辞書）。読みはひらがなで入力します（カタカナはひらがなに直します）。\
-                変更はすぐに反映されます。ダブルクリックで編集。
+                変換候補に単語を追加します（Mozc のユーザー辞書）。読みはひらがなで入力してください。カタカナはひらがなに直り、\
+                小さいかな（ゃ・っ・ぁ など）や長音符 ー も使えます。変更はすぐに反映され、ダブルクリックで編集できます。
                 """))
         }
         .sheet(item: $editing) { entry in
@@ -272,11 +272,11 @@ struct UserDictionarySection: View {
             }
         }
         .confirmationDialog(
-            tr("낱말 \(confirmDelete?.count ?? 0)개를 지울까?", "Delete \(confirmDelete?.count ?? 0) word(s)?",
+            tr("단어 \(confirmDelete?.count ?? 0)개를 삭제하시겠습니까?", "Delete \(confirmDelete?.count ?? 0) word(s)?",
                "\(confirmDelete?.count ?? 0) 語を削除しますか？"),
             isPresented: Binding(get: { confirmDelete != nil }, set: { if !$0 { confirmDelete = nil } })
         ) {
-            Button(tr("지우기", "Delete", "削除"), role: .destructive) {
+            Button(tr("삭제", "Delete", "削除"), role: .destructive) {
                 if let ids = confirmDelete {
                     problem = dictionary.remove(ids)
                     selection.subtract(ids)
@@ -307,12 +307,12 @@ struct UserDictEntryEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(isNew ? tr("낱말 넣기", "Add a word", "単語を追加") : tr("낱말 고치기", "Edit word", "単語を編集"))
+            Text(isNew ? tr("단어 추가", "Add Word", "単語を追加") : tr("단어 편집", "Edit Word", "単語を編集"))
                 .font(.headline)
             Form {
                 TextField(tr("읽기", "Reading", "読み"), text: $draft.key, prompt: Text("くもつ"))
                 TextField(tr("단어", "Word", "単語"), text: $draft.value, prompt: Text("雲津"))
-                Picker(tr("품사", "Part of speech", "品詞"), selection: $draft.pos) {
+                Picker(tr("품사", "Part of Speech", "品詞"), selection: $draft.pos) {
                     ForEach(MozcPOS.choices + (MozcPOS.choices.contains(original.pos) ? [] : [original.pos]), id: \.self) { pos in
                         Text(MozcPOS.name(pos)).tag(pos)
                     }

@@ -41,7 +41,7 @@ pub fn toml_from_json(json: &str) -> Result<String, String> {
 }
 
 fn give(result: std::thread::Result<Result<String, String>>) -> *const c_char {
-    match result.unwrap_or_else(|_| Err("설정 변환 중 패닉".into())) {
+    match result.unwrap_or_else(|_| Err("설정을 변환하다 멈췄습니다(패닉)".into())) {
         Ok(text) => OUT.with(|o| {
             *o.borrow_mut() = cstring(&text);
             o.borrow().as_ptr()
@@ -110,7 +110,7 @@ pub unsafe extern "C" fn cssgsg_userdict_save(path: *const c_char, json: *const 
         let storage: userdict::Storage = serde_json::from_str(&json).map_err(|e| e.to_string())?;
         userdict::save(&path, storage.dictionaries)
     })
-    .unwrap_or_else(|_| Err("사전 저장 중 패닉".into()));
+    .unwrap_or_else(|_| Err("사전을 저장하다 멈췄습니다(패닉)".into()));
     match result {
         Ok(()) => 1,
         Err(err) => {
@@ -147,7 +147,7 @@ mod tests {
         assert!(json.contains(r#""toggle_english":"tap:shift_right""#), "{json}");
         assert!(json.contains(r#""hanja":"alt_left+enter""#), "{json}");
         assert!(
-            json.contains(r#""newline_delay_offset_ms":0"#) && json.contains(r#""newline_replay_ms":120"#),
+            json.contains(r#""shift_enter_delay_ms":15"#) && json.contains(r#""newline_replay_ms":120"#),
             "{json}"
         );
         assert!(!json.contains("taps"), "옛 탭 표는 JSON에 내보내지 않는다");
@@ -185,9 +185,9 @@ mod tests {
         assert!(json_from_toml(Some("ko_layout = \"qwerty\"")).unwrap_err().contains("qwerty"));
         assert!(toml_from_json("{").is_err());
         assert!(
-            toml_from_json(r#"{"mac":{"newline_delay_offset_ms":80}}"#)
+            toml_from_json(r#"{"mac":{"shift_enter_delay_ms":200}}"#)
                 .unwrap_err()
-                .contains("newline_delay_offset_ms")
+                .contains("shift_enter_delay_ms")
         );
         assert!(toml_from_json(r#"{"shortcuts":{"hanja":"meta_left+enter"}}"#).unwrap_err().contains("⌘"));
         assert!(toml_from_json(r#"{"surprise":1}"#).is_err(), "모르는 키");
