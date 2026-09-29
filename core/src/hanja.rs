@@ -1,21 +1,16 @@
-//! 한국어 한자 변환: 사전 찾기, 후보 만들기, 고른 후보 기억.
+//! 한국어 한자 변환: 사전 찾기, 글자 하나의 후보, 고른 후보 기억.
 //!
 //! 사전은 libhangul의 `hanja.txt`와 `mssymbol.txt`(`dict/ko`, BSD-3)를 고치지 않고 바이너리에 넣는다.
 //! 두 파일 모두 `읽기:값:뜻` 줄이 읽기 순으로 정렬돼 있어서 그대로 이진 탐색한다(정렬은 테스트가 확인한다).
-//! 같은 읽기 안의 줄 순서를 순위로 쓴다. 한 음절은 대체로 빈도 순이지만 단어는 아니다(대한: 大寒이 大韓보다 앞).
-//! 그래서 고른 후보를 기억해 앞으로 올린다([`Learning`]).
+//! 같은 읽기 안의 줄 순서를 순위로 쓰고, 고른 후보는 기억해 앞으로 올린다([`Learning`]).
 //!
-//! 후보는 바꿀 구간이 서로 다른 것을 한 목록에 모은다. 커서 앞 "대한민국"이면 大韓民國(4음절) 다음에
-//! 民國(끝 2음절), 그다음 國·局·菊…(끝 1음절). 구간을 따로 조절하지 않아도 고르는 후보가 곧 구간이다.
+//! 바꾸는 것은 조합 중인 글자 하나다(음절 → 한자, 자음 하나 → 기호). `hanja.txt`의 낱말 항목(27만여 개)은 지금 쓰지 않는다.
 
 use std::cmp::Reverse;
 use std::collections::HashMap;
 
 const HANJA_TXT: &str = include_str!("../../dict/ko/hanja.txt");
 const SYMBOL_TXT: &str = include_str!("../../dict/ko/mssymbol.txt");
-
-/// 사전에서 가장 긴 읽기(음절 수). 이보다 긴 앞 글자는 보지 않는다.
-pub const MAX_READING: usize = 18;
 
 /// 사전 한 줄.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -92,14 +87,6 @@ pub fn symbols(jamo: char) -> impl Iterator<Item = Entry> {
     symbol_table().lookup(reading).collect::<Vec<_>>().into_iter()
 }
 
-/// 한자 한 글자의 첫 훈음(`클 대, 큰 대` → `클 대`). 사전에 훈음이 없으면 None.
-pub fn gloss(syllable: char, hanja: char) -> Option<&'static str> {
-    let (mut rb, mut hb) = ([0u8; 4], [0u8; 4]);
-    let (reading, value) = (&*syllable.encode_utf8(&mut rb), &*hanja.encode_utf8(&mut hb));
-    let note = lookup(reading).find(|e| e.value == value)?.note;
-    note.split(", ").next().filter(|s| !s.is_empty())
-}
-
 pub fn is_syllable(c: char) -> bool {
     ('가'..='힣').contains(&c)
 }
@@ -109,107 +96,31 @@ pub fn is_consonant(c: char) -> bool {
     ('ㄱ'..='ㅎ').contains(&c)
 }
 
-/// 후보 하나. 원문 안에서 바꿀 구간(글자 단위)과 바꿀 글자.
+/// 후보 하나: 바꿀 글자와 후보창에 같이 보일 뜻(한자의 훈음, 없으면 빈 문자열).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Cand {
-    pub start: usize,
-    pub len: usize,
     pub text: String,
-    /// 후보창에 같이 보일 뜻. 없으면 빈 문자열.
     pub note: String,
 }
 
-/// 변환할 원문과 후보(보일 순서).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Found {
-    pub source: Vec<char>,
-    pub cands: Vec<Cand>,
-}
-
-/// 커서 앞 글자에서 찾는다(끝이 커서). 끝에서 이어진 한글 음절 중 사전과 맞는 끝부분을 긴 것부터 모은다.
-/// 원문은 가장 긴 맞는 끝부분이다. 끝 글자가 자음 하나면 기호표를 본다.
-pub fn at_caret(before: &[char], learning: &Learning) -> Option<Found> {
-    let &last = before.last()?;
-    if is_consonant(last) {
-        return symbol_found(last, learning);
-    }
-    let run_len = before.iter().rev().take(MAX_READING).take_while(|&&c| is_syllable(c)).count();
-    let run = &before[before.len() - run_len..];
-    let mut groups = Vec::new();
-    for len in (1..=run.len()).rev() {
-        let reading = &run[run.len() - len..];
-        let cands = group(reading, run.len() - len, learning);
-        if !cands.is_empty() {
-            groups.push((len, cands));
-        }
-    }
-    let longest = groups.first()?.0;
-    let offset = run.len() - longest;
-    let cands = groups
-        .into_iter()
-        .flat_map(|(_, cands)| cands)
-        .map(|c| Cand { start: c.start - offset, ..c })
-        .collect();
-    Some(Found { source: run[offset..].to_vec(), cands })
-}
-
-/// 선택한 글에서 찾는다. 앞 공백 뒤로 이어진 한글 음절 중 사전과 맞는 앞부분을 긴 것부터 모은다
-/// (선택 전체가 맞으면 그것이 첫 후보). 원문은 선택 전체다. 선택이 자음 하나면 기호표를 본다.
-pub fn in_selection(selected: &[char], learning: &Learning) -> Option<Found> {
-    if let [c] = selected
-        && is_consonant(*c)
-    {
-        return symbol_found(*c, learning);
-    }
-    let lead = selected.iter().take_while(|c| c.is_whitespace()).count();
-    let run_len = selected[lead..].iter().take(MAX_READING).take_while(|&&c| is_syllable(c)).count();
-    let cands: Vec<Cand> =
-        (1..=run_len).rev().flat_map(|len| group(&selected[lead..lead + len], lead, learning)).collect();
-    (!cands.is_empty()).then(|| Found { source: selected.to_vec(), cands })
-}
-
-fn symbol_found(jamo: char, learning: &Learning) -> Option<Found> {
-    let mut cands: Vec<Cand> = symbols(jamo)
-        .map(|e| Cand { start: 0, len: 1, text: e.value.to_string(), note: String::new() })
-        .collect();
-    if cands.is_empty() {
-        return None;
-    }
-    learning.order(&jamo.to_string(), &mut cands);
-    Some(Found { source: vec![jamo], cands })
-}
-
-/// 읽기 하나의 후보(기억한 것 먼저, 그다음 사전 순위).
-fn group(reading: &[char], start: usize, learning: &Learning) -> Vec<Cand> {
-    let key: String = reading.iter().collect();
-    let mut cands: Vec<Cand> = lookup(&key)
-        .filter(|e| !e.value.is_empty())
-        .map(|e| Cand { start, len: reading.len(), text: e.value.to_string(), note: note(reading, e) })
-        .collect();
-    learning.order(&key, &mut cands);
+/// 조합 중인 글자 하나의 후보(기억한 것 먼저, 그다음 사전 순위).
+/// 한글 음절이면 한자와 훈음(`韓 나라 이름 한, 한나라 한`), 자음 하나(ㄱ~ㅎ)면 기호표. 없으면 빈 목록.
+pub fn candidates(letter: char, learning: &Learning) -> Vec<Cand> {
+    let mut buf = [0u8; 4];
+    let reading: &str = letter.encode_utf8(&mut buf);
+    let mut cands: Vec<Cand> = if is_syllable(letter) {
+        // 한 음절 항목 중 값이 두 글자인 것(莘洞 같은 지명 2개)은 사전 오류라 뺀다.
+        lookup(reading)
+            .filter(|e| e.value.chars().count() == 1)
+            .map(|e| Cand { text: e.value.to_string(), note: e.note.to_string() })
+            .collect()
+    } else if is_consonant(letter) {
+        symbols(letter).map(|e| Cand { text: e.value.to_string(), note: String::new() }).collect()
+    } else {
+        Vec::new()
+    };
+    learning.order(reading, &mut cands);
     cands
-}
-
-/// 후보창에 보일 뜻. 한 글자는 사전의 훈음 전체, 단어는 사전 설명(`지명` 등)이 있으면 그것,
-/// 없으면 글자마다 첫 훈음을 이어 붙인다(電氣 → 번개 전 · 기운 기). 한글이 섞인 값(可決되다)은 한자만.
-fn note(reading: &[char], e: Entry) -> String {
-    let value: Vec<char> = e.value.chars().collect();
-    if reading.len() == 1 && value.len() == 1 {
-        return e.note.to_string();
-    }
-    if !e.note.is_empty() && e.note != e.reading {
-        return e.note.to_string();
-    }
-    if value.len() != reading.len() {
-        return String::new();
-    }
-    let parts: Vec<String> = reading
-        .iter()
-        .zip(&value)
-        .filter(|(_, h)| !is_syllable(**h))
-        .map(|(&r, &h)| gloss(r, h).map_or_else(|| r.to_string(), str::to_string))
-        .collect();
-    parts.join(" · ")
 }
 
 /// 고른 후보 기억. 읽기마다 (글자, 고른 횟수, 마지막으로 고른 순번)을 둔다.
@@ -340,12 +251,8 @@ impl Learning {
 mod tests {
     use super::*;
 
-    fn chars(s: &str) -> Vec<char> {
-        s.chars().collect()
-    }
-
-    fn texts(found: &Found) -> Vec<(usize, usize, &str)> {
-        found.cands.iter().map(|c| (c.start, c.len, c.text.as_str())).collect()
+    fn texts(letter: char, learning: &Learning, n: usize) -> Vec<String> {
+        candidates(letter, learning).into_iter().take(n).map(|c| c.text).collect()
     }
 
     fn body_lines(text: &'static str) -> Vec<Entry> {
@@ -388,58 +295,31 @@ mod tests {
         assert!(symbols('ㅁ').any(|e| e.value == "※"));
         assert_eq!(symbols('ㅁ').count(), 76);
         assert_eq!(symbols('ㅉ').count(), 0);
-        assert_eq!(gloss('대', '大'), Some("클 대"));
-        assert_eq!(gloss('한', '韓'), Some("나라 이름 한"));
-        assert_eq!(gloss('한', '大'), None);
     }
 
     #[test]
-    fn caret_collects_every_matching_suffix_longest_first() {
+    fn candidates_for_one_letter() {
         let none = Learning::default();
-        let found = at_caret(&chars("나는대한민국"), &none).unwrap();
-        assert_eq!(found.source, chars("대한민국"));
-        let t = texts(&found);
-        assert_eq!(t[0], (0, 4, "大韓民國"));
-        assert_eq!(t[1], (2, 2, "民國"));
-        assert_eq!(t[2], (3, 1, "國"));
-        assert!(t[3..].iter().all(|&(s, l, _)| (s, l) == (3, 1)));
-        assert_eq!(found.cands[0].note, "클 대 · 나라 이름 한 · 백성 민 · 나라 국");
-        assert_eq!(found.cands[2].note, "나라 국");
-
-        // 한글이 아닌 글자에서 끊는다. 끝이 자음이면 기호.
-        assert_eq!(at_caret(&chars("abc전기"), &none).unwrap().cands[0].text, "電氣");
-        assert_eq!(at_caret(&chars("전기 "), &none), None);
-        assert_eq!(at_caret(&chars(""), &none), None);
-        let sym = at_caret(&chars("한ㅁ"), &none).unwrap();
-        assert_eq!((sym.source.clone(), sym.cands[5].text.as_str()), (chars("ㅁ"), "※"));
-    }
-
-    #[test]
-    fn selection_collects_prefixes_and_keeps_the_rest() {
-        let none = Learning::default();
-        let found = in_selection(&chars(" 전기 요금"), &none).unwrap();
-        assert_eq!(found.source, chars(" 전기 요금"));
-        assert_eq!(texts(&found)[0], (1, 2, "電氣"));
-        assert!(texts(&found).iter().any(|&(s, l, _)| (s, l) == (1, 1)));
-        assert_eq!(in_selection(&chars("abc"), &none), None);
-        assert_eq!(in_selection(&chars("ㅁ"), &none).unwrap().cands[5].text, "※");
+        let guk = candidates('국', &none);
+        assert_eq!(guk[0], Cand { text: "國".into(), note: "나라 국".into() });
+        assert_eq!(texts('국', &none, 3), ["國", "局", "菊"]);
+        assert_eq!(guk.len(), 58);
+        assert_eq!(candidates('한', &none)[0].note, "나라 이름 한, 한나라 한");
+        // 한 음절 항목 중 값이 두 글자인 사전 오류(신:莘洞)는 뺀다.
+        assert!(candidates('신', &none).iter().all(|c| c.text.chars().count() == 1));
+        // 자음 하나는 기호표, 한자가 없는 음절·모음·그 밖은 빈 목록.
+        assert_eq!(candidates('ㅁ', &none)[5], Cand { text: "※".into(), note: String::new() });
+        assert!(candidates('뭐', &none).is_empty());
+        assert!(candidates('ㅏ', &none).is_empty());
+        assert!(candidates('a', &none).is_empty());
     }
 
     #[test]
     fn learning_moves_picks_forward() {
         let mut l = Learning::default();
-        let order = |l: &Learning| {
-            at_caret(&chars("한"), l)
-                .unwrap()
-                .cands
-                .iter()
-                .take(3)
-                .map(|c| c.text.clone())
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(order(&l), ["韓", "漢", "寒"]);
+        assert_eq!(texts('한', &l, 3), ["韓", "漢", "寒"]);
         l.record("한", "寒");
-        assert_eq!(order(&l), ["寒", "韓", "漢"]);
+        assert_eq!(texts('한', &l, 3), ["寒", "韓", "漢"]);
         // 가장 최근(寒 1번) → 많이 고른 것(漢 5번, 限 2번) → 사전 순위(韓)
         for _ in 0..5 {
             l.record("한", "漢");
@@ -447,15 +327,12 @@ mod tests {
         l.record("한", "限");
         l.record("한", "限");
         l.record("한", "寒");
-        let four: Vec<String> =
-            at_caret(&chars("한"), &l).unwrap().cands.iter().take(4).map(|c| c.text.clone()).collect();
-        assert_eq!(four, ["寒", "漢", "限", "韓"]);
+        assert_eq!(texts('한', &l, 4), ["寒", "漢", "限", "韓"]);
         assert_eq!(l.len(), 3);
-
-        // 다른 길이 무리 안에서만 움직인다
-        l.record("민국", "民國");
-        let found = at_caret(&chars("대한민국"), &l).unwrap();
-        assert_eq!(found.cands[0].text, "大韓民國");
+        // 기호도 같다. 다른 읽기의 기억은 섞이지 않는다.
+        l.record("ㅁ", "★");
+        assert_eq!(texts('ㅁ', &l, 1), ["★"]);
+        assert_eq!(texts('국', &l, 1), ["國"]);
     }
 
     #[test]

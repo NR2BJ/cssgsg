@@ -465,7 +465,8 @@ fn escape_leaves_the_grid_and_the_conversion() {
 }
 
 // ---------------------------------------------------------------- 한국어 한자 변환
-// 참신세벌식 v18: 대 is, 한 hfs, 민 uds, 국 kre, 전 nvs, 기 kd, ㅁ u. 한자 키는 {A-ent}(Option+Enter).
+// 참신세벌식 v18: 대 is, 한 hfs, 민 uds, 국 kre, 전 nvs, 기 kd, ㅁ u, 뭐 u.v. 한자 키는 {A-ent}(Option+Enter).
+// 바꾸는 것은 조합 중인 글자 하나다.
 
 fn hanja_state(s: &Sim) -> (String, String, Option<String>) {
     let first = s.candidates.as_ref().and_then(|c| c.selected.map(|i| c.items[i].clone()));
@@ -478,46 +479,39 @@ fn option_enter(s: &mut Sim) -> Output {
 }
 
 #[test]
-fn hanja_pulls_the_word_before_the_composing_syllable() {
+fn hanja_converts_only_the_composing_letter() {
     let mut s = sim();
     s.type_keys("{rs}ishfsudskre").unwrap();
     assert_eq!((s.text.as_str(), s.preedit.as_str()), ("대한민", "국"));
     s.type_keys("{A-ent}").unwrap();
-    // 앞 세 글자를 조합으로 끌어와 첫 후보를 보인다.
-    assert_eq!(hanja_state(&s), ("".into(), "大韓民國".into(), Some("大韓民國".into())));
+    // 앞 글자(대한민)는 그대로, 조합 중인 국만 첫 후보로 바뀌고 후보창이 뜬다.
+    assert_eq!(hanja_state(&s), ("대한민".into(), "國".into(), Some("國".into())));
     let c = s.candidates.clone().unwrap();
-    assert_eq!(c.notes[0], "클 대 · 나라 이름 한 · 백성 민 · 나라 국");
-    assert_eq!((c.items[1].as_str(), c.items[2].as_str(), c.notes[2].as_str()), ("民國", "國", "나라 국"));
+    assert_eq!(
+        (&c.items[..3], c.notes[0].as_str(), c.notes[1].as_str()),
+        (&["國", "局", "菊"].map(String::from)[..], "나라 국", "부분 국, 판 국")
+    );
     assert_eq!((c.page, c.grid), (Some((1, c.items.len().div_ceil(9))), false));
-    // 다음 후보는 더 짧은 구간: 바뀌지 않는 앞부분은 그대로 보인다.
     s.type_keys("{sp}").unwrap();
-    assert_eq!(s.preedit, "대한民國");
-    s.type_keys("{sp}").unwrap();
-    assert_eq!(s.preedit, "대한민國");
+    assert_eq!(s.preedit, "局");
     s.type_keys("{ent}").unwrap();
-    assert_eq!(hanja_state(&s), ("대한민國".into(), "".into(), None));
+    assert_eq!(hanja_state(&s), ("대한민局".into(), "".into(), None));
 }
 
 #[test]
-fn hanja_output_asks_for_context_then_absorbs_it() {
-    let mut e = Engine::new(Config::default());
-    e.set_mode(Mode::Ko);
-    let mut s = Sim::new(e);
-    s.type_keys("ishfsudskre").unwrap();
+fn hanja_preview_is_one_focused_segment() {
+    let mut s = sim();
+    s.type_keys("{rs}kre").unwrap();
     let out = option_enter(&mut s);
-    assert_eq!((out.consumed, out.hanja_context), (true, Some(HanjaAnchor::Composing)));
-    assert!(out.preedit.is_none() && out.commit.is_empty());
-    let out = s.engine.hanja_begin(Some("앞 대한민"), "");
-    assert_eq!(out.preedit_replace_before, 3);
-    assert_eq!(out.preedit.unwrap().segments, vec![Segment { start: 0, len: 4, focused: true }]);
-    // 스스로 부른 hanja_begin(한자 키 없이)은 아무 일도 하지 않는다.
-    let mut fresh = Engine::new(Config::default());
-    fresh.set_mode(Mode::Ko);
-    assert_eq!(fresh.hanja_begin(Some("대한"), ""), Output::default());
+    assert!(out.consumed && out.commit.is_empty());
+    assert_eq!(
+        out.preedit.unwrap(),
+        Preedit { text: "國".into(), segments: vec![Segment { start: 0, len: 1, focused: true }] }
+    );
 }
 
 #[test]
-fn hanja_escape_restores_text_and_composition() {
+fn hanja_escape_restores_the_composition() {
     let mut s = sim();
     s.type_keys("{rs}ishfsudskre{A-ent}{sp}{esc}").unwrap();
     assert_eq!(hanja_state(&s), ("대한민".into(), "국".into(), None));
@@ -530,38 +524,32 @@ fn hanja_escape_restores_text_and_composition() {
 }
 
 #[test]
-fn hanja_converts_committed_text_before_the_caret() {
+fn hanja_key_without_composition_goes_to_the_app() {
     let mut s = sim();
-    // {right}는 음절을 확정하고 앱으로 간다(시뮬레이터에서 커서는 끝 그대로).
+    // {right}는 음절을 확정하고 앱으로 간다. 조합이 없으면 한자 키도 앱으로(줄바꿈 등은 앱이 정한다).
     s.type_keys("{rs}nvskd{right}").unwrap();
-    assert_eq!((s.text.as_str(), s.preedit.as_str()), ("전기", ""));
-    s.type_keys("{A-ent}").unwrap();
-    assert_eq!(hanja_state(&s), ("".into(), "電氣".into(), Some("電氣".into())));
-    s.type_keys("{esc}").unwrap();
-    assert_eq!((s.text.as_str(), s.preedit.as_str()), ("전기", ""));
-    s.type_keys("{A-ent}{ent}").unwrap();
-    assert_eq!(s.text, "電氣");
-    // 커서 앞이 한글이 아니면 한자 키는 앱으로 간다.
     let out = option_enter(&mut s);
-    assert!(out.hanja_context.is_some());
-    assert!(!s.engine.hanja_begin(Some("電氣"), "").consumed);
-    assert!(!option_enter_begin(&mut s, "", ""));
-}
-
-fn option_enter_begin(s: &mut Sim, before: &str, selected: &str) -> bool {
-    option_enter(s);
-    s.engine.hanja_begin(Some(before), selected).consumed
+    assert!(!out.consumed && out.preedit.is_none() && out.candidates.is_none());
+    assert_eq!(s.screen(), "전기");
+    // 한자가 없는 음절(뭐)이나 모음만 있을 때는 키만 먹고 그대로 둔다.
+    for keys in ["u.v", "f"] {
+        let mut s = sim();
+        s.type_keys("{rs}").unwrap();
+        s.type_keys(keys).unwrap();
+        let before = s.preedit.clone();
+        let out = option_enter(&mut s);
+        assert!(out.consumed && out.preedit.is_none() && out.candidates.is_none(), "{keys}");
+        assert_eq!(s.preedit, before);
+    }
 }
 
 #[test]
 fn hanja_numbers_pick_and_learning_reorders() {
     let mut s = sim();
     s.type_keys("{rs}kre{A-ent}").unwrap();
-    let items = s.candidates.clone().unwrap().items;
-    assert_eq!(&items[..3], ["國", "局", "菊"]);
     s.press(Key::DIGIT2, 0);
     assert_eq!(hanja_state(&s), ("局".into(), "".into(), None));
-    // 같은 읽기를 다시 바꾸면 고른 것이 먼저 나온다.
+    // 같은 글자를 다시 바꾸면 고른 것이 먼저 나온다.
     s.type_keys("kre{A-ent}").unwrap();
     assert_eq!(s.candidates.as_ref().unwrap().items[..3], ["局", "國", "菊"]);
     assert_eq!(s.engine.hanja_learning().len(), 1);
@@ -594,70 +582,11 @@ fn hanja_symbols_for_a_lone_consonant() {
 }
 
 #[test]
-fn hanja_selection_is_replaced_as_a_whole() {
-    let mut e = Engine::new(Config::default());
-    e.set_mode(Mode::Ko);
-    let mut s = Sim::new(e);
-    let _ = option_enter(&mut s);
-    let out = s.engine.hanja_begin(Some("앞"), " 전기 요금");
-    assert_eq!(out.preedit_replace_before, 0, "선택은 조합이 대신한다");
-    let p = out.preedit.unwrap();
-    assert_eq!(p.text, " 電氣 요금");
-    assert_eq!(p.segments.iter().filter(|g| g.focused).count(), 1);
-    assert_eq!(p.segments[1], Segment { start: 1, len: 2, focused: true });
-    let out = s.engine.handle_key(&KeyEvent::down(Key::ESCAPE, Mods(0), 10.0), &Context::default());
-    assert_eq!(out.commit, " 전기 요금");
-    // 너무 긴 선택, 줄바꿈이 든 선택, 바꿀 것이 없는 선택: 키는 먹고(선택이 줄바꿈으로 바뀌지 않게) 바꾸지 않는다.
-    for sel in ["가".repeat(65), "전기\n요금".into(), "abc".into()] {
-        let _ = option_enter(&mut s);
-        let out = s.engine.hanja_begin(Some(""), &sel);
-        assert!(out.consumed && out.preedit.is_none(), "{sel:?}");
-    }
-}
-
-#[test]
-fn hanja_restart_without_context_keeps_only_the_syllable() {
-    // 앱이 replacementRange를 무시하면 셸이 빈 글자로 다시 부른다.
-    let mut e = Engine::new(Config::default());
-    e.set_mode(Mode::Ko);
-    let mut s = Sim::new(e);
-    s.type_keys("ishfsudskre").unwrap();
-    let _ = option_enter(&mut s);
-    assert_eq!(s.engine.hanja_begin(Some("대한민"), "").preedit_replace_before, 3);
-    let out = s.engine.hanja_begin(Some(""), "");
-    assert!(out.consumed);
-    assert_eq!((out.preedit.unwrap().text, out.preedit_replace_before), ("國".into(), 0));
-    let out = s.engine.handle_key(&KeyEvent::down(Key::ESCAPE, Mods(0), 10.0), &Context::default());
-    assert_eq!((out.commit.as_str(), out.preedit.unwrap().text.as_str()), ("", "국"));
-    // 커서 앞 변환을 다시 부르면 바꿀 것이 없어 조합을 지운다(앱 글자는 그대로 남는다).
-    let mut s = sim();
-    s.type_keys("{rs}nvskd{right}{A-ent}").unwrap();
-    let out = s.engine.hanja_begin(Some(""), "");
-    assert!(out.consumed && out.commit.is_empty());
-    assert_eq!(out.preedit.unwrap().text, "");
-}
-
-#[test]
-fn hanja_shift_arrows_move_the_range_edge() {
-    let mut s = sim();
-    s.type_keys("{rs}ishfsudskre{A-ent}").unwrap();
-    let preedit = |s: &mut Sim, keys: &str| {
-        s.type_keys(keys).unwrap();
-        s.preedit.clone()
-    };
-    assert_eq!(preedit(&mut s, "{S-right}"), "대한民國");
-    assert_eq!(preedit(&mut s, "{S-right}"), "대한민國");
-    assert_eq!(preedit(&mut s, "{S-right}"), "대한민國");
-    assert_eq!(preedit(&mut s, "{S-left}"), "대한民國");
-    assert_eq!(preedit(&mut s, "{S-left}{S-left}"), "大韓民國");
-}
-
-#[test]
 fn hanja_grid_and_paging_match_japanese() {
     let mut s = sim();
     s.type_keys("{rs}kre{A-ent}").unwrap();
     let n = s.candidates.as_ref().unwrap().items.len();
-    assert!(n > 30, "국 후보 {n}개");
+    assert_eq!(n, 58);
     s.type_keys("{right}").unwrap();
     assert_eq!(cand_state(&s), (Some(9), Some((2, n.div_ceil(9))), false));
     s.type_keys("{tab}{down}").unwrap();
@@ -675,70 +604,15 @@ fn hanja_grid_and_paging_match_japanese() {
 #[test]
 fn hanja_key_is_ignored_in_secure_fields_and_other_modes() {
     let mut s = sim();
-    s.type_keys("{rs}").unwrap();
+    s.type_keys("{rs}kre").unwrap();
     s.ctx.secure_field = true;
     let out = option_enter(&mut s);
-    assert!(!out.consumed && out.hanja_context.is_none());
+    assert!(!out.consumed && out.preedit.is_none());
     s.ctx.secure_field = false;
     s.type_keys("{ls}").unwrap();
     assert_eq!(s.engine.mode(), Mode::Ja);
-    assert!(option_enter(&mut s).hanja_context.is_none());
+    assert!(option_enter(&mut s).candidates.is_none());
     // 일본어 후보에는 뜻이 없다.
     s.type_keys("s{sp}").unwrap();
     assert!(s.candidates.as_ref().unwrap().notes.is_empty());
-}
-
-/// 한자 키 → 앱이 앞 글자를 읽어 주지 않은 것으로(`before` None) 변환을 시작한다.
-fn begin_without_app_text(s: &mut Sim) -> Output {
-    let _ = option_enter(s);
-    s.engine.hanja_begin(None, "")
-}
-
-fn ko_sim() -> Sim {
-    let mut e = Engine::new(Config::default());
-    e.set_mode(Mode::Ko);
-    Sim::new(e)
-}
-
-#[test]
-fn hanja_uses_the_just_typed_run_when_the_app_gives_no_text() {
-    // Chromium은 조합 중에 조합 밖 글자를 주지 않는다: 엔진이 기억한 방금 친 한글(대한민)로 끌어온다.
-    let mut s = ko_sim();
-    s.type_keys("ishfsudskre").unwrap();
-    let out = begin_without_app_text(&mut s);
-    assert_eq!((out.preedit.unwrap().text, out.preedit_replace_before), ("大韓民國".into(), 3));
-    // 취소하면 되돌린 글자가 다시 방금 친 한글이 된다.
-    let out = s.engine.handle_key(&KeyEvent::down(Key::ESCAPE, Mods(0), 10.0), &Context::default());
-    assert_eq!(out.commit, "대한민");
-    assert_eq!(begin_without_app_text(&mut s).preedit_replace_before, 3);
-}
-
-#[test]
-fn hanja_run_follows_what_the_app_did() {
-    let replace = |keys: &str| {
-        let mut s = ko_sim();
-        s.type_keys(keys).unwrap();
-        let out = begin_without_app_text(&mut s);
-        (out.preedit.map(|p| p.text).unwrap_or_default(), out.preedit_replace_before)
-    };
-    // 조합을 Backspace로 다 지운 뒤의 Backspace는 앱이 앞 글자(민)를 지운다: 대한 + 국 → 한국만 맞는다.
-    assert_eq!(replace("ishfsudskre{bs}{bs}{bs}{bs}kre").1, 1);
-    // 앱이 받은 키(Space, 화살표), 모드 전환, 클릭, ⌘, 기호는 방금 친 한글을 끊는다.
-    for keys in [
-        "ishfsuds{sp}kre",
-        "ishfsuds{right}kre",
-        "ishfsuds{rs}{rs}kre",
-        "ishfsuds{click}kre",
-        "ishfsuds{M-a}kre",
-        "ishfsudsQkre",
-    ] {
-        assert_eq!(replace(keys), ("國".into(), 0), "{keys}");
-    }
-    // 한자로 확정한 뒤는 한글이 아니다.
-    assert_eq!(replace("ishfsudskre{A-ent}{ent}kre"), ("國".into(), 0));
-    // 기호 뒤로는 새로 센다(× 뒤의 민 + 국).
-    assert_eq!(replace("isHudskre").1, 1);
-    // 글자를 바꾸지 않는 이벤트(Caps Lock, 키 뗌)는 끊지 않는다.
-    assert_eq!(replace("ishfsuds{caps}{caps}kre").1, 3);
-    assert_eq!(replace("ishfsudskre").1, 3);
 }

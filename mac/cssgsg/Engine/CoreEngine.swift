@@ -25,8 +25,6 @@ struct PreeditUpdate {
     let text: String
     let caret: Int
     let segments: [Segment]
-    /// 이 조합이 기준 자리(조합 글자, 없으면 커서·선택) 앞의 이만큼(UTF-16)도 덮는다(한자 변환이 앱 글자를 끌어올 때).
-    var replaceBefore = 0
 }
 
 enum CandidateUpdate {
@@ -34,14 +32,6 @@ enum CandidateUpdate {
     case hide
     /// items: 포커스된 문절의 후보 전체, notes: 후보마다 뜻(없으면 빈 배열), selected: 전체 목록 기준, grid: 격자(펼친) 모드.
     case show(items: [String], notes: [String], selected: Int?, grid: Bool)
-}
-
-/// 한자 키를 받은 엔진이 앱 글자를 어디서 읽어 달라고 하는지.
-enum HanjaContext {
-    /// 조합 중이 아니다: 커서 앞 글자와 선택한 글.
-    case caret
-    /// 조합 중이다: 조합 글자 앞 글자.
-    case composing
 }
 
 /// 엔진이 키 하나를 처리한 결과(Swift 쪽 사본). C 쪽 포인터는 다음 호출 때 무효가 되므로 바로 복사한다.
@@ -52,8 +42,6 @@ struct EngineOutput {
     var candidates: CandidateUpdate = .unchanged
     var mode: InputMode?
     var capsLockOff = false
-    /// 한자 키: 앱 글자를 읽어 곧바로 hanjaBegin을 부르고 그 결과를 대신 반영한다.
-    var hanjaContext: HanjaContext?
     /// 한자 학습이 바뀌었다(저장한다).
     var learningChanged = false
 }
@@ -108,19 +96,6 @@ final class CoreEngine {
         configURL.deletingLastPathComponent().appendingPathComponent("mozc", isDirectory: true)
     }
 
-    /// 한국어 한자 변환을 시작한다. 한자 키 결과의 hanjaContext를 받은 뒤 곧바로 부른다.
-    /// before: 기준 자리(조합 글자, 없으면 커서·선택 시작) 바로 앞 글자. 앱이 읽어 주지 않으면 nil(엔진이 방금 친 한글을 쓴다),
-    /// 기준 자리를 몰라 끌어올 수 없으면 "". selected: 선택한 글(없으면 "").
-    func hanjaBegin(before: String?, selected: String) -> EngineOutput {
-        let out = selected.withCString { sel in
-            if let before {
-                return before.withCString { cssgsg_engine_hanja_begin(engine, $0, sel) }
-            }
-            return cssgsg_engine_hanja_begin(engine, nil, sel)
-        }
-        return Self.copy(out)
-    }
-
     /// 한자 학습(TSV)을 불러온다. 읽은 항목 수.
     @discardableResult
     func loadHanjaLearning(_ tsv: String) -> Int {
@@ -164,7 +139,6 @@ final class CoreEngine {
         out.commit = o.commit.map { String(cString: $0) } ?? ""
         out.capsLockOff = o.caps_lock_off != 0
         out.mode = o.mode >= 0 ? InputMode(rawValue: o.mode) : nil
-        out.hanjaContext = o.hanja_context == 1 ? .caret : o.hanja_context == 2 ? .composing : nil
         out.learningChanged = o.learning_changed != 0
         if o.preedit_changed != 0 {
             let text = o.preedit.map { String(cString: $0) } ?? ""
@@ -173,8 +147,7 @@ final class CoreEngine {
                 guard let s = o.segments?[i] else { continue }
                 segments.append(.init(range: NSRange(location: Int(s.start), length: Int(s.len)), focused: s.focused != 0))
             }
-            out.preedit = PreeditUpdate(
-                text: text, caret: Int(o.preedit_caret), segments: segments, replaceBefore: Int(o.preedit_replace_before))
+            out.preedit = PreeditUpdate(text: text, caret: Int(o.preedit_caret), segments: segments)
         }
         if o.candidates_changed != 0 {
             if o.candidate_count == 0 {

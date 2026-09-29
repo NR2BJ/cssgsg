@@ -127,25 +127,16 @@ func makeEvent(_ type: CGEventType, code: UInt16, flags: UInt64, at seconds: Dou
 // MARK: - 가짜 문서
 
 /// NSTextInputClient 규칙대로 움직이는 문서. 커서는 늘 조합 글자 끝(=문서 끝)이다(러스트 시뮬레이터와 같다).
-/// 앱마다 다른 점을 흉내 내는 스위치(입력기에 보이는 것만 바뀌고 문서 자체는 규칙대로 움직인다).
 final class FakeDocument: TextClient {
     let storage = NSMutableString()
     private(set) var marked: NSRange?
     var selection = NSRange(location: 0, length: 0)
-    /// replacementRange를 무시하는 앱.
-    var ignoresReplacementRange = false
-    /// 글자를 읽어 주지 않는 앱(Chromium은 조합 중에 조합 밖 글자를 주지 않는다).
-    var readable = true
-    /// 조합 글자 자리를 알려 주지 않는 앱.
-    var reportsMarkedRange = true
-    /// 조합 글자 자리를 틀리게 알려 주는 앱(이 위치라고 한다).
-    var reportedMarkedLocation: Int?
 
     var string: String { storage as String }
 
     /// 바꿀 구간: replacementRange가 있으면 그것, 없으면 조합 글자, 그것도 없으면 선택.
     private func target(_ replacement: NSRange) -> NSRange {
-        if replacement.location != NSNotFound && !ignoresReplacementRange { return replacement }
+        if replacement.location != NSNotFound { return replacement }
         return marked ?? selection
     }
 
@@ -165,16 +156,8 @@ final class FakeDocument: TextClient {
         selection = NSRange(location: r.location + min(selectionRange.location, length), length: 0)
     }
 
-    func markedRange() -> NSRange {
-        guard reportsMarkedRange, let m = marked else { return NSRange(location: NSNotFound, length: 0) }
-        return NSRange(location: reportedMarkedLocation ?? m.location, length: m.length)
-    }
-    func selectedRange() -> NSRange { selection }
-
-    func substring(_ range: NSRange) -> String? {
-        guard readable, range.location != NSNotFound, NSMaxRange(range) <= storage.length else { return nil }
-        return storage.substring(with: range)
-    }
+    /// 자체 점검용: 조합 글자 자리(없으면 NSNotFound).
+    func markedRange() -> NSRange { marked ?? NSRange(location: NSNotFound, length: 0) }
 
     /// 앱이 받은 글자 키. 시뮬레이터처럼 확정 글자 끝(조합 글자 앞)에 넣는다.
     func typed(_ text: String) {
@@ -284,16 +267,8 @@ final class Typist {
         let key = modifiers.keyDown(event)
         lastEvent = event
         lastKey = key
-        var out = engine.handle(key)
-        if let context = out.hanjaContext {
-            // 입력기 컨트롤러와 같다: 앱 글자를 읽어 변환을 시작하고, 글자는 TextApplier가 이미 넣었다.
-            let (result, trace) = TextApplier.beginHanja(context, engine: engine, doc: doc)
-            lastHanja = trace
-            applyNonText(result)
-            out = result
-        } else {
-            apply(out)
-        }
+        let out = engine.handle(key)
+        apply(out)
         clock += 0.03
         guard !out.consumed, event.modifierFlags.intersection([.command, .control, .option]).isEmpty else { return }
         // 엔진이 넘긴 키는 앱이 ABC 배열대로 처리한다.
@@ -311,8 +286,6 @@ final class Typist {
         }
     }
 
-    /// 마지막 한자 변환 시작 과정(자체 점검용).
-    private(set) var lastHanja: TextApplier.HanjaTrace?
 
     func click() {
         deliverPending()
@@ -321,10 +294,6 @@ final class Typist {
 
     private func apply(_ out: EngineOutput) {
         TextApplier.apply(out, to: doc)
-        applyNonText(out)
-    }
-
-    private func applyNonText(_ out: EngineOutput) {
         if let m = out.mode {
             mode = m
         }

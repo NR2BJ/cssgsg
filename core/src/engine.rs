@@ -6,9 +6,6 @@
 //! - 그다음 `preedit`가 Some이고 비어 있지 않으면 `setMarkedText(preedit)`.
 //!   `commit` 없이 `preedit`가 Some(빈 값)이면 조합 중 글자를 지운다.
 //! - `consumed`가 false면 원래 키를 앱에 넘긴다(맥: handle에서 false 반환).
-//! - `preedit_replace_before`가 0이 아니면 새 `preedit`가 기준 자리(조합 글자, 없으면 커서·선택) 앞의 그만큼도
-//!   같이 덮는다(맥: setMarkedText의 replacementRange). 한자 변환이 앱에 이미 있는 글자를 조합으로 끌어올 때다.
-//! - `hanja_context`가 Some이면 셸은 앱에서 글자를 읽어 곧바로 [`Engine::hanja_begin`]을 부르고, 그 결과를 대신 반영한다.
 
 use crate::config::{Config, JaConfig, JaPunct, TapAction};
 use crate::convert::{ConvCmd, ConvView, Converter, EchoConverter};
@@ -98,21 +95,8 @@ pub struct Output {
     pub mode: Option<Mode>,
     /// Caps Lock을 꺼 달라는 요청.
     pub caps_lock_off: bool,
-    /// 한자 키를 받았다: 셸은 앱에서 글자를 읽어 곧바로 [`Engine::hanja_begin`]을 부르고 그 결과를 대신 반영한다.
-    pub hanja_context: Option<HanjaAnchor>,
-    /// 새 `preedit`가 기준 자리 앞의 이만큼(UTF-16 단위)도 같이 덮는다. 한자 변환이 앱의 글자를 조합으로 끌어올 때만 0이 아니다.
-    pub preedit_replace_before: usize,
     /// 한자 학습이 바뀌었다(셸이 저장한다).
     pub learning_changed: bool,
-}
-
-/// 한자 변환에 쓸 앱 글자를 어디서 읽을지.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum HanjaAnchor {
-    /// 조합 중이 아니다: 커서 앞 글자와 선택한 글.
-    Caret,
-    /// 조합 중이다: 조합 글자 앞 글자(선택은 없다).
-    Composing,
 }
 
 impl Output {
@@ -142,14 +126,8 @@ pub struct Engine {
     conv: Option<ConvView>,
     /// 한국어 한자 변환 중이면 Some.
     hanja: Option<ko_hanja::HanjaConv>,
-    /// 한자 키를 받고 셸이 앱 글자를 주기를 기다린다(다음 호출까지만).
-    hanja_pending: bool,
     hanja_learning: Learning,
     learning_dirty: bool,
-    /// 방금 친 한글: 한국어 조합기가 이어서 확정한 음절들로, 입력 자리(조합 글자) 바로 앞에 있다.
-    /// 앱이 앞 글자를 읽어 주지 않을 때(Chromium은 조합 중에 조합 밖 글자를 주지 않는다) 한자 변환이 쓴다.
-    /// 앱이 키를 받거나(Backspace는 한 글자 빼기), 클릭·모드 전환·다른 글자를 확정하면 비운다.
-    ko_run: Vec<char>,
     /// 후보창이 격자(펼친) 모드인지. 변환을 시작할 때 목록으로 돌아간다.
     cand_grid: bool,
     converter: Box<dyn Converter>,
@@ -173,10 +151,8 @@ impl Engine {
             kana: KanaComposer::new(),
             conv: None,
             hanja: None,
-            hanja_pending: false,
             hanja_learning: Learning::default(),
             learning_dirty: false,
-            ko_run: Vec::new(),
             cand_grid: false,
             converter: Box::new(EchoConverter::default()),
             latin: LatinLayout::graphite(),
@@ -202,44 +178,13 @@ impl Engine {
 
     /// 키 이벤트 하나를 처리한다.
     pub fn handle_key(&mut self, ev: &KeyEvent, ctx: &Context) -> Output {
-        self.hanja_pending = false;
         let before = self.snapshot();
         let out = self.route(ev, ctx);
-        self.track_run(ev, &out);
         self.finish(out, before)
-    }
-
-    /// 키 하나를 처리한 뒤 "방금 친 한글"(`ko_run`)을 고친다.
-    fn track_run(&mut self, ev: &KeyEvent, out: &Output) {
-        if self.mode != Mode::Ko {
-            self.ko_run.clear();
-            return;
-        }
-        if out.consumed {
-            if out.commit.chars().all(crate::hanja::is_syllable) {
-                self.ko_run.extend(out.commit.chars());
-                let extra = self.ko_run.len().saturating_sub(crate::hanja::MAX_READING);
-                self.ko_run.drain(..extra);
-            } else {
-                self.ko_run.clear();
-            }
-            return;
-        }
-        // 앱이 키를 받았다. 글자를 바꾸지 않는 이벤트(뗌, 수식키, Caps Lock)는 그대로 둔다.
-        if out.commit.is_empty() && (!ev.down || ev.key.is_modifier() || ev.key == Key::CAPS_LOCK) {
-            return;
-        }
-        if out.commit.is_empty() && ev.key == Key::BACKSPACE && !ev.mods.command_like() {
-            self.ko_run.pop();
-            return;
-        }
-        self.ko_run.clear();
     }
 
     /// 조합 중인 것을 모두 확정한다(마우스 클릭, 포커스 해제).
     pub fn commit_all(&mut self) -> Output {
-        self.hanja_pending = false;
-        self.ko_run.clear();
         let before = self.snapshot();
         let out = Output::commit_eat(self.take_composition());
         self.finish(out, before)
@@ -260,16 +205,12 @@ impl Engine {
             self.converter.cancel();
         }
         self.hanja = None;
-        self.hanja_pending = false;
-        self.ko_run.clear();
         self.taps.cancel();
         self.finish(Output::eat(), before)
     }
 
     /// 모드를 바로 바꾼다(메뉴 등). 조합 중인 것은 확정한다.
     pub fn set_mode(&mut self, mode: Mode) -> Output {
-        self.hanja_pending = false;
-        self.ko_run.clear();
         let before = self.snapshot();
         let out = self.switch_to(mode);
         self.finish(out, before)
@@ -302,9 +243,9 @@ impl Engine {
             return Output::pass();
         }
 
-        // 한자 키(Option+Enter): 변환 중이면 다음 후보, 아니면 셸에 앱 글자를 달라고 한다.
+        // 한자 키(Option+Enter): 변환 중이면 다음 후보, 아니면 조합 중인 글자를 바꾸기 시작한다.
         if self.mode == Mode::Ko && ko_hanja::is_hanja_key(ev) {
-            return if self.hanja.is_some() { self.hanja_key(ev) } else { self.hanja_request() };
+            return if self.hanja.is_some() { self.hanja_key(ev) } else { self.hanja_start() };
         }
 
         // ⌘/Ctrl/Option 조합: 조합을 확정하고 앱에 넘긴다(단축키는 쿼티 자리 그대로).
@@ -343,7 +284,6 @@ impl Engine {
     }
 
     fn switch_to(&mut self, mode: Mode) -> Output {
-        self.ko_run.clear();
         let mut out = Output::commit_pass(self.take_composition());
         if mode == self.mode {
             return out;

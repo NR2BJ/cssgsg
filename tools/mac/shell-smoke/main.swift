@@ -131,62 +131,30 @@ func selfTest() -> Bool {
         check(t.lastKey?.is_repeat == 0, "보통 누름 → is_repeat 0")
     }
 
-    // 한자 변환(참신 v18: 대 is, 한 hfs, 민 uds, 국 kre, 전 nvs, 기 kd). 입력기와 같은 TextApplier가
-    // 가짜 앱에서 앞 글자를 조합으로 끌어오고, 못 하는 앱에서는 조합 음절만 바꾼다.
-    func typed(_ keys: String, _ setup: (FakeDocument) -> Void = { _ in }) -> Typist {
+    // 한자 변환(참신 v18: 대 is, 한 hfs, 민 uds, 국 kre, 전 nvs, 기 kd, ㅁ u): 조합 중인 글자 하나만 바꾼다.
+    // 입력기와 같은 TextApplier가 가짜 문서에 넣는다. 앞 글자는 건드리지 않는다.
+    func typed(_ keys: String) -> Typist {
         let t = Typist(layout: layout, mode: .ko)
-        setup(t.doc)
         do { try t.type(keys) } catch { print("     키열 오류: \(error)") }
         return t
     }
     let none = NSRange(location: NSNotFound, length: 0)
     do {
         let t = typed("ishfsudskre{A-ent}")
-        check(t.screen == "大韓民國" && t.doc.markedRange() == NSRange(location: 0, length: 4)
-              && t.lastHanja?.replaceBefore == 3, "한자: 조합 음절 앞 한글을 끌어와 大韓民國(조합 0~4)")
+        check(t.screen == "대한민國" && t.doc.markedRange() == NSRange(location: 3, length: 1),
+              "한자: 조합 중인 국만 國(조합 3~4), 앞 글자는 그대로")
         try? t.type("{sp}")
-        check(t.screen == "대한民國" && t.doc.markedRange() == NSRange(location: 0, length: 4), "한자: 다음 후보는 짧은 구간(대한民國)")
-        try? t.type("{ent}")
-        check(t.screen == "대한民國" && t.doc.markedRange() == none, "한자: Enter로 확정")
-    }
-    do {
-        let t = typed("ishfsudskre{A-ent}") { $0.readable = false }
-        check(t.screen == "大韓民國" && t.lastHanja?.beforeLength == nil && t.lastHanja?.replaceBefore == 3,
-              "한자: 글자를 읽어 주지 않는 앱은 엔진이 방금 친 한글(대한민)로 大韓民國")
+        check(t.screen == "대한민局" && t.doc.markedRange() == NSRange(location: 3, length: 1), "한자: 다음 후보")
         try? t.type("{esc}")
-        check(t.screen == "대한민국" && t.doc.markedRange() == NSRange(location: 3, length: 1), "한자: 되돌리면 국이 다시 조합")
+        check(t.screen == "대한민국" && t.doc.markedRange() == NSRange(location: 3, length: 1), "한자: Esc로 국 조합이 돌아옴")
+        try? t.type("{A-ent}{ent}")
+        check(t.screen == "대한민國" && t.doc.markedRange() == none, "한자: Enter로 확정")
     }
     do {
-        let t = typed("ishfsudskre{A-ent}") { $0.reportsMarkedRange = false }
-        check(t.screen == "대한민國" && t.lastHanja?.anchorKnown == false && t.lastHanja?.replaceBefore == 0,
-              "한자: 조합 글자 자리를 모르는 앱은 조합 음절만")
-        let u = typed("ishfsudskre{A-ent}") {
-            $0.readable = false
-            $0.reportedMarkedLocation = 1
-        }
-        check(u.screen == "대한민國" && u.lastHanja?.restarted == true,
-              "한자: 조합 자리가 앞 글자보다 앞이면 아무것도 넣기 전에 조합 음절만으로 다시 시작")
-    }
-    do {
-        let t = typed("ishfsudskre{A-ent}") { $0.ignoresReplacementRange = true }
-        check(t.screen == "대한민大韓民國", "한자: replacementRange를 무시하는 앱은 겹친다(지워지지는 않는다, 알려진 한계)")
-    }
-    do {
-        let t = typed("nvskd{right}{A-ent}")
-        check(t.screen == "電氣" && t.doc.markedRange() == NSRange(location: 0, length: 2), "한자: 확정된 커서 앞 글자(電氣)")
-    }
-    do {
-        let t = typed("nvskd{right}")
-        t.doc.selection = NSRange(location: 0, length: 2)
-        try? t.type("{A-ent}")
-        check(t.screen == "電氣" && t.lastHanja?.selectedLength == 2 && t.lastHanja?.replaceBefore == 0, "한자: 선택한 글을 통째로")
-        try? t.type("{esc}")
-        check(t.screen == "전기" && t.doc.markedRange() == none, "한자: 선택 변환 취소는 원래 글자")
-        let u = typed("nvskd{right}") { $0.readable = false }
-        u.doc.selection = NSRange(location: 0, length: 2)
-        try? u.type("{A-ent}")
-        check(u.screen == "전기" && u.lastHanja?.selectionUnreadable == true && u.doc.markedRange() == none,
-              "한자: 선택을 읽지 못하는 앱은 바꾸지 않는다(선택이 사라지지 않게)")
+        let t = typed("u{A-ent}6")
+        check(t.screen == "※" && t.doc.markedRange() == none, "한자: 자음 하나 + 한자 키는 기호(ㅁ 6번 ※)")
+        let u = typed("nvskd{right}{A-ent}")
+        check(u.screen == "전기" && u.doc.markedRange() == none, "한자: 조합이 없으면 한자 키는 앱으로(글자 그대로)")
     }
     return ok
 }

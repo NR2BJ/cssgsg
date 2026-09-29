@@ -60,7 +60,7 @@ int main(void) {
     cssgsg_engine_free(c);
     CHECK(cssgsg_engine_new("[mac]\nnewline_replay_ms = 5") == NULL);
 
-    /* 한자: Option+Enter → 앱 글자 요청 → hanja_begin → 앞 글자를 끌어온 조합, 후보 뜻, 학습 저장/불러오기.
+    /* 한자: 조합 중인 국 + Option+Enter → 國(조합), 후보 뜻, 확정, 학습 저장/불러오기.
      * 새 필드는 구조체 끝에 있어서 헤더와 러스트의 배치가 어긋나면 여기서 값이 틀린다. */
     CssgsgEngine *h = cssgsg_engine_new(NULL);
     cssgsg_engine_set_mode(h, CSSGSG_MODE_KO);
@@ -71,17 +71,15 @@ int main(void) {
     }
     CssgsgKeyEvent option_enter = { cssgsg_key_from_mac_keycode(0x24), 1, 0, CSSGSG_MOD_ALT_L, 5.0 };
     o = cssgsg_engine_handle_key(h, &option_enter, NULL);
-    CHECK(o->consumed == 1 && o->hanja_context == 2 && o->preedit_changed == 0);
-    o = cssgsg_engine_hanja_begin(h, "대한민", NULL);
-    CHECK(o->consumed == 1 && o->preedit_changed == 1 && o->preedit_replace_before == 3);
-    CHECK(strcmp(o->preedit, "大韓民國") == 0);
+    CHECK(o->consumed == 1 && o->preedit_changed == 1 && strcmp(o->preedit, "國") == 0);
     CHECK(o->candidates_changed == 1 && o->candidate_count > 3 && o->candidate_selected == 0);
-    CHECK(o->candidate_page == 1 && o->candidate_grid == 0 && o->hanja_context == 0);
-    CHECK(o->candidate_notes != NULL && strcmp(o->candidate_notes[2], "나라 국") == 0);
+    CHECK(o->candidate_page == 1 && o->candidate_grid == 0 && o->learning_changed == 0);
+    CHECK(o->candidate_notes != NULL && strcmp(o->candidate_notes[0], "나라 국") == 0);
+    CHECK(strcmp(o->candidates[1], "局") == 0);
     o = cssgsg_engine_commit(h);
-    CHECK(strcmp(o->commit, "大韓民國") == 0 && o->learning_changed == 1);
+    CHECK(strcmp(o->commit, "國") == 0 && o->learning_changed == 1);
     const char *tsv = cssgsg_engine_hanja_learning_save(h);
-    CHECK(strstr(tsv, "대한민국\t大韓民國\t1\t") != NULL);
+    CHECK(strstr(tsv, "국\t國\t1\t") != NULL);
     CHECK(cssgsg_engine_hanja_learning_load(e, tsv) == 1);
     cssgsg_engine_free(h);
 

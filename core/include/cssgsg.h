@@ -10,9 +10,6 @@
  * - 그다음 preedit_changed이고 preedit가 비어 있지 않으면 setMarkedText(preedit, segments).
  *   commit 없이 preedit_changed이고 preedit가 비어 있으면 조합 중 글자를 지운다.
  * - consumed가 0이면 원래 키를 앱에 넘긴다(handle에서 false).
- * - preedit_replace_before가 0이 아니면 새 preedit가 기준 자리(조합 글자, 없으면 커서·선택) 앞의 그만큼도 덮는다
- *   (setMarkedText의 replacementRange). 한자 변환이 앱에 있는 글자를 조합으로 끌어올 때다.
- * - hanja_context가 0이 아니면 앱 글자를 읽어 곧바로 cssgsg_engine_hanja_begin을 부르고 그 결과를 대신 반영한다.
  */
 #ifndef CSSGSG_H
 #define CSSGSG_H
@@ -81,9 +78,7 @@ typedef struct CssgsgOutput {
     uint32_t candidate_page;     /* 1부터(지금 목록/격자 기준), 모르면 0 */
     uint32_t candidate_pages;
     uint8_t candidate_grid;      /* 격자(펼친) 모드면 1: 목록 9개/페이지, 격자 5열 × 6행 */
-    uint8_t hanja_context;       /* 한자 키: 1 커서 기준(커서 앞 글자·선택한 글), 2 조합 글자 기준(그 앞 글자), 0 없음 */
     uint8_t learning_changed;    /* 한자 학습이 바뀌었다(저장한다) */
-    uint32_t preedit_replace_before; /* 새 preedit가 기준 자리 앞의 이만큼(UTF-16)도 덮는다 */
     const char *const *candidate_notes; /* 후보마다 뜻(candidate_count개, "" 가능). 없는 후보창이면 NULL */
 } CssgsgOutput;
 
@@ -103,13 +98,6 @@ const CssgsgOutput *cssgsg_engine_reset(CssgsgEngine *engine);
 const CssgsgOutput *cssgsg_engine_set_mode(CssgsgEngine *engine, int32_t mode);
 int32_t cssgsg_engine_mode(const CssgsgEngine *engine);
 
-/* 한국어 한자 변환을 시작한다(hanja_context를 받은 뒤 곧바로).
- * before: 기준 자리(조합 글자, 없으면 커서·선택 시작) 바로 앞 글자. 앱이 읽어 주지 않으면 NULL(엔진이 기억한
- *   방금 친 한글을 쓴다). 기준 자리를 몰라 끌어올 수 없으면 "" (조합 음절만 바꾼다).
- * selected: 선택한 글(조합 중이 아닐 때), 없으면 NULL/"".
- * 결과의 preedit_replace_before만큼 끌어올 기준 자리를 셸이 알 수 없으면 ""로 다시 부른다.
- * consumed가 0이면 한자 키를 앱에 넘긴다. */
-const CssgsgOutput *cssgsg_engine_hanja_begin(CssgsgEngine *engine, const char *before, const char *selected);
 /* 한자 학습(TSV)을 불러와 바꾼다. 읽은 항목 수. */
 uint32_t cssgsg_engine_hanja_learning_load(CssgsgEngine *engine, const char *tsv);
 /* 한자 학습을 TSV로. 다음 이 함수 호출이나 해제 전까지 유효. */

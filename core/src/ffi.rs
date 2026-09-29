@@ -12,7 +12,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr;
 
 use crate::config::Config;
-use crate::engine::{Context, Engine, HanjaAnchor, Mode, Output};
+use crate::engine::{Context, Engine, Mode, Output};
 use crate::hanja::Learning;
 use crate::key::{Key, KeyEvent, Mods};
 
@@ -74,13 +74,8 @@ pub struct CssgsgOutput {
     pub candidate_pages: u32,
     /// 격자(펼친) 모드면 1. 목록은 한 페이지 9개, 격자는 5열 × 6행.
     pub candidate_grid: u8,
-    /// 한자 키를 받았다: 셸은 앱 글자를 읽어 곧바로 `cssgsg_engine_hanja_begin`을 부르고 그 결과를 대신 반영한다.
-    /// 0 없음, 1 커서 기준(커서 앞 글자와 선택한 글), 2 조합 글자 기준(조합 글자 앞 글자).
-    pub hanja_context: u8,
     /// 한자 학습이 바뀌었다(셸이 저장한다).
     pub learning_changed: u8,
-    /// 새 preedit가 기준 자리(조합 글자, 없으면 커서·선택) 앞의 이만큼(UTF-16)도 같이 덮는다.
-    pub preedit_replace_before: u32,
     /// 후보마다 같이 보일 뜻(candidate_count개, 빈 문자열 가능). 뜻이 없는 후보창이면 NULL.
     pub candidate_notes: *const *const c_char,
 }
@@ -138,9 +133,7 @@ fn empty_output() -> CssgsgOutput {
         candidate_page: 0,
         candidate_pages: 0,
         candidate_grid: 0,
-        hanja_context: 0,
         learning_changed: 0,
-        preedit_replace_before: 0,
         candidate_notes: ptr::null(),
     }
 }
@@ -155,13 +148,7 @@ impl CssgsgEngine {
         let mut o = empty_output();
         o.consumed = out.consumed as u8;
         o.caps_lock_off = out.caps_lock_off as u8;
-        o.hanja_context = match out.hanja_context {
-            None => 0,
-            Some(HanjaAnchor::Caret) => 1,
-            Some(HanjaAnchor::Composing) => 2,
-        };
         o.learning_changed = out.learning_changed as u8;
-        o.preedit_replace_before = out.preedit_replace_before as u32;
         o.mode = out.mode.map_or(-1, |m| m as i32);
         o.commit = self.commit.as_ptr();
 
@@ -357,29 +344,6 @@ unsafe fn str_arg(p: *const c_char) -> String {
     unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned()
 }
 
-/// 한국어 한자 변환을 시작한다. 한자 키 결과에 `hanja_context`가 있으면 셸이 곧바로 부르고, 그 결과를 대신 반영한다.
-/// - `before`: 기준 자리(조합 글자, 없으면 커서·선택 시작) 바로 앞 글자.
-///   앱이 읽어 주지 않으면 NULL(엔진이 기억한 방금 친 한글을 쓴다). 기준 자리를 몰라 끌어올 수 없으면 "" (조합 음절만 바꾼다).
-/// - `selected`: 선택한 글(조합 중이 아닐 때). 없으면 NULL이나 "".
-///
-/// 결과의 `preedit_replace_before`만큼 앞 글자를 끌어올 기준 자리를 셸이 알 수 없으면 ""로 다시 부른다:
-/// 조합 음절만 바꾸는 변환으로 다시 시작한다. `consumed`가 0이면 한자 키를 앱에 넘긴다.
-///
-/// # Safety
-/// `e`는 NULL이거나 `cssgsg_engine_new`가 돌려준, 아직 해제하지 않은 포인터여야 한다.
-/// 두 문자열은 NULL이거나 NUL로 끝나야 한다.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn cssgsg_engine_hanja_begin(
-    e: *mut CssgsgEngine,
-    before: *const c_char,
-    selected: *const c_char,
-) -> *const CssgsgOutput {
-    // SAFETY: 위 약속대로 NULL이거나 NUL로 끝나는 문자열이다.
-    let before = (!before.is_null()).then(|| unsafe { str_arg(before) });
-    let selected = unsafe { str_arg(selected) };
-    unsafe { run(e, |engine| engine.hanja_begin(before.as_deref(), &selected)) }
-}
-
 /// 한자 학습(저장 형식 TSV)을 불러와 지금 것을 바꾼다. 읽은 항목 수를 돌려준다.
 ///
 /// # Safety
@@ -545,22 +509,19 @@ mod tests {
             for (i, code) in [0x28u16, 0x0F, 0x0E].into_iter().enumerate() {
                 cssgsg_engine_handle_key(e, &key(code, 1.0 + i as f64 / 10.0), ptr::null());
             }
-            let mut ev = key(0x24, 2.0); // Return
+            let mut ev = key(0x24, 2.0); // Option+Return: 조합 중인 국을 바꾼다
             ev.mods = crate::key::Mods::ALT_L;
             let out = &*cssgsg_engine_handle_key(e, &ev, ptr::null());
-            assert_eq!((out.consumed, out.hanja_context), (1, 2));
-            let before = CString::new("대한민").unwrap();
-            let out = &*cssgsg_engine_hanja_begin(e, before.as_ptr(), ptr::null());
-            assert_eq!((out.consumed, out.preedit_changed, out.preedit_replace_before), (1, 1, 3));
-            assert_eq!(s(out.preedit), "大韓民國");
+            assert_eq!((out.consumed, out.preedit_changed, out.candidates_changed), (1, 1, 1));
+            assert_eq!(s(out.preedit), "國");
             assert!(out.candidate_count > 3 && !out.candidate_notes.is_null());
-            assert_eq!(s(*out.candidates.add(2)), "國");
-            assert_eq!(s(*out.candidate_notes.add(2)), "나라 국");
+            assert_eq!(s(*out.candidates.add(1)), "局");
+            assert_eq!(s(*out.candidate_notes.add(0)), "나라 국");
             let out = &*cssgsg_engine_commit(e);
-            assert_eq!((s(out.commit).as_str(), out.learning_changed), ("大韓民國", 1));
+            assert_eq!((s(out.commit).as_str(), out.learning_changed), ("國", 1));
 
             let tsv = s(cssgsg_engine_hanja_learning_save(e));
-            assert!(tsv.contains("대한민국\t大韓民國\t1\t"), "{tsv}");
+            assert!(tsv.contains("국\t國\t1\t"), "{tsv}");
             let other = cssgsg_engine_new(ptr::null());
             let tsv = CString::new(tsv).unwrap();
             assert_eq!(cssgsg_engine_hanja_learning_load(other, tsv.as_ptr()), 1);

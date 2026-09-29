@@ -70,9 +70,6 @@ final class CssgsgInputController: IMKInputController {
             if secure {
                 return false
             }
-            if let context = out.hanjaContext {
-                return beginHanja(context, client: client)
-            }
             return finish(out, event: event, client: client)
 
         default:
@@ -105,24 +102,6 @@ final class CssgsgInputController: IMKInputController {
         }
 
         apply(out, client: client)
-        return out.consumed
-    }
-
-    /// 한자 키: 앱 글자를 읽어 변환을 시작한다. 바꿀 것이 없으면 false(Option+Enter를 앱에 넘긴다).
-    private func beginHanja(_ context: HanjaContext, client: any IMKTextInput) -> Bool {
-        let (out, trace) = TextApplier.beginHanja(context, engine: CoreEngine.shared, doc: IMKTextClient(client: client))
-        applyUI(out, client: client)
-        DeveloperLogger.shared.log("Hanja", "begin", metadata: [
-            "anchor": context == .composing ? "composing" : "caret",
-            "anchorKnown": "\(trace.anchorKnown)",
-            "beforeLen": trace.beforeLength.map { "\($0)" } ?? "unreadable",
-            "selectedLen": "\(trace.selectedLength)",
-            "selectionUnreadable": "\(trace.selectionUnreadable)",
-            "replaceBefore": "\(trace.replaceBefore)",
-            "restarted": "\(trace.restarted)",
-            "consumed": "\(out.consumed)",
-            "app": client.bundleIdentifier() ?? "unknown",
-        ])
         return out.consumed
     }
 
@@ -243,11 +222,4 @@ struct IMKTextClient: TextClient {
         client.setMarkedText(text, selectionRange: selectionRange, replacementRange: replacementRange)
     }
 
-    func markedRange() -> NSRange { client.markedRange() }
-
-    func selectedRange() -> NSRange { client.selectedRange() }
-
-    func substring(_ range: NSRange) -> String? {
-        client.attributedSubstring(from: range)?.string
-    }
 }

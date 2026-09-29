@@ -21,9 +21,8 @@
   - [~] M2b: 모드 HUD(커서 근처 G/ㅊ/月, 설정 `[mac]`) 완료. 입력 소스 복구, 비밀번호 칸 Graphite(나중에)
   - [ ] M2c: 설정 앱(학습 탭 포함). 그전까지는 메뉴 막대 → "설정 파일 열기"로 `config.toml`을 고친다
 - [x] 일본어 한자 변환: Mozc를 입력기 프로세스 안에 정적 링크(0.2.0, [mozc/README.md](mozc/README.md))
-- [x] 한국어 한자 변환(0.3.0, Option+Enter, [CONCEPT.md](CONCEPT.md) §5.4): libhangul 사전(30만 항목)을 코어에 넣었다.
-  조합 중 음절과 커서 앞 한글(또는 선택한 글)을 조합으로 끌어와 바꾸고, 길이가 다른 후보(大韓民國·民國·國)를 한 목록에 뜻과 같이 보인다.
-  자음 하나 + Option+Enter는 기호표(ㅁ → ※☆★…). 고른 후보를 기억한다
+- [x] 한국어 한자 변환(0.3.1, Option+Enter, [CONCEPT.md](CONCEPT.md) §5.4): 조합 중인 글자 하나를 libhangul 사전으로 바꾼다.
+  후보창에 뜻(國 나라 국)을 같이 보이고, 자음 하나 + Option+Return은 기호표(ㅁ → ※☆★…). 고른 후보를 기억한다
 - [ ] 설정 앱(학습 탭 포함)
 - [ ] Windows TSF (나중)
 
@@ -99,7 +98,7 @@ bash tools/mac/release.sh 0.1.1 --notes-file docs/releases/v0.1.1.md    # 검사
 
 보통 글자는 쿼티 자리, 대문자와 Shift 기호는 Shift. `{sp}` `{bs}` `{ent}` `{esc}` `{tab}` `{left}` …,
 `{rs}` `{ls}`(오른쪽/왼쪽 Shift 탭), `{caps}`, `{click}`, `{M-c}`(⌘C), `{A-ent}`(Option+Enter, 한자) 같은 식이다.
-시뮬레이터는 한자 변환에 커서 앞 글자를 준다: `cargo run -q -p cssgsg-cli -- type "ishfsudskre{A-ent}"` → 大韓民國.
+예: `cargo run -q -p cssgsg-cli -- type "ishfsudskre{A-ent}"` → 대한민國(조합 중인 국만 바뀐다).
 
 ## 검증
 

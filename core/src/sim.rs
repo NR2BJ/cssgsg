@@ -8,14 +8,10 @@
 //! - `{S-이름}`: Shift+특수 키. `{M-x}` ⌘/Win+x, `{C-x}` Ctrl+x, `{A-x}` Option/Alt+x. 한자 키는 `{A-ent}`.
 //!
 //! 앱 화면은 확정 글자 + 조합 글자이고 커서는 늘 끝이다(화살표는 커서를 옮기지 않는다). 선택은 없다.
-//! 한자 변환이 앱 글자를 달라고 하면 커서(조합 글자) 앞 [`CONTEXT_UNITS`]만큼을 준다(맥 셸과 같다).
 
 use crate::engine::{Candidates, Context, Engine, Mode, Output};
 use crate::key::{Key, KeyEvent, Mods};
 use crate::latin::qwerty_char_for;
-
-/// 한자 변환에 넘기는 앞 글자 길이(UTF-16). 맥 셸의 HanjaTextBridge.contextUnits와 같다.
-pub const CONTEXT_UNITS: usize = 20;
 
 pub struct Sim {
     pub engine: Engine,
@@ -126,11 +122,7 @@ impl Sim {
     pub fn press(&mut self, key: Key, mod_bits: u32) {
         self.time += 0.03;
         let ev = KeyEvent::down(key, self.mods(mod_bits), self.time);
-        let mut out = self.engine.handle_key(&ev, &self.ctx);
-        if out.hanja_context.is_some() {
-            // 셸처럼 곧바로 앞 글자를 주고, 그 결과를 대신 반영한다.
-            out = self.engine.hanja_begin(Some(&tail_units(&self.text, CONTEXT_UNITS)), "");
-        }
+        let out = self.engine.handle_key(&ev, &self.ctx);
         self.apply(Some(&ev), &out);
         self.time += 0.03;
         let ev = KeyEvent::up(key, self.mods(mod_bits), self.time);
@@ -156,13 +148,6 @@ impl Sim {
             self.preedit.clear();
         }
         if let Some(p) = &out.preedit {
-            // 앞 글자를 조합으로 끌어온다(맥: setMarkedText의 replacementRange).
-            let mut absorb = out.preedit_replace_before;
-            while absorb > 0
-                && let Some(c) = self.text.pop()
-            {
-                absorb = absorb.saturating_sub(c.len_utf16());
-            }
             self.preedit = p.text.clone();
         }
         if let Some(c) = &out.candidates {
@@ -190,21 +175,6 @@ impl Sim {
             }
         }
     }
-}
-
-/// 글자열 끝의 UTF-16 `units`만큼(글자 중간에서 자르지 않는다).
-pub fn tail_units(text: &str, units: usize) -> String {
-    let mut taken = 0;
-    let start = text
-        .char_indices()
-        .rev()
-        .take_while(|(_, c)| {
-            taken += c.len_utf16();
-            taken <= units
-        })
-        .last()
-        .map_or(text.len(), |(i, _)| i);
-    text[start..].to_string()
 }
 
 fn named_key(name: &str) -> Option<Key> {
