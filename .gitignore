@@ -1,0 +1,17 @@
+# agent worklog (git 롤백 시 보존)
+worklog.md
+worklog.md.bak
+
+# macOS
+.DS_Store
+
+# build outputs
+/target/
+/build/
+DerivedData/
+
+# 원작자 배포 배열 파일 (날개셋 .ist 등) — 레포에 커밋하지 않음
+*.ist
+
+# node
+node_modules/
