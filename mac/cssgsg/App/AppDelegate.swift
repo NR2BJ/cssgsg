@@ -210,6 +210,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     # full_width_space = false
     # 일본어 모드에서 켠 Caps Lock(가타카나)을 다른 모드로 나갈 때 끈다
     # caps_katakana_auto_off = true
+    # Caps Lock 가타카나는 치는 대로 바로 확정한다(마지막 글자만 잠깐 조합). false면 히라가나처럼 조합으로 들고 있다
+    # katakana_direct = true
 
     """
 }

@@ -42,6 +42,8 @@ pub struct JaConfig {
     pub full_width_space: bool,
     /// 일본어 모드에서 켠 Caps Lock(가타카나)을 다른 모드로 나갈 때 끈다.
     pub caps_katakana_auto_off: bool,
+    /// Caps Lock 가타카나는 변환하지 않으므로 바로 확정한다. 뒤치기(゛)가 바꿀 수 있는 마지막 키의 글자만 조합으로 남긴다.
+    pub katakana_direct: bool,
 }
 
 impl Default for JaConfig {
@@ -51,6 +53,7 @@ impl Default for JaConfig {
             slash_nakaguro: true,
             full_width_space: false,
             caps_katakana_auto_off: true,
+            katakana_direct: true,
         }
     }
 }

@@ -9,6 +9,8 @@
 //!   붙을 가나가 없으면 ゛ 글자 자체를 넣고, ゛에 한 번 더 치면 ゜가 된다.
 //! - 앞치기 뒤에 정의되지 않은 키가 오면 앞치기를 취소하고 그 키를 새로 처리한다.
 //! - Backspace는 키 입력 하나를 되돌린다(が → か, ☆ 취소).
+//! - 바로 확정(가타카나): 마지막 키가 붙인 글자(뒤치기가 아직 바꿀 수 있는 부분)만 남기고 앞은 꺼낼 수 있다
+//!   (`take_settled`). 3타 단축처럼 한 키가 두 글자를 내면 둘을 함께 남긴다.
 
 use super::layout::KanaLayout;
 use crate::key::Key;
@@ -35,10 +37,19 @@ impl Pending {
 }
 
 #[derive(Debug, Default, Clone)]
+struct Snapshot {
+    reading: String,
+    pending: Pending,
+    unit_start: usize,
+}
+
+#[derive(Debug, Default, Clone)]
 pub struct KanaComposer {
     reading: String,
     pending: Pending,
-    history: Vec<(String, Pending)>,
+    /// 마지막 키가 붙인 글자가 읽기에서 시작하는 바이트 위치. 그 앞은 뒤치기로도 바뀌지 않는다.
+    unit_start: usize,
+    history: Vec<Snapshot>,
 }
 
 impl KanaComposer {
@@ -76,7 +87,30 @@ impl KanaComposer {
     pub fn clear(&mut self) {
         self.reading.clear();
         self.pending = Pending::None;
+        self.unit_start = 0;
         self.history.clear();
+    }
+
+    /// 더는 바뀌지 않는 앞부분(마지막 키가 붙인 글자 앞)을 꺼낸다. 되돌리기 기록도 그만큼 떼어 낸다.
+    /// 앞부분이 다 차기 전의 기록은 꺼낸 글자를 되살리므로 버린다(그다음 Backspace는 앱으로 간다).
+    pub fn take_settled(&mut self) -> String {
+        if self.unit_start == 0 {
+            return String::new();
+        }
+        let settled: String = self.reading.drain(..self.unit_start).collect();
+        self.unit_start = 0;
+        self.history = std::mem::take(&mut self.history)
+            .into_iter()
+            .filter_map(|s| {
+                let rest = s.reading.strip_prefix(settled.as_str())?.to_string();
+                Some(Snapshot {
+                    reading: rest,
+                    pending: s.pending,
+                    unit_start: s.unit_start.saturating_sub(settled.len()),
+                })
+            })
+            .collect();
+        settled
     }
 
     /// 앞치기만 취소한다(읽기는 그대로). 취소했으면 true.
@@ -92,15 +126,14 @@ impl KanaComposer {
     pub fn push_str(&mut self, s: &str) {
         self.save();
         self.pending = Pending::None;
-        self.reading.push_str(s);
+        self.append(s);
     }
 
     /// 키 입력 하나를 되돌린다. 되돌릴 게 없으면 false.
     pub fn backspace(&mut self) -> bool {
         match self.history.pop() {
-            Some((reading, pending)) => {
-                self.reading = reading;
-                self.pending = pending;
+            Some(s) => {
+                self.restore(s);
                 true
             }
             None => false,
@@ -122,7 +155,7 @@ impl KanaComposer {
                     self.apply_daku(l);
                 } else if let Some(kana) = l.base.get(&key) {
                     self.save();
-                    self.reading.push_str(kana);
+                    self.append(kana);
                 } else {
                     return false;
                 }
@@ -148,16 +181,13 @@ impl KanaComposer {
         if let Some(kana) = table(l).get(&key) {
             self.save();
             self.pending = Pending::None;
-            self.reading.push_str(kana);
+            self.append(kana);
             return true;
         }
         // 정의되지 않은 조합: 걸려 있는 앞치기를 모두 없던 일로 하고 이 키를 새로 처리한다.
         while self.pending != Pending::None {
             match self.history.pop() {
-                Some((reading, pending)) => {
-                    self.reading = reading;
-                    self.pending = pending;
-                }
+                Some(s) => self.restore(s),
                 None => self.pending = Pending::None,
             }
         }
@@ -169,15 +199,33 @@ impl KanaComposer {
             let replaced = l.postfix.get(&last).copied().or(if last == '゛' { Some('゜') } else { None });
             if let Some(to) = replaced {
                 self.reading.pop();
+                // 바뀐 글자는 마지막 키가 붙인 글자에 속한다.
+                self.unit_start = self.unit_start.min(self.reading.len());
                 self.reading.push(to);
                 return;
             }
         }
-        self.reading.push('゛');
+        self.append("゛");
+    }
+
+    /// 새 키가 글자를 붙인다. 그 글자가 새 "마지막 키의 글자"가 된다.
+    fn append(&mut self, s: &str) {
+        self.unit_start = self.reading.len();
+        self.reading.push_str(s);
     }
 
     fn save(&mut self) {
-        self.history.push((self.reading.clone(), self.pending));
+        self.history.push(Snapshot {
+            reading: self.reading.clone(),
+            pending: self.pending,
+            unit_start: self.unit_start,
+        });
+    }
+
+    fn restore(&mut self, s: Snapshot) {
+        self.reading = s.reading;
+        self.pending = s.pending;
+        self.unit_start = s.unit_start;
     }
 }
 
@@ -264,6 +312,55 @@ mod tests {
         assert_eq!(t("skly"), "かつ");
         assert_eq!(t("skly<"), "か");
         assert_eq!(t("skly<<"), "");
+    }
+
+    /// 가타카나 바로 확정처럼 매 키 뒤에 앞부분을 꺼낸다. (꺼낸 글자, 남은 표시). '<'는 Backspace.
+    fn settle(keys: &str) -> (String, String) {
+        let l = KanaLayout::shingetsu();
+        let mut c = KanaComposer::new();
+        let mut settled = String::new();
+        for ch in keys.chars() {
+            if ch == '<' {
+                c.backspace();
+            } else {
+                assert!(c.key(&l, Key::from_qwerty(ch).unwrap()), "가나 키가 아님: {ch:?}");
+            }
+            settled += &c.take_settled();
+        }
+        (settled, c.display(false))
+    }
+
+    #[test]
+    fn settle_keeps_only_the_last_key_open() {
+        // に ほ ん は새 가나가 붙을 때 확정되고, 마지막 ご(こ+゛)만 남는다.
+        assert_eq!(settle("ckeuwl"), ("にほん".into(), "ご".into()));
+        // 3타 단축은 한 키가 두 글자를 낸다: 둘을 함께 남기고, 다음 가나가 오면 함께 확정한다.
+        assert_eq!(settle("klq"), ("".into(), "ぴょ".into()));
+        assert_eq!(settle("klqs"), ("ぴょ".into(), "か".into()));
+        // 뒤치기는 남아 있는 마지막 글자에 붙는다.
+        assert_eq!(settle("sfl"), ("か".into(), "ど".into()));
+        // 앞치기 중에는 앞 글자가 남아 있다가, 가나가 나오면 확정된다.
+        assert_eq!(settle("sk"), ("".into(), "か☆".into()));
+        assert_eq!(settle("ska"), ("か".into(), "あ".into()));
+        // 정의되지 않은 앞치기 조합: ☆를 취소하고 새로 친 가나 앞까지 확정한다.
+        assert_eq!(settle("sfky"), ("かと".into(), "つ".into()));
+    }
+
+    #[test]
+    fn backspace_after_settle_undoes_only_the_open_part() {
+        let l = KanaLayout::shingetsu();
+        let mut c = KanaComposer::new();
+        for ch in "sfl".chars() {
+            c.key(&l, Key::from_qwerty(ch).unwrap());
+            c.take_settled();
+        }
+        assert_eq!(c.display(false), "ど");
+        assert!(c.backspace());
+        assert_eq!(c.display(false), "と");
+        assert!(c.backspace());
+        assert_eq!(c.display(false), "");
+        // 확정한 か는 조합기에 없다: 다음 Backspace는 앱이 처리한다.
+        assert!(!c.backspace());
     }
 
     #[test]

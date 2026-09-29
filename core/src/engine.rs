@@ -379,13 +379,13 @@ impl Engine {
         if k.is_printable() {
             // 글자 키는 Shift를 무시하고 가나. 그 밖의 키(숫자·기호 자리)는 Shift를 따른다.
             if (k.is_letter() || !shift) && self.kana.key(&self.kana_layout, k) {
-                return Output::eat();
+                return self.ja_typed(katakana);
             }
             if k.is_digit() && !shift {
                 // 숫자는 읽기에 넣는다(3じ → 3時 변환).
                 let d = k.qwerty_char(false).unwrap();
                 self.kana.push_str(&d.to_string());
-                return Output::eat();
+                return self.ja_typed(katakana);
             }
             // 그 밖의 기호: 읽기를 확정하고 설정대로 기호를 낸다.
             let ascii = k.qwerty_char(shift).unwrap();
@@ -399,6 +399,18 @@ impl Engine {
 
         // 화살표, Delete 등: 읽기를 확정하고 앱에 넘긴다.
         Output::commit_pass(self.take_composition())
+    }
+
+    /// 가나(또는 숫자)를 읽기에 넣은 뒤. 가타카나 입력(Caps Lock)은 변환하지 않으므로 바로 확정하고,
+    /// 뒤치기(゛)가 아직 바꿀 수 있는 마지막 키의 글자만 조합으로 남긴다(ja.katakana_direct).
+    fn ja_typed(&mut self, katakana: bool) -> Output {
+        if katakana && self.config.ja.katakana_direct {
+            let settled = self.kana.take_settled();
+            if !settled.is_empty() {
+                return Output::commit_eat(self.ja_text(&settled));
+            }
+        }
+        Output::eat()
     }
 
     fn ja_converting_key(&mut self, ev: &KeyEvent) -> Output {

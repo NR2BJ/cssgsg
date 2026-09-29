@@ -178,7 +178,8 @@ fn japanese_space_width() {
 fn caps_lock_is_katakana_in_japanese() {
     let mut s = sim();
     s.type_keys("{ls}{caps}ckeuwl").unwrap();
-    assert_eq!(s.preedit, "ニホンゴ");
+    // 가타카나는 변환하지 않으므로 바로 확정한다. 뒤치기가 바꿀 수 있는 마지막 글자만 조합으로 남는다.
+    assert_eq!((s.text.as_str(), s.preedit.as_str()), ("ニホン", "ゴ"));
     s.type_keys("{sp}").unwrap();
     assert_eq!(s.screen(), "ニホンゴ ");
     // 일본어 모드를 나가면 Caps Lock을 끈다.
@@ -272,4 +273,60 @@ fn secure_field_passes_keys_but_keeps_taps_consistent() {
     e.handle_key(&KeyEvent::down(Key::A, Mods(Mods::SHIFT_R), 1.02), &ctx);
     let out = e.handle_key(&KeyEvent::up(Key::SHIFT_RIGHT, Mods::default(), 1.05), &ctx);
     assert_eq!(out.mode, None);
+}
+
+#[test]
+fn katakana_direct_can_be_turned_off() {
+    let mut s = sim_with("[ja]\nkatakana_direct = false");
+    s.type_keys("{ls}{caps}ckeuwl").unwrap();
+    assert_eq!((s.text.as_str(), s.preedit.as_str()), ("", "ニホンゴ"));
+    // 히라가나는 설정과 상관없이 변환을 위해 조합으로 남는다.
+    let mut s = sim();
+    s.type_keys("{ls}ckeuwl").unwrap();
+    assert_eq!((s.text.as_str(), s.preedit.as_str()), ("", "にほんご"));
+}
+
+#[test]
+fn katakana_direct_backspace() {
+    // か(s) と(f): か는 と를 칠 때 확정. Backspace는 と를 되돌리고, 그다음은 앱이 カ를 지운다.
+    let mut s = sim();
+    s.type_keys("{ls}{caps}sf{bs}").unwrap();
+    assert_eq!((s.text.as_str(), s.preedit.as_str()), ("カ", ""));
+    s.type_keys("{bs}").unwrap();
+    assert_eq!(s.screen(), "");
+}
+
+#[test]
+fn katakana_direct_shows_the_same_text_as_composing() {
+    // 무작위 키열(Backspace 없음, Caps Lock 켠 채): 바로 확정해도 화면의 글자는 조합으로 들고 있을 때와 같아야 한다.
+    // (중간에 Caps Lock을 끄면 다르다: katakana_direct_keeps_what_was_typed_as_katakana)
+    // 조합으로 남는 것은 마지막 키의 글자(최대 2자)와 앞치기 표시(최대 2자)뿐이다.
+    let keys: Vec<&str> =
+        "a s d f g h j k l ; q w e r t y u i o p z x c v b n m , . / [ ] 1 2 3 {sp} {ent} - '"
+            .split(' ')
+            .collect();
+    let mut seed: u64 = 0x5eed;
+    let mut next = || {
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        (seed >> 33) as usize
+    };
+    for _ in 0..3000 {
+        let len = 1 + next() % 20;
+        let line: String = (0..len).map(|_| keys[next() % keys.len()]).collect();
+        let keys = format!("{{ls}}{{caps}}{line}");
+        let mut direct = sim();
+        let mut composing = sim_with("[ja]\nkatakana_direct = false");
+        direct.type_keys(&keys).unwrap();
+        composing.type_keys(&keys).unwrap();
+        assert_eq!(direct.screen(), composing.screen(), "{keys}");
+        assert!(direct.preedit.chars().count() <= 4, "{keys}: 조합이 길다 {:?}", direct.preedit);
+    }
+}
+
+#[test]
+fn katakana_direct_keeps_what_was_typed_as_katakana() {
+    // Caps Lock을 켜고 친 글자는 그때 가타카나로 확정된다. 끄면 남은 조합(마지막 글자)만 히라가나로 보인다.
+    let mut s = sim();
+    s.type_keys("{ls}{caps}sf{caps}").unwrap();
+    assert_eq!((s.text.as_str(), s.preedit.as_str()), ("カ", "と"));
 }
