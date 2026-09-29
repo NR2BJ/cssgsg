@@ -120,13 +120,14 @@ gh release create "${ARGS[@]}"
 
 if [ "$PRERELEASE" -eq 0 ]; then
   echo "=== 올라간 릴리스 확인(앱과 같은 코드) ==="
-  for attempt in 1 2 3 4 5 6; do
+  # 릴리스 목록(/releases, 베타 채널)은 GitHub가 최대 60초 캐시한다(0.5.1: 30초 안에 안 보였다). 2분까지 기다린다.
+  for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
     if "$ROOT/build/mac-smoke/update-smoke" --live "$PKG" "$VERSION"; then
       break
     fi
-    [ "$attempt" -lt 6 ] || { echo "올라간 릴리스 확인 실패"; exit 1; }
+    [ "$attempt" -lt 12 ] || { echo "올라간 릴리스 확인 실패"; exit 1; }
     echo "  GitHub 반영을 기다린다…"
-    sleep 5
+    sleep 10
   done
 fi
 echo "완료: https://github.com/$REPO/releases/tag/$TAG"
