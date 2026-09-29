@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             ?? (Bundle.main.bundleIdentifier ?? "com.cssgsg.inputmethod.app") + "_Connection"
         server = IMKServer(name: connection, bundleIdentifier: Bundle.main.bundleIdentifier)
         let engine = CoreEngine.shared
+        KeyEventReposter.replayDelay = TimeInterval(engine.macSettings.newline_replay_ms) / 1000
         setupStatusItem()
         updateStatus(engine.mode)
         InputSourceSetup.register()
@@ -212,6 +213,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     # caps_katakana_auto_off = true
     # Caps Lock 가타카나는 치는 대로 바로 확정한다(마지막 글자만 잠깐 조합). false면 히라가나처럼 조합으로 들고 있다
     # katakana_direct = true
+
+    # [mac]
+    # 모드를 바꿀 때 커서 근처에 A/한/あ를 잠깐 보인다
+    # hud = true
+    # HUD 자리: "caret"(커서 위, 커서 자리를 모르면 안 보임) 또는 "mouse"(마우스 옆)
+    # hud_position = "caret"
+    # Codex처럼 줄바꿈 입력을 전송으로 받는 앱에서, 조합 중 Shift+Enter로 확정한 뒤 줄을 바꾸기까지 기다리는 시간(밀리초, 20~1000).
+    # 짧으면 빨라지지만 줄바꿈이 먹힐 수 있다
+    # newline_replay_ms = 120
 
     """
 }

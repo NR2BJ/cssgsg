@@ -106,6 +106,10 @@ final class CssgsgInputController: IMKInputController {
     }
 
     private func apply(_ out: EngineOutput, client: any IMKTextInput, allowCommit: Bool = true) {
+        // 모드가 바뀌면 HUD를 띄운다. 자리는 확정하기 전에 잰다(확정한 뒤에는 앱마다 커서 자리가 어긋난다).
+        let settings = CoreEngine.shared.macSettings
+        let hudCaret: NSRect? = out.mode != nil && settings.hud != 0 && settings.hud_at_mouse == 0
+            ? TextInputGeometry.caretRect(for: client)?.rect : nil
         let replacement = NSRange(location: NSNotFound, length: NSNotFound)
         let committed = !out.commit.isEmpty && allowCommit
         if committed {
@@ -139,6 +143,9 @@ final class CssgsgInputController: IMKInputController {
         }
         if let mode = out.mode {
             (NSApp.delegate as? AppDelegate)?.updateStatus(mode)
+            if settings.hud != 0 {
+                ModeHUD.shared.show(mode.label, caret: hudCaret, fallbackToMouse: settings.hud_at_mouse != 0)
+            }
         }
         if out.capsLockOff {
             CapsLock.set(false)

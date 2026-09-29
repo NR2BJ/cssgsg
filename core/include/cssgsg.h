@@ -95,6 +95,14 @@ const CssgsgOutput *cssgsg_engine_reset(CssgsgEngine *engine);
 const CssgsgOutput *cssgsg_engine_set_mode(CssgsgEngine *engine, int32_t mode);
 int32_t cssgsg_engine_mode(const CssgsgEngine *engine);
 
+/* 맥 셸 설정(설정 파일의 [mac]). 엔진은 쓰지 않는다. engine이 NULL이면 기본값. */
+typedef struct CssgsgMacSettings {
+    uint8_t hud;               /* 모드를 바꿀 때 A/한/あ를 잠깐 보인다 */
+    uint8_t hud_at_mouse;      /* 1이면 마우스 옆, 0이면 커서 위 */
+    uint32_t newline_replay_ms; /* Codex류 Shift+Enter 다시 보내기 전 대기(밀리초) */
+} CssgsgMacSettings;
+CssgsgMacSettings cssgsg_engine_mac_settings(const CssgsgEngine *engine);
+
 uint16_t cssgsg_key_from_mac_keycode(uint16_t mac_keycode);
 const char *cssgsg_last_error(void);
 const char *cssgsg_version(void);

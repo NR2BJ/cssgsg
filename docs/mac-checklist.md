@@ -13,10 +13,10 @@
 | 2 | A (텍스트 편집기) | `j l w w i` | hello | `en:jlwwi` → `hello` |
 | 3 | A | `Shift+j`, `l w w i` | Hello | `en:Jlwwi` → `Hello` |
 | 4 | A | `'` 키 | , (쉼표) | `en:'` → `,` |
-| 5 | A | 오른쪽 Shift를 톡 | **한** | `en:{rs}jfs` → `안` |
+| 5 | A | 오른쪽 Shift를 톡 | **한** (커서 근처에도 "한"이 1초쯤 떴다 사라짐) | `en:{rs}jfs` → `안` |
 | 6 | 한 | `j f s m t d h f l e j a` | 안녕하세요 (치는 동안 마지막 글자에 밑줄) | `ko:jfsmtdhfleja` → `안녕하세요` |
 | 7 | 한 | `j f s` 후 Backspace 두 번 | 안 → 아 → ㅇ (한 타씩 지워짐) | `ko:jfs{bs}` → `아`, `ko:jfs{bs}{bs}` → `ㅇ` |
-| 8 | 한 | 왼쪽 Shift를 톡 | **あ** | `ko:{ls}ckeuwl` → `にほんご` |
+| 8 | 한 | 왼쪽 Shift를 톡 | **あ** (커서 근처에도 "あ"가 잠깐 뜸) | `ko:{ls}ckeuwl` → `にほんご` |
 | 9 | あ | `c k e u w l` 후 Enter | にほんご (밑줄이 있다가 Enter로 확정) | `ja:ckeuwl{ent}` → `にほんご` |
 | 10 | あ | `c k e u w l` 후 Space, Space | 후보창 1.にほんご 2.ニホンゴ → 두 번째 Space에 ニホンゴ | `ja:ckeuwl{sp}{sp}` → `ニホンゴ` |
 | 11 | あ | Caps Lock 켜고 `c k e u w l` | ニホンゴ. 치는 대로 확정되고 밑줄은 마지막 글자(ゴ)에만. 오른쪽 Shift를 톡 해서 A로 가면 Caps Lock 불이 저절로 꺼짐 | `ja:{caps}ckeuwl` → `ニホンゴ` |

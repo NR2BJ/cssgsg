@@ -19,7 +19,7 @@
 | 新月 이어치기 | 같은 로마자 표 | 무작위 가나 문장 3,000개를 쳐서 그대로 나오는지 | 통과 | 〃 |
 | 모드 전환·단축키·기호 | NRIME 동작, 설계 문서 | 엔진 단위 테스트 | 통과 | `cargo test` |
 | 가타카나 바로 확정 | 조합으로 들고 있을 때(`katakana_direct = false`)의 화면 | Caps Lock을 켠 무작위 키열 3,000개를 켬·끔으로 쳐서 화면이 같은지, 조합으로 남는 게 4자 이하인지. 뒤치기·3타 단축·Backspace·앞치기 취소는 조합기 단위 테스트 | 3,000/3,000 | `cargo test katakana_direct` |
-| C 인터페이스 | 헤더 `core/include/cssgsg.h` | C 프로그램으로 호출 | 통과 | `bash tools/ffi-smoke/run.sh` |
+| C 인터페이스 | 헤더 `core/include/cssgsg.h` | C 프로그램으로 호출(키 처리, 확정, 탭 전환, 설정 오류, `[mac]` 설정값·기본값·범위 거부) | 통과 | `bash tools/ffi-smoke/run.sh` |
 | 맥 셸 키 변환(Swift 계층) | macOS ABC 배열 데이터(UCKeyTranslate), IOLLEvent.h 기기 비트, Events.h 키코드, 러스트 시뮬레이터, macOS 27 개발자 기록 | CGEvent로 만든 진짜 NSEvent를 IMKit 순서대로(수식키 flagsChanged 따로, 글자 키 뗌 없음) 셸 코드에 넣는다. 무작위 키열을 모드마다 시뮬레이터와 줄마다 비교하는데, 입력 조건 4가지(좌우 기기 비트 있음/없음 × flagsChanged 한 번/두 번 — 실제 macOS 27 IMKit은 비트 없음·두 번)로 모두 돌린다. 수식키 좌우·중복·양쪽 Shift·Caps, 탭 시각(200ms 경계)을 네 조건에서 자체 점검한다 | 36,000/36,000 같음, 자체 점검 66/66. 옛 좌우 처리·중복 처리로 되돌리면 점검 9·11개 실패, 비교 268·502줄 차이로 잡힌다 | `bash tools/mac/shell-smoke/run.sh` |
 | 업데이트·설치 코드 | GitHub 실제 응답 모양, 알려진 SHA-256 값, `osacompile`, `/bin/sh` | 버전 순서(semver), 권할 릴리스 고르기, 응답 해석, 해시 대조, 버전 문자열 거르기. 셸 인용은 까다로운 문자열 6개를 셸로 왕복하고, 설치 명령이 셸에 넘기는 인자를 확인한다. 설치 뒤 다시 띄우는 셸은 osascript가 끝날 때까지 기다렸다 여는지 본다. AppleScript는 컴파일로 문법을 보고, 리터럴을 되읽어 셸 명령과 한 글자까지 같은지 본다 | 37/37 | `bash tools/mac/update-smoke/run.sh` |
 | 올라간 릴리스 | GitHub API, 로컬 pkg | 릴리스 직후 앱과 같은 코드로 최신 릴리스를 읽고, 파일을 받아 해시를 로컬 pkg와 맞춘다 | 릴리스마다 | `tools/mac/release.sh`가 돌린다 |

@@ -51,6 +51,8 @@ final class CoreEngine {
     private let engine: OpaquePointer
     /// 설정 파일을 못 읽었으면 그 이유(기본 설정으로 돌았다).
     private(set) var configError: String?
+    /// 설정 파일의 [mac] 표(엔진은 쓰지 않고 셸이 쓴다).
+    let macSettings: CssgsgMacSettings
 
     static var configURL: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -73,6 +75,7 @@ final class CoreEngine {
             fatalError("cssgsg: 엔진을 만들 수 없다: \(String(cString: cssgsg_last_error()))")
         }
         self.engine = engine
+        macSettings = cssgsg_engine_mac_settings(engine)
     }
 
     deinit {

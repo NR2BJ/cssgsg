@@ -73,6 +73,16 @@ pub struct CssgsgOutput {
     pub candidate_pages: u32,
 }
 
+/// 맥 셸 설정(설정 파일의 `[mac]`). 엔진은 쓰지 않는다.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct CssgsgMacSettings {
+    pub hud: u8,
+    /// 1이면 HUD를 마우스 옆에, 0이면 커서 위에.
+    pub hud_at_mouse: u8,
+    pub newline_replay_ms: u32,
+}
+
 pub struct CssgsgEngine {
     engine: Engine,
     out: CssgsgOutput,
@@ -297,6 +307,22 @@ pub unsafe extern "C" fn cssgsg_engine_set_mode(e: *mut CssgsgEngine, mode: i32)
 pub unsafe extern "C" fn cssgsg_engine_mode(e: *const CssgsgEngine) -> i32 {
     // SAFETY: cssgsg_engine_new가 준 포인터.
     unsafe { e.as_ref() }.map_or(-1, |e| e.engine.mode() as i32)
+}
+
+/// 맥 셸 설정을 읽는다. `e`가 NULL이면 기본값.
+///
+/// # Safety
+/// `e`는 NULL이거나 `cssgsg_engine_new`가 돌려준, 아직 해제하지 않은 포인터여야 한다.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn cssgsg_engine_mac_settings(e: *const CssgsgEngine) -> CssgsgMacSettings {
+    let default = crate::config::MacConfig::default();
+    // SAFETY: 위 약속대로 NULL이거나 살아 있는 엔진이다.
+    let mac = unsafe { e.as_ref() }.map(|e| &e.engine.config().mac).unwrap_or(&default);
+    CssgsgMacSettings {
+        hud: mac.hud as u8,
+        hud_at_mouse: (mac.hud_position == crate::config::HudPosition::Mouse) as u8,
+        newline_replay_ms: mac.newline_replay_ms,
+    }
 }
 
 #[unsafe(no_mangle)]

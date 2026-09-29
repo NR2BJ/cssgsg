@@ -45,7 +45,8 @@ enum KeyEventReposter {
     }
 
     /// 다시 보낸 키는 renderer가 확정을 끝낸 뒤라야 평범한 Shift+Enter로 받는다. insertText보다 더 기다린다.
-    static let replayDelay: TimeInterval = 0.12
+    /// 기본 0.12초(NRIME 실험값). 설정 파일 [mac] newline_replay_ms.
+    static var replayDelay: TimeInterval = 0.12
 
     /// Chromium에서 확정 뒤의 Shift+Enter 줄바꿈.
     static func performChromiumNewline(keyCode: UInt16, client: any IMKTextInput, delay: TimeInterval) {

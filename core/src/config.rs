@@ -58,6 +58,35 @@ impl Default for JaConfig {
     }
 }
 
+/// 모드 HUD를 띄울 자리.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HudPosition {
+    /// 커서 위(커서 자리를 모르면 안 띄운다).
+    #[default]
+    Caret,
+    /// 마우스 옆(늘 뜬다).
+    Mouse,
+}
+
+/// 맥 셸 설정. 엔진은 쓰지 않고, 셸이 `cssgsg_engine_mac_settings`로 읽는다(설정 파일을 한 곳에 두려고).
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MacConfig {
+    /// 모드를 바꿀 때 커서 근처에 A / 한 / あ를 잠깐 보인다.
+    pub hud: bool,
+    pub hud_position: HudPosition,
+    /// Codex처럼 줄바꿈 입력을 전송으로 받는 앱에서 조합 중 Shift+Enter: 확정한 뒤 Shift+Enter를 다시 보내기까지
+    /// 기다리는 시간(밀리초). 짧으면 확정이 끝나기 전에 도착해 줄바꿈이 먹힐 수 있다(NRIME 실험값 120).
+    pub newline_replay_ms: u32,
+}
+
+impl Default for MacConfig {
+    fn default() -> Self {
+        Self { hud: true, hud_position: HudPosition::Caret, newline_replay_ms: 120 }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
@@ -71,6 +100,7 @@ pub struct Config {
     /// Caps Lock과 Shift가 서로 뒤집는지(윈도우 방식). 맥은 false.
     pub caps_shift_inverts: bool,
     pub ja: JaConfig,
+    pub mac: MacConfig,
 }
 
 impl Default for Config {
@@ -84,6 +114,7 @@ impl Default for Config {
             ]),
             caps_shift_inverts: false,
             ja: JaConfig::default(),
+            mac: MacConfig::default(),
         }
     }
 }
@@ -98,6 +129,9 @@ impl Config {
             if modifier_key(name).is_none() {
                 return Err(format!("알 수 없는 탭 키 이름 {name:?}"));
             }
+        }
+        if !(20..=1000).contains(&c.mac.newline_replay_ms) {
+            return Err(format!("mac.newline_replay_ms는 20~1000이어야 한다: {}", c.mac.newline_replay_ms));
         }
         Ok(c)
     }

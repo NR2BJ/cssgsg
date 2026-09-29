@@ -48,6 +48,18 @@ int main(void) {
     CHECK(cssgsg_engine_new("ko_layout = \"x\"") == NULL);
     CHECK(strlen(cssgsg_last_error()) > 0);
 
+    /* 맥 셸 설정: 기본값과 [mac] 표 */
+    CssgsgMacSettings m = cssgsg_engine_mac_settings(e);
+    CHECK(m.hud == 1 && m.hud_at_mouse == 0 && m.newline_replay_ms == 120);
+    m = cssgsg_engine_mac_settings(NULL);
+    CHECK(m.hud == 1 && m.newline_replay_ms == 120);
+    CssgsgEngine *c = cssgsg_engine_new("[mac]\nhud = false\nhud_position = \"mouse\"\nnewline_replay_ms = 80");
+    CHECK(c != NULL);
+    m = cssgsg_engine_mac_settings(c);
+    CHECK(m.hud == 0 && m.hud_at_mouse == 1 && m.newline_replay_ms == 80);
+    cssgsg_engine_free(c);
+    CHECK(cssgsg_engine_new("[mac]\nnewline_replay_ms = 5") == NULL);
+
     cssgsg_engine_free(e);
     printf(fail ? "FFI SMOKE: FAIL\n" : "FFI SMOKE: OK\n");
     return fail;
