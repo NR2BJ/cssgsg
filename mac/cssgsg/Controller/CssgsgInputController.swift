@@ -17,7 +17,7 @@ final class CssgsgInputController: IMKInputController {
     private static var mouseMonitor: Any?
     /// 수식키 상태(좌우, 눌림). 컨트롤러는 클라이언트마다 따로 생기므로 프로세스 전체에서 하나를 같이 쓴다.
     private static var modifiers = ModifierState()
-    /// ⌘+키 재전송과 Shift+Enter 줄바꿈 전에 기다리는 시간(NRIME 기본 15ms).
+    /// ⌘+키 재전송과 Shift+Enter 줄바꿈 전에 기다리는 시간(NRIME 기본 15ms). 설정 파일 [mac] shift_enter_delay_ms.
     static var shiftEnterDelay: TimeInterval = 0.015
 
     private let secureInput = SecureInputDetector()
@@ -115,6 +115,18 @@ final class CssgsgInputController: IMKInputController {
         }
         TextApplier.apply(out, to: IMKTextClient(client: client), allowCommit: allowCommit)
         applyUI(out, client: client, hudCaret: hudCaret)
+        scheduleTimer(out.timerMs)
+    }
+
+    /// 빠른 탭 전환 보정이 글자를 잡아 두었다. 수식키를 떼지 않고 시간이 지나면 엔진이 그 글자를 누른 그대로 친다.
+    /// 엔진은 늦게 온 타이머를 스스로 걸러 내므로(아직이면 남은 시간을 다시 청한다) 여러 번 걸어도 된다.
+    private func scheduleTimer(_ ms: UInt32) {
+        guard ms > 0 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(Int(ms))) { [weak self] in
+            let out = CoreEngine.shared.timer(now: ProcessInfo.processInfo.systemUptime)
+            guard let self, let client = self.cachedClient ?? self.client() else { return }
+            self.apply(out, client: client, allowCommit: self.canCommit(to: client))
+        }
     }
 
     /// 글자 밖의 것: 후보창, 모드 표시와 HUD, Caps Lock, 한자 학습 저장.

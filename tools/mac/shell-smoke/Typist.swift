@@ -184,13 +184,15 @@ final class FakeDocument: TextClient {
 
 /// 키열을 IMKit 이벤트 순서대로 셸 코드(ModifierState → CoreEngine)에 넣고 앱 화면을 흉내 낸다.
 final class Typist {
-    let engine = CoreEngine(configTOML: nil)
+    let engine: CoreEngine
     let layout: AbcLayout
     let doc = FakeDocument()
     private(set) var mode: InputMode
     /// 마지막으로 엔진에 넣은 키 이벤트와 그 NSEvent(자체 점검용).
     private(set) var lastKey: CssgsgKeyEvent?
     private(set) var lastEvent: NSEvent?
+    /// 마지막 결과가 청한 타이머(밀리초, 빠른 탭 전환 보정).
+    private(set) var lastTimerMs: UInt32 = 0
 
     private var caps = false
     private var held: UInt64 = 0
@@ -203,7 +205,8 @@ final class Typist {
     /// flagsChanged를 4ms 간격으로 두 번씩 보낼지(macOS 27 IMKit).
     let duplicateFlags: Bool
 
-    init(layout: AbcLayout, mode: InputMode, deviceBits: Bool = true, duplicateFlags: Bool = false) {
+    init(layout: AbcLayout, mode: InputMode, deviceBits: Bool = true, duplicateFlags: Bool = false, config: String? = nil) {
+        engine = CoreEngine(configTOML: config)
         self.layout = layout
         self.mode = mode
         self.deviceBits = deviceBits
@@ -292,7 +295,14 @@ final class Typist {
         apply(engine.mouseDown())
     }
 
+    /// 컨트롤러처럼 청한 타이머를 `after`초 뒤에 부른다.
+    func fireTimer(after: Double) {
+        clock += after
+        apply(engine.timer(now: clock))
+    }
+
     private func apply(_ out: EngineOutput) {
+        lastTimerMs = out.timerMs
         TextApplier.apply(out, to: doc)
         if let m = out.mode {
             mode = m

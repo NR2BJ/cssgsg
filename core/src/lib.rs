@@ -16,6 +16,7 @@ pub mod key;
 pub mod latin;
 #[cfg(feature = "mozc")]
 pub mod mozc;
+pub mod shortcut;
 pub mod sim;
 
 pub use config::Config;

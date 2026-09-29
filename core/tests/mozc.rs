@@ -142,3 +142,56 @@ fn tab_grid_works_with_mozc() {
     s.type_keys("{ent}").unwrap();
     assert_eq!(s.text, c.items[1]);
 }
+
+/// 사용자 사전 파일(user_dictionary.db = UserDictionaryStorage 프로토콜 버퍼)을 손으로 만든다.
+/// 설정 앱은 config-ffi의 userdict로 같은 파일을 쓴다.
+fn user_dictionary(entries: &[(&str, &str)]) -> Vec<u8> {
+    fn field(out: &mut Vec<u8>, number: u8, bytes: &[u8]) {
+        out.push((number << 3) | 2);
+        let mut n = bytes.len();
+        while n >= 0x80 {
+            out.push((n as u8) | 0x80);
+            n >>= 7;
+        }
+        out.push(n as u8);
+        out.extend_from_slice(bytes);
+    }
+    let mut dict = vec![0x08, 0x2A]; // id = 42
+    field(&mut dict, 3, "cssgsg".as_bytes());
+    for (key, value) in entries {
+        let mut e = Vec::new();
+        field(&mut e, 1, key.as_bytes());
+        field(&mut e, 2, value.as_bytes());
+        e.extend_from_slice(&[0x28, 0x01]); // pos = 名詞
+        field(&mut dict, 4, &e);
+    }
+    let mut storage = Vec::new();
+    field(&mut storage, 2, &dict);
+    storage
+}
+
+#[test]
+fn reload_picks_up_the_user_dictionary() {
+    let _serial = serial();
+    let (_, profile) = paths();
+    let mut m = mozc();
+    let reading = "くもつくもつ";
+    let word = "蜘蛛津雲津";
+    let has_word = |m: &mut MozcConverter| {
+        let v = m.start(reading).unwrap();
+        m.cancel();
+        v.candidates.iter().any(|c| c == word)
+    };
+    assert!(!has_word(&mut m), "사전에 없는 낱말로 시험한다");
+    let path = std::path::Path::new(&profile).join("user_dictionary.db");
+    std::fs::write(&path, user_dictionary(&[(reading, word)])).unwrap();
+    m.reload();
+    // Mozc는 사용자 사전을 뒤에서 읽는다: 조금 기다린다.
+    let found = (0..40).any(|_| {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        has_word(&mut m)
+    });
+    std::fs::remove_file(&path).ok();
+    m.reload();
+    assert!(found, "다시 읽은 뒤 사용자 사전 낱말이 후보에 있어야 한다");
+}

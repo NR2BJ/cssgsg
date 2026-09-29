@@ -7,14 +7,15 @@
 //!   `commit` 없이 `preedit`가 Some(빈 값)이면 조합 중 글자를 지운다.
 //! - `consumed`가 false면 원래 키를 앱에 넘긴다(맥: handle에서 false 반환).
 
-use crate::config::{Config, JaConfig, JaPunct, TapAction};
+use crate::config::{Config, JaConfig, JaPunct};
 use crate::convert::{ConvCmd, ConvView, Converter, EchoConverter};
 use crate::hangul::{KoComposer, KoLayout, KoResult};
 use crate::hanja::Learning;
 use crate::hotkey::TapTracker;
 use crate::kana::{KanaComposer, KanaLayout, to_katakana};
-use crate::key::{Key, KeyEvent};
+use crate::key::{Key, KeyEvent, Mods};
 use crate::latin::{LatinLayout, qwerty_char_for};
+use crate::shortcut::{ModFamilies, ShortcutAction};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(i32)]
@@ -97,6 +98,8 @@ pub struct Output {
     pub caps_lock_off: bool,
     /// 한자 학습이 바뀌었다(셸이 저장한다).
     pub learning_changed: bool,
+    /// 이만큼(밀리초) 뒤에 [`Engine::timer`]를 불러 달라(빠른 탭 전환 보정이 잡아 둔 글자를 내보낼 때).
+    pub timer_ms: Option<u32>,
 }
 
 impl Output {
@@ -135,6 +138,19 @@ pub struct Engine {
     taps: TapTracker,
     /// 마지막으로 본 Caps Lock 상태. 일본어 모드에서는 가타카나 입력이다.
     caps: bool,
+    /// 빠른 탭 전환 보정이 잡아 둔 글자(탭할 수식키를 떼기 전에 누른 것).
+    buffered: Option<Buffered>,
+}
+
+/// 빠른 탭 전환 보정: 탭할 수식키를 누른 채 친 글자를 잠깐 잡아 둔다(NRIME와 같다).
+/// 수식키를 곧(`tap_overlap_ms` 안에) 떼면 탭으로 보고 전환한 뒤 그 글자를 수식키 없이 친다.
+/// 늦게 떼거나, 다른 키를 치거나, 시간이 다 되면 누른 그대로(Shift 글자) 친다.
+#[derive(Clone, Copy, Debug)]
+struct Buffered {
+    ev: KeyEvent,
+    modifier: Key,
+    /// 이 시각이 지나면 누른 그대로 친다(셸이 타이머로 [`Engine::timer`]를 부른다).
+    deadline: f64,
 }
 
 impl Engine {
@@ -158,6 +174,7 @@ impl Engine {
             latin: LatinLayout::graphite(),
             taps: TapTracker::default(),
             caps: false,
+            buffered: None,
         }
     }
 
@@ -166,6 +183,14 @@ impl Engine {
             self.converter.cancel();
         }
         self.converter = converter;
+    }
+
+    /// 변환기의 사용자 사전을 다시 읽는다(설정 앱이 고친 뒤). 변환 중이면 버리고 읽기로 돌아간다.
+    pub fn reload_converter(&mut self) {
+        if self.conv.take().is_some() {
+            self.converter.cancel();
+        }
+        self.converter.reload();
     }
 
     pub fn mode(&self) -> Mode {
@@ -191,10 +216,25 @@ impl Engine {
         self.finish(out, before)
     }
 
-    /// 조합 중인 것을 모두 확정한다(마우스 클릭, 포커스 해제).
+    /// 조합 중인 것을 모두 확정한다(마우스 클릭, 포커스 해제). 잡아 둔 글자가 있으면 누른 그대로 먼저 친다.
     pub fn commit_all(&mut self) -> Output {
         let before = self.snapshot();
-        let out = Output::commit_eat(self.take_composition());
+        let flushed = self.flush_buffered(&Context::default());
+        let out = merge(flushed, Output::commit_eat(self.take_composition()));
+        self.finish(out, before)
+    }
+
+    /// 셸이 `timer_ms`만큼 기다렸다 부른다(`now`는 키 이벤트와 같은 시계, 초).
+    /// 빠른 탭 전환 보정이 잡아 둔 글자를 시간이 다 됐으면 누른 그대로 친다.
+    pub fn timer(&mut self, now: f64) -> Output {
+        let before = self.snapshot();
+        let out = match self.buffered {
+            Some(b) if now + 0.001 >= b.deadline => self.flush_buffered(&Context::default()),
+            Some(b) => {
+                Output { consumed: true, timer_ms: Some(millis(b.deadline - now)), ..Output::default() }
+            }
+            None => Output::default(),
+        };
         self.finish(out, before)
     }
 
@@ -213,6 +253,7 @@ impl Engine {
             self.converter.cancel();
         }
         self.hanja = None;
+        self.buffered = None;
         self.taps.cancel();
         self.finish(Output::eat(), before)
     }
@@ -220,24 +261,52 @@ impl Engine {
     /// 모드를 바로 바꾼다(메뉴 등). 조합 중인 것은 확정한다.
     pub fn set_mode(&mut self, mode: Mode) -> Output {
         let before = self.snapshot();
-        let out = self.switch_to(mode);
+        let flushed = self.flush_buffered(&Context::default());
+        let out = merge(flushed, self.switch_to(mode));
         self.finish(out, before)
     }
 
     fn route(&mut self, ev: &KeyEvent, ctx: &Context) -> Output {
         self.caps = ev.mods.caps();
-
         let threshold = self.config.tap_threshold_ms as f64 / 1000.0;
-        if let Some(tapped) = self.taps.observe(ev, threshold) {
-            if !ctx.taps_disabled {
-                match self.config.tap_action(tapped) {
-                    TapAction::ToggleEnglish => return self.toggle_english(),
-                    TapAction::ToggleNonEnglish => return self.toggle_non_english(),
-                    TapAction::None => {}
+
+        // 빠른 탭 전환 보정: 잡아 둔 글자가 있으면 이 이벤트로 정한다.
+        if let Some(b) = self.buffered {
+            if !ev.down && ev.key == b.modifier {
+                self.buffered = None;
+                let tapped = self.taps.observe(ev, threshold) == Some(b.modifier);
+                let quick = ev.time - b.ev.time < self.config.tap_overlap_ms as f64 / 1000.0;
+                let action = self.config.shortcuts.for_tap(b.modifier);
+                if let (true, true, Some(action), false) = (tapped, quick, action, ctx.taps_disabled) {
+                    let switched = self.shortcut_action(action, ctx);
+                    let bare = KeyEvent { mods: Mods(b.ev.mods.0 & !b.modifier.modifier_bit()), ..b.ev };
+                    return merge(switched, self.replay(&bare, ctx));
                 }
+                // 탭이 아니다: 누른 그대로 친다.
+                return self.replay(&b.ev, ctx);
             }
+            if ev.down || ev.key.is_modifier() {
+                // 다른 키나 수식키: 잡아 둔 글자를 누른 그대로 먼저 치고 이 이벤트를 처리한다.
+                let flushed = self.flush_buffered(ctx);
+                return merge(flushed, self.route(ev, ctx));
+            }
+            return Output::pass();
+        }
+        if let Some(out) = self.try_buffer(ev, ctx, threshold) {
+            return out;
         }
 
+        if let Some(tapped) = self.taps.observe(ev, threshold)
+            && !ctx.taps_disabled
+            && let Some(action) = self.config.shortcuts.for_tap(tapped)
+        {
+            return self.shortcut_action(action, ctx);
+        }
+        self.route_key(ev, ctx)
+    }
+
+    /// 탭 판정 뒤의 키 처리.
+    fn route_key(&mut self, ev: &KeyEvent, ctx: &Context) -> Output {
         // ⌘/Ctrl을 누르는 순간 조합을 확정한다(NRIME). Electron에서는 ⌘+키가 handle을 거치지 않고
         // performKeyEquivalent로 가서, 조합 중 글자가 그 단축키에 먹힌다.
         if ev.down
@@ -247,13 +316,20 @@ impl Engine {
             return Output::commit_pass(self.take_composition());
         }
 
-        if !ev.down || ev.key.is_modifier() || ev.key == Key::CAPS_LOCK || ctx.secure_field {
+        if !ev.down || ev.key.is_modifier() || ev.key == Key::CAPS_LOCK {
             return Output::pass();
         }
 
-        // 한자 키(Option+Enter): 변환 중이면 다음 후보, 아니면 조합 중인 글자를 바꾸기 시작한다.
-        if self.mode == Mode::Ko && ko_hanja::is_hanja_key(ev) {
-            return if self.hanja.is_some() { self.hanja_key(ev) } else { self.hanja_start() };
+        // 조합 단축키. 언어 전환은 비밀번호 칸에서도 된다(갇히지 않게). 한자는 한국어 모드에서만.
+        if let Some(action) = self.config.shortcuts.for_combo(ev) {
+            let hanja = action == ShortcutAction::Hanja;
+            if (!ev.repeat || hanja) && (!hanja || (self.mode == Mode::Ko && !ctx.secure_field)) {
+                return self.shortcut_action(action, ctx);
+            }
+        }
+
+        if ctx.secure_field {
+            return Output::pass();
         }
 
         // ⌘/Ctrl/Option 조합: 조합을 확정하고 앱에 넘긴다(단축키는 쿼티 자리 그대로).
@@ -267,6 +343,62 @@ impl Engine {
             Mode::Ko => self.ko_key(ev),
             Mode::Ja => self.ja_key(ev),
         }
+    }
+
+    fn shortcut_action(&mut self, action: ShortcutAction, ctx: &Context) -> Output {
+        match action {
+            ShortcutAction::ToggleEnglish => self.toggle_english(),
+            ShortcutAction::ToggleNonEnglish => self.toggle_non_english(),
+            ShortcutAction::Hanja if self.mode == Mode::Ko && !ctx.secure_field => self.hanja_shortcut(),
+            ShortcutAction::Hanja => Output::pass(),
+        }
+    }
+
+    /// 빠른 탭 전환 보정을 시작할지: 켜져 있고, 탭 단축키 수식키 하나만 누른 채 탭 시간 안에 글자를 쳤고,
+    /// 그 수식키를 쓰는 조합 단축키가 없을 때(NRIME와 같다). 잡으면 키를 먹고 타이머를 청한다.
+    fn try_buffer(&mut self, ev: &KeyEvent, ctx: &Context, threshold: f64) -> Option<Output> {
+        if !self.config.tap_buffering || ctx.taps_disabled || ctx.secure_field {
+            return None;
+        }
+        if !ev.down || ev.repeat || !ev.key.is_printable() || ev.mods.command_like() {
+            return None;
+        }
+        let (modifier, pressed) = self.taps.candidate()?;
+        let family = family_bit(modifier)?;
+        let only_it = !ev.mods.any_held_except(modifier.modifier_bit());
+        if self.config.shortcuts.for_tap(modifier).is_none()
+            || ev.time - pressed >= threshold
+            || !only_it
+            || self.config.shortcuts.combo_uses(family)
+        {
+            return None;
+        }
+        let overlap = self.config.tap_overlap_ms as f64 / 1000.0;
+        // 수식키 뗌이 조금 늦게 도착해도 되게 20ms를 더 기다린다(NRIME와 같다).
+        let deadline = (ev.time + overlap).min(pressed + threshold) + 0.02;
+        self.buffered = Some(Buffered { ev: *ev, modifier, deadline });
+        Some(Output { consumed: true, timer_ms: Some(millis(deadline - ev.time)), ..Output::default() })
+    }
+
+    /// 잡아 둔 글자를 누른 그대로 친다. 그 수식키는 이제 탭이 아니다.
+    fn flush_buffered(&mut self, ctx: &Context) -> Output {
+        let Some(b) = self.buffered.take() else { return Output::default() };
+        self.taps.cancel();
+        self.replay(&b.ev, ctx)
+    }
+
+    /// 잡아 둔 키를 지금 친다. 원래 키는 이미 먹었으니 앱에 넘길 수 없다: 넘겨야 하는 키면 앱이 넣었을 글자를 대신 넣는다.
+    fn replay(&mut self, ev: &KeyEvent, ctx: &Context) -> Output {
+        let mut out = self.route_key(ev, ctx);
+        if !out.consumed {
+            if let Some(c) =
+                qwerty_char_for(ev.key, ev.mods.shift(), ev.mods.caps(), self.config.caps_shift_inverts)
+            {
+                out.commit.push(c);
+            }
+            out.consumed = true;
+        }
+        out
     }
 
     // ---------------------------------------------------------------- 모드
@@ -387,6 +519,20 @@ impl Engine {
             }
             Key::SPACE | Key::TAB | Key::ARROW_DOWN if !self.kana.reading().is_empty() => {
                 self.kana.cancel_pending();
+                let trigger = match k {
+                    Key::SPACE => self.config.ja.convert_with_space,
+                    Key::TAB => self.config.ja.convert_with_tab,
+                    _ => true,
+                };
+                if !trigger {
+                    // 변환 키가 아니다: 읽기를 확정한다. Space는 스페이스를 넣고 Tab은 앱에 넘긴다.
+                    let commit = self.take_composition();
+                    if k == Key::SPACE {
+                        let space = if self.config.ja.full_width_space { "\u{3000}" } else { " " };
+                        return Output::commit_eat(commit + space);
+                    }
+                    return Output::commit_pass(commit);
+                }
                 if katakana || (k == Key::TAB && shift) {
                     // 가타카나 입력은 변환하지 않는다: 확정하고 키는 앱으로.
                     return Output::commit_pass(self.take_composition());
@@ -623,8 +769,38 @@ impl Engine {
     }
 }
 
+/// 두 결과를 잇는다(잡아 둔 글자를 먼저 친 뒤 지금 이벤트). 조합·후보는 finish가 마지막 상태로 알린다.
+fn merge(first: Output, second: Output) -> Output {
+    Output {
+        consumed: second.consumed,
+        commit: first.commit + &second.commit,
+        mode: second.mode.or(first.mode),
+        caps_lock_off: first.caps_lock_off || second.caps_lock_off,
+        timer_ms: second.timer_ms,
+        ..second
+    }
+}
+
+fn millis(secs: f64) -> u32 {
+    (secs * 1000.0).ceil().max(1.0) as u32
+}
+
+/// 수식키의 종류 비트(조합 단축키와 견준다).
+fn family_bit(modifier: Key) -> Option<u8> {
+    Some(match modifier {
+        Key::SHIFT_LEFT | Key::SHIFT_RIGHT => ModFamilies::SHIFT,
+        Key::CONTROL_LEFT | Key::CONTROL_RIGHT => ModFamilies::CONTROL,
+        Key::ALT_LEFT | Key::ALT_RIGHT => ModFamilies::ALT,
+        Key::META_LEFT | Key::META_RIGHT => ModFamilies::META,
+        _ => return None,
+    })
+}
+
 /// 일본어 모드의 가나 배열 밖 기호(Shift 기호 등). NRIME의 전각/반각 규칙과 같다.
 fn ja_symbol(cfg: &JaConfig, ascii: char) -> String {
+    if ascii == '\\' && cfg.yen_sign {
+        return "¥".into();
+    }
     match cfg.punctuation {
         JaPunct::HalfWidthWestern => ascii.to_string(),
         style => match ascii {

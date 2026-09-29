@@ -11,16 +11,15 @@ use std::fmt::Write as _;
 
 use serde::{Deserialize, Serialize};
 
-use crate::key::Key;
+use crate::key::{Key, KeyEvent};
+use crate::shortcut::{Shortcut, ShortcutAction};
 
-/// 수식키를 혼자 탭했을 때 할 일.
+/// 0.4.0까지의 `[taps]` 표(수식키별 탭 동작). 읽기만 하고 `[shortcuts]`로 옮긴다.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TapAction {
     None,
-    /// 영어 ↔ 직전 비영어 모드.
     ToggleEnglish,
-    /// 한국어 ↔ 일본어.
     ToggleNonEnglish,
 }
 
@@ -42,8 +41,14 @@ pub struct JaConfig {
     pub punctuation: JaPunct,
     /// `/` 자리를 ・로 쓸지(끄면 ／ 또는 /).
     pub slash_nakaguro: bool,
-    /// 읽기가 없을 때 Space를 전각 스페이스로.
+    /// 변환할 읽기가 없을 때 누른 Space를 전각 스페이스(U+3000)로. 읽기가 있으면 Space는 변환이다.
     pub full_width_space: bool,
+    /// `\` 키를 ¥로(NRIME 기본과 같다). 끄면 ＼(반각 구두점이면 \).
+    pub yen_sign: bool,
+    /// 읽기가 있을 때 Space로 변환한다. 끄면 읽기를 확정하고 스페이스를 넣는다.
+    pub convert_with_space: bool,
+    /// 읽기가 있을 때 Tab으로 변환한다. 끄면 읽기를 확정하고 Tab을 앱에 넘긴다.
+    pub convert_with_tab: bool,
     /// 일본어 모드에서 켠 Caps Lock(가타카나)을 다른 모드로 나갈 때 끈다.
     pub caps_katakana_auto_off: bool,
     /// Caps Lock 가타카나는 변환하지 않으므로 바로 확정한다. 뒤치기(゛)가 바꿀 수 있는 마지막 키의 글자만 조합으로 남긴다.
@@ -56,6 +61,9 @@ impl Default for JaConfig {
             punctuation: JaPunct::Japanese,
             slash_nakaguro: true,
             full_width_space: false,
+            yen_sign: true,
+            convert_with_space: true,
+            convert_with_tab: true,
             caps_katakana_auto_off: true,
             katakana_direct: true,
         }
@@ -77,17 +85,86 @@ pub enum HudPosition {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct MacConfig {
-    /// 모드를 바꿀 때 커서 근처에 A / 한 / あ를 잠깐 보인다.
+    /// 모드를 바꿀 때 커서 근처에 G / ㅊ / 月을 잠깐 보인다.
     pub hud: bool,
     pub hud_position: HudPosition,
-    /// Codex처럼 줄바꿈 입력을 전송으로 받는 앱에서 조합 중 Shift+Enter: 확정한 뒤 Shift+Enter를 다시 보내기까지
-    /// 기다리는 시간(밀리초). 짧으면 확정이 끝나기 전에 도착해 줄바꿈이 먹힐 수 있다(NRIME 실험값 120).
+    /// 후보창 글자 크기(포인트).
+    pub candidate_font_size: u32,
+    /// 조합 중 Shift+Enter: 확정한 뒤 줄바꿈을 넣기까지 기다리는 시간(밀리초, NRIME 기본 15).
+    /// Chromium(Electron) 앱은 확정과 같은 순간의 줄바꿈이면 확정한 글자를 잃는다. ⌘/Option+키 재전송도 이만큼 기다린다.
+    pub shift_enter_delay_ms: u32,
+    /// Codex처럼 줄바꿈 입력을 전송으로 받는 앱: 확정한 뒤 Shift+Enter 키를 다시 보내기까지 기다리는 시간(밀리초).
+    /// 짧으면 확정이 끝나기 전에 도착해 줄바꿈이 먹힌다(NRIME도 이 앱들에는 120을 쓴다).
     pub newline_replay_ms: u32,
 }
 
 impl Default for MacConfig {
     fn default() -> Self {
-        Self { hud: true, hud_position: HudPosition::Caret, newline_replay_ms: 120 }
+        Self {
+            hud: true,
+            hud_position: HudPosition::Caret,
+            candidate_font_size: 14,
+            shift_enter_delay_ms: 15,
+            newline_replay_ms: 120,
+        }
+    }
+}
+
+/// 단축키 셋. 한국어·일본어로 바로 가는 단축키는 두지 않는다(사용자 결정, NRIME에는 있었다).
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Shortcuts {
+    /// 영어 ↔ 방금 쓰던 비영어.
+    pub toggle_english: Shortcut,
+    /// 한국어 ↔ 일본어.
+    pub toggle_non_english: Shortcut,
+    /// 한국어 한자 변환.
+    pub hanja: Shortcut,
+}
+
+impl Default for Shortcuts {
+    fn default() -> Self {
+        Self {
+            toggle_english: Shortcut::Tap(Key::SHIFT_RIGHT),
+            toggle_non_english: Shortcut::Tap(Key::SHIFT_LEFT),
+            hanja: Shortcut::parse("alt+enter").expect("기본 한자 단축키"),
+        }
+    }
+}
+
+impl Shortcuts {
+    fn all(&self) -> [(ShortcutAction, Shortcut); 3] {
+        [
+            (ShortcutAction::ToggleEnglish, self.toggle_english),
+            (ShortcutAction::ToggleNonEnglish, self.toggle_non_english),
+            (ShortcutAction::Hanja, self.hanja),
+        ]
+    }
+
+    /// 설정 파일의 이름.
+    fn field_name(action: ShortcutAction) -> &'static str {
+        match action {
+            ShortcutAction::ToggleEnglish => "toggle_english",
+            ShortcutAction::ToggleNonEnglish => "toggle_non_english",
+            ShortcutAction::Hanja => "hanja",
+        }
+    }
+
+    /// 이 수식키 탭에 붙은 일.
+    pub fn for_tap(&self, key: Key) -> Option<ShortcutAction> {
+        self.all().into_iter().find(|&(_, s)| s == Shortcut::Tap(key)).map(|(a, _)| a)
+    }
+
+    /// 이 키 눌림에 붙은 조합 단축키.
+    pub fn for_combo(&self, ev: &KeyEvent) -> Option<ShortcutAction> {
+        self.all().into_iter().find(|&(_, s)| s.matches_combo(ev)).map(|(a, _)| a)
+    }
+
+    /// 조합 단축키 중 이 수식키 종류를 쓰는 것이 있는지(빠른 탭 전환 보정이 그 수식키를 가로채지 않게).
+    pub fn combo_uses(&self, family_bit: u8) -> bool {
+        self.all()
+            .into_iter()
+            .any(|(_, s)| matches!(s, Shortcut::Combo(mods, _) if mods.contains(family_bit)))
     }
 }
 
@@ -98,11 +175,16 @@ pub struct Config {
     pub ko_layout: String,
     /// 수식키 탭 인식 시간(밀리초). NRIME 기본값과 같은 200.
     pub tap_threshold_ms: u32,
-    /// 수식키별 탭 동작. 키 이름: shift_left, shift_right, control_left, control_right,
-    /// alt_left, alt_right, meta_left, meta_right.
-    pub taps: HashMap<String, TapAction>,
+    /// 빠른 탭 전환 보정(실험적, NRIME와 같다): 탭할 수식키를 떼기 전에 다음 글자를 눌러도, 곧 떼면 전환한 뒤의 글자로 친다.
+    pub tap_buffering: bool,
+    /// 빠른 탭 전환 보정에서 글자를 누르고 수식키를 떼기까지 이 시간(밀리초, 30~80) 안이면 탭으로 본다.
+    pub tap_overlap_ms: u32,
     /// Caps Lock과 Shift가 서로 뒤집는지(윈도우 방식). 맥은 false.
     pub caps_shift_inverts: bool,
+    pub shortcuts: Shortcuts,
+    /// 0.4.0까지의 수식키 탭 표. 읽으면 `shortcuts`로 옮기고 다시 쓰지 않는다.
+    #[serde(skip_serializing)]
+    pub taps: Option<HashMap<String, TapAction>>,
     pub ja: JaConfig,
     pub mac: MacConfig,
 }
@@ -112,32 +194,28 @@ impl Default for Config {
         Self {
             ko_layout: "chamshin-v18".into(),
             tap_threshold_ms: 200,
-            taps: HashMap::from([
-                ("shift_right".into(), TapAction::ToggleEnglish),
-                ("shift_left".into(), TapAction::ToggleNonEnglish),
-            ]),
+            tap_buffering: false,
+            tap_overlap_ms: 50,
             caps_shift_inverts: false,
+            shortcuts: Shortcuts::default(),
+            taps: None,
             ja: JaConfig::default(),
             mac: MacConfig::default(),
         }
     }
 }
 
-/// 탭 키 이름(설정 파일과 설정 앱이 쓰는 순서).
-pub const TAP_KEYS: [&str; 8] = [
-    "shift_left",
-    "shift_right",
-    "control_left",
-    "control_right",
-    "alt_left",
-    "alt_right",
-    "meta_left",
-    "meta_right",
-];
-
 impl Config {
     pub fn from_toml(src: &str) -> Result<Self, String> {
-        let c: Config = toml::from_str(src).map_err(|e| e.to_string())?;
+        let table: toml::Table = src.parse().map_err(|e: toml::de::Error| e.to_string())?;
+        let has_shortcuts = table.contains_key("shortcuts");
+        let mut c: Config =
+            toml::Value::Table(table).try_into().map_err(|e: toml::de::Error| e.to_string())?;
+        if let Some(taps) = c.taps.take()
+            && !has_shortcuts
+        {
+            c.shortcuts = shortcuts_from_legacy_taps(&taps)?;
+        }
         c.validate()?;
         Ok(c)
     }
@@ -147,19 +225,26 @@ impl Config {
         if crate::hangul::KoLayout::BUILTIN.iter().all(|(id, _)| *id != self.ko_layout) {
             return Err(format!("알 수 없는 한국어 배열 {:?}", self.ko_layout));
         }
-        if !(50..=1000).contains(&self.tap_threshold_ms) {
-            return Err(format!("tap_threshold_ms는 50~1000이어야 한다: {}", self.tap_threshold_ms));
-        }
-        for name in self.taps.keys() {
-            if modifier_key(name).is_none() {
-                return Err(format!("알 수 없는 탭 키 이름 {name:?}"));
+        let ranges = [
+            ("tap_threshold_ms", self.tap_threshold_ms, 50, 1000),
+            ("tap_overlap_ms", self.tap_overlap_ms, 30, 80),
+            ("mac.candidate_font_size", self.mac.candidate_font_size, 10, 28),
+            ("mac.shift_enter_delay_ms", self.mac.shift_enter_delay_ms, 5, 100),
+            ("mac.newline_replay_ms", self.mac.newline_replay_ms, 20, 1000),
+        ];
+        for (name, value, lo, hi) in ranges {
+            if !(lo..=hi).contains(&value) {
+                return Err(format!("{name}는 {lo}~{hi}이어야 한다: {value}"));
             }
         }
-        if !(20..=1000).contains(&self.mac.newline_replay_ms) {
-            return Err(format!(
-                "mac.newline_replay_ms는 20~1000이어야 한다: {}",
-                self.mac.newline_replay_ms
-            ));
+        let all = self.shortcuts.all();
+        for (i, &(action, s)) in all.iter().enumerate() {
+            let name = Shortcuts::field_name(action);
+            s.validate().map_err(|e| format!("shortcuts.{name}: {e}"))?;
+            if let Some(&(other, _)) = all[..i].iter().find(|&&(_, t)| s != Shortcut::None && t == s) {
+                let other = Shortcuts::field_name(other);
+                return Err(format!("shortcuts.{other}와 shortcuts.{name}에 같은 단축키를 썼다: {s}"));
+            }
         }
         Ok(())
     }
@@ -188,6 +273,20 @@ impl Config {
             &self.tap_threshold_ms.to_string(),
             self.tap_threshold_ms == d.tap_threshold_ms,
         ));
+        line(
+            "# 빠른 탭 전환 보정(실험적): 탭할 수식키를 떼기 전에 다음 글자를 눌러도, 곧 떼면 전환한 뒤의 글자로 친다",
+        );
+        line(&setting(
+            "tap_buffering",
+            &self.tap_buffering.to_string(),
+            self.tap_buffering == d.tap_buffering,
+        ));
+        line("# 빠른 탭 전환 보정: 글자를 누르고 수식키를 떼기까지 이 시간(밀리초, 30~80) 안이면 탭이다");
+        line(&setting(
+            "tap_overlap_ms",
+            &self.tap_overlap_ms.to_string(),
+            self.tap_overlap_ms == d.tap_overlap_ms,
+        ));
         line("");
         line("# Caps Lock과 Shift가 서로 뒤집는지(윈도우 방식, 맥은 false)");
         line(&setting(
@@ -197,23 +296,27 @@ impl Config {
         ));
         line("");
         line(
-            "# 수식키 탭: \"toggle_english\"(영어 ↔ 방금 쓰던 언어), \"toggle_non_english\"(한국어 ↔ 일본어)",
+            "# 단축키: \"tap:수식키\"는 수식키를 혼자 짧게 누르기, \"수식키+키\"는 같이 누르기, \"\"는 없음.",
         );
         line(
-            "# 키 이름: shift_left, shift_right, control_left, control_right, alt_left, alt_right, meta_left, meta_right",
+            "# 탭 수식키: shift_left, shift_right, control_left, control_right, alt_left, alt_right, meta_left, meta_right",
         );
         line(
-            "# 이 표를 적으면 기본값(오른쪽 Shift = 영어, 왼쪽 Shift = 한↔일)을 모두 대신한다. 적지 않은 키는 아무 일도 하지 않는다.",
+            "# 같이 누르는 수식키(좌우 없음): control, alt, shift, meta. 키: a~z, 0~9, space, enter, tab, f1~f20, left …",
         );
-        let taps_default = self.taps == d.taps;
-        let taps = if taps_default { &d.taps } else { &self.taps };
-        line(if taps_default { "# [taps]" } else { "[taps]" });
-        for name in TAP_KEYS {
-            let action = taps.get(name).copied().unwrap_or(TapAction::None);
-            if action != TapAction::None {
-                line(&setting(name, &quoted(tap_action_name(action)), taps_default));
-            }
-        }
+        line("[shortcuts]");
+        let (s, ds) = (&self.shortcuts, &d.shortcuts);
+        line(&setting(
+            "toggle_english",
+            &quoted(&s.toggle_english.to_string()),
+            s.toggle_english == ds.toggle_english,
+        ));
+        line(&setting(
+            "toggle_non_english",
+            &quoted(&s.toggle_non_english.to_string()),
+            s.toggle_non_english == ds.toggle_non_english,
+        ));
+        line(&setting("hanja", &quoted(&s.hanja.to_string()), s.hanja == ds.hanja));
         line("");
         let (ja, dja) = (&self.ja, &d.ja);
         line("[ja]");
@@ -231,11 +334,25 @@ impl Config {
             &ja.slash_nakaguro.to_string(),
             ja.slash_nakaguro == dja.slash_nakaguro,
         ));
-        line("# 읽기가 없을 때 Space를 전각 스페이스로");
+        line("# \\ 키를 ¥로. 끄면 ＼(반각 구두점이면 \\)");
+        line(&setting("yen_sign", &ja.yen_sign.to_string(), ja.yen_sign == dja.yen_sign));
+        line("# 변환할 읽기가 없을 때 누른 Space를 전각 스페이스(U+3000)로. 읽기가 있으면 Space는 변환이다");
         line(&setting(
             "full_width_space",
             &ja.full_width_space.to_string(),
             ja.full_width_space == dja.full_width_space,
+        ));
+        line("# 읽기가 있을 때 Space로 변환한다. 끄면 읽기를 확정하고 스페이스를 넣는다");
+        line(&setting(
+            "convert_with_space",
+            &ja.convert_with_space.to_string(),
+            ja.convert_with_space == dja.convert_with_space,
+        ));
+        line("# 읽기가 있을 때 Tab으로 변환한다. 끄면 읽기를 확정하고 Tab을 앱에 넘긴다");
+        line(&setting(
+            "convert_with_tab",
+            &ja.convert_with_tab.to_string(),
+            ja.convert_with_tab == dja.convert_with_tab,
         ));
         line("# 일본어 모드에서 켠 Caps Lock(가타카나)을 다른 모드로 나갈 때 끈다");
         line(&setting(
@@ -262,8 +379,22 @@ impl Config {
             &quoted(hud_position_name(mac.hud_position)),
             mac.hud_position == dmac.hud_position,
         ));
+        line("# 후보창 글자 크기(포인트, 10~28)");
+        line(&setting(
+            "candidate_font_size",
+            &mac.candidate_font_size.to_string(),
+            mac.candidate_font_size == dmac.candidate_font_size,
+        ));
         line(
-            "# Codex처럼 줄바꿈 입력을 전송으로 받는 앱에서, 조합 중 Shift+Enter로 확정한 뒤 줄을 바꾸기까지 기다리는 시간(밀리초, 20~1000)",
+            "# 조합 중 Shift+Enter: 확정한 뒤 줄바꿈을 넣기까지 기다리는 시간(밀리초, 5~100). Electron 앱에서 글자를 잃지 않게",
+        );
+        line(&setting(
+            "shift_enter_delay_ms",
+            &mac.shift_enter_delay_ms.to_string(),
+            mac.shift_enter_delay_ms == dmac.shift_enter_delay_ms,
+        ));
+        line(
+            "# Codex처럼 줄바꿈 입력을 전송으로 받는 앱: 확정한 뒤 Shift+Enter를 다시 보내기까지 기다리는 시간(밀리초, 20~1000)",
         );
         line(&setting(
             "newline_replay_ms",
@@ -272,14 +403,33 @@ impl Config {
         ));
         out
     }
+}
 
-    pub fn tap_action(&self, key: Key) -> TapAction {
-        self.taps
-            .iter()
-            .find(|(name, _)| modifier_key(name) == Some(key))
-            .map(|(_, &a)| a)
-            .unwrap_or(TapAction::None)
+/// 0.4.0까지의 `[taps]` 표를 단축키로 옮긴다. 그 표는 기본값을 통째로 대신했으므로, 표에 없는 전환은 없음이다.
+/// 한자 단축키는 그대로(Option+Return) 둔다.
+fn shortcuts_from_legacy_taps(taps: &HashMap<String, TapAction>) -> Result<Shortcuts, String> {
+    let mut s = Shortcuts {
+        toggle_english: Shortcut::None,
+        toggle_non_english: Shortcut::None,
+        ..Shortcuts::default()
+    };
+    for name in crate::shortcut::MODIFIER_NAMES {
+        let Some(&action) = taps.get(name) else { continue };
+        let key = crate::shortcut::modifier_from_name(name).expect("수식키 이름");
+        match action {
+            TapAction::ToggleEnglish if s.toggle_english == Shortcut::None => {
+                s.toggle_english = Shortcut::Tap(key)
+            }
+            TapAction::ToggleNonEnglish if s.toggle_non_english == Shortcut::None => {
+                s.toggle_non_english = Shortcut::Tap(key)
+            }
+            _ => {}
+        }
     }
+    if let Some(name) = taps.keys().find(|n| crate::shortcut::modifier_from_name(n).is_none()) {
+        return Err(format!("알 수 없는 탭 키 이름 {name:?}"));
+    }
+    Ok(s)
 }
 
 /// `key = value` 한 줄. 기본값이면 주석으로.
@@ -297,14 +447,6 @@ fn quoted(v: &str) -> String {
     format!("\"{}\"", v.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
-fn tap_action_name(a: TapAction) -> &'static str {
-    match a {
-        TapAction::None => "none",
-        TapAction::ToggleEnglish => "toggle_english",
-        TapAction::ToggleNonEnglish => "toggle_non_english",
-    }
-}
-
 fn ja_punct_name(p: JaPunct) -> &'static str {
     match p {
         JaPunct::Japanese => "japanese",
@@ -320,31 +462,25 @@ fn hud_position_name(p: HudPosition) -> &'static str {
     }
 }
 
-fn modifier_key(name: &str) -> Option<Key> {
-    Some(match name {
-        "shift_left" => Key::SHIFT_LEFT,
-        "shift_right" => Key::SHIFT_RIGHT,
-        "control_left" => Key::CONTROL_LEFT,
-        "control_right" => Key::CONTROL_RIGHT,
-        "alt_left" => Key::ALT_LEFT,
-        "alt_right" => Key::ALT_RIGHT,
-        "meta_left" => Key::META_LEFT,
-        "meta_right" => Key::META_RIGHT,
-        _ => return None,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::key::Mods;
 
     #[test]
     fn defaults_match_nrime_usage() {
         let c = Config::default();
-        assert_eq!(c.tap_action(Key::SHIFT_RIGHT), TapAction::ToggleEnglish);
-        assert_eq!(c.tap_action(Key::SHIFT_LEFT), TapAction::ToggleNonEnglish);
-        assert_eq!(c.tap_action(Key::META_LEFT), TapAction::None);
+        assert_eq!(c.shortcuts.for_tap(Key::SHIFT_RIGHT), Some(ShortcutAction::ToggleEnglish));
+        assert_eq!(c.shortcuts.for_tap(Key::SHIFT_LEFT), Some(ShortcutAction::ToggleNonEnglish));
+        assert_eq!(c.shortcuts.for_tap(Key::META_LEFT), None);
+        let option_return = KeyEvent::down(Key::ENTER, Mods(Mods::ALT_R), 1.0);
+        assert_eq!(c.shortcuts.for_combo(&option_return), Some(ShortcutAction::Hanja));
         assert_eq!(c.tap_threshold_ms, 200);
+        assert!(!c.tap_buffering && c.ja.yen_sign && c.ja.convert_with_space && c.ja.convert_with_tab);
+        assert_eq!(
+            (c.mac.shift_enter_delay_ms, c.mac.newline_replay_ms, c.mac.candidate_font_size),
+            (15, 120, 14)
+        );
     }
 
     #[test]
@@ -360,6 +496,30 @@ mod tests {
         assert!(Config::from_toml("[taps]\nshift_middle = \"none\"").is_err());
         assert!(Config::from_toml("unknown_field = 1").is_err());
         assert!(Config::from_toml("tap_threshold_ms = 20").is_err());
+        assert!(Config::from_toml("[shortcuts]\nhanja = \"a\"").is_err(), "수식키 없는 글자 키");
+        let err = Config::from_toml("[shortcuts]\ntoggle_english = \"tap:shift_left\"").unwrap_err();
+        assert!(
+            err.contains("shortcuts.toggle_english") && err.contains("shortcuts.toggle_non_english"),
+            "기본값(한↔일 왼쪽 Shift)과 겹친다. 어느 설정인지 말한다: {err}"
+        );
+        let err = Config::from_toml("[shortcuts]\nhanja = \"a\"").unwrap_err();
+        assert!(err.starts_with("shortcuts.hanja: "), "{err}");
+    }
+
+    #[test]
+    fn legacy_taps_table_becomes_shortcuts() {
+        // 0.4.0 설정 앱이 쓴 [taps]: 적힌 것만 전환이고 나머지는 없음. 한자는 기본값.
+        let c = Config::from_toml("[taps]\nalt_right = \"toggle_english\"\n").unwrap();
+        assert_eq!(c.shortcuts.toggle_english, Shortcut::Tap(Key::ALT_RIGHT));
+        assert_eq!(c.shortcuts.toggle_non_english, Shortcut::None);
+        assert_eq!(c.shortcuts.hanja, Shortcuts::default().hanja);
+        assert_eq!(c.taps, None, "옮긴 뒤에는 들고 있지 않는다");
+        // [shortcuts]가 있으면 그쪽이 이긴다.
+        let c = Config::from_toml("[taps]\nalt_right = \"toggle_english\"\n[shortcuts]\n").unwrap();
+        assert_eq!(c.shortcuts, Shortcuts::default());
+        // 옛 틀(0.2.x, 모두 주석)과 0.4.0 기본 파일도 기본값이다.
+        assert_eq!(Config::from_toml("# [taps]\n# [ja]\n").unwrap(), Config::default());
+        assert!(!Config::default().to_toml().contains("[taps]"));
     }
 
     /// 설정 파일로 쓴 것을 다시 읽으면 같은 설정이다.
@@ -373,17 +533,26 @@ mod tests {
     fn default_file_has_every_setting_commented() {
         let text = Config::default().to_toml();
         round_trip(&Config::default());
-        // 표 머리([ja] [mac])와 설명 말고는 모두 주석: 기본값이 바뀌면 따라간다.
+        // 표 머리([shortcuts] [ja] [mac])와 설명 말고는 모두 주석: 기본값이 바뀌면 따라간다.
         let live: Vec<&str> =
             text.lines().filter(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with('[')).collect();
         assert!(live.is_empty(), "{live:?}");
-        for key in
-            ["ko_layout", "tap_threshold_ms", "shift_right", "punctuation", "katakana_direct", "hud_position"]
-        {
+        for key in [
+            "ko_layout",
+            "tap_threshold_ms",
+            "tap_buffering",
+            "toggle_english",
+            "hanja",
+            "punctuation",
+            "yen_sign",
+            "convert_with_tab",
+            "katakana_direct",
+            "candidate_font_size",
+            "shift_enter_delay_ms",
+        ] {
             assert!(text.contains(&format!("# {key} = ")), "{key}");
         }
-        // 옛 틀(0.2.x, 모두 주석)과 같은 설정이다.
-        assert_eq!(Config::from_toml("# [taps]\n# [ja]\n").unwrap(), Config::default());
+        assert!(text.contains("# hanja = \"alt+enter\""));
     }
 
     #[test]
@@ -391,35 +560,35 @@ mod tests {
         let c = Config {
             ko_layout: "chamshin-d-v19".into(),
             tap_threshold_ms: 250,
+            tap_buffering: true,
+            tap_overlap_ms: 60,
+            shortcuts: Shortcuts {
+                toggle_english: Shortcut::parse("control+space").unwrap(),
+                toggle_non_english: Shortcut::None,
+                hanja: Shortcut::Tap(Key::ALT_RIGHT),
+            },
             ja: JaConfig {
                 punctuation: JaPunct::HalfWidthWestern,
+                yen_sign: false,
+                convert_with_tab: false,
                 katakana_direct: false,
                 ..JaConfig::default()
             },
-            mac: MacConfig { hud: false, hud_position: HudPosition::Mouse, newline_replay_ms: 80 },
+            mac: MacConfig {
+                hud: false,
+                hud_position: HudPosition::Mouse,
+                candidate_font_size: 18,
+                shift_enter_delay_ms: 30,
+                newline_replay_ms: 80,
+            },
             ..Config::default()
         };
         round_trip(&c);
         let text = c.to_toml();
         assert!(text.contains("\nko_layout = \"chamshin-d-v19\"\n"));
+        assert!(text.contains("\ntoggle_english = \"control+space\"\n"));
+        assert!(text.contains("\ntoggle_non_english = \"\"\n"), "없음은 빈 글자열");
+        assert!(text.contains("\nhanja = \"tap:alt_right\"\n"));
         assert!(text.contains("\n# slash_nakaguro = true\n"), "바꾸지 않은 것은 주석 그대로");
-
-        // 탭 표: 바꾸면 표 전체를 적는다. 없음은 적지 않는다. 모두 없음이면 빈 표.
-        let t = Config {
-            taps: HashMap::from([
-                ("alt_right".into(), TapAction::ToggleEnglish),
-                ("shift_left".into(), TapAction::None),
-            ]),
-            ..Config::default()
-        };
-        round_trip(&Config {
-            taps: HashMap::from([("alt_right".into(), TapAction::ToggleEnglish)]),
-            ..t.clone()
-        });
-        let text = t.to_toml();
-        assert!(text.contains("\n[taps]\nalt_right = \"toggle_english\"\n\n"), "{text}");
-        let none = Config { taps: HashMap::new(), ..Config::default() };
-        round_trip(&none);
-        assert!(none.to_toml().contains("\n[taps]\n\n[ja]"));
     }
 }

@@ -6,7 +6,7 @@ import InputMethodKit
 /// Provides direct control over selection highlight, candidate list, and positioning.
 final class CandidatePanel {
 
-    /// 후보 글꼴 크기. 설정 앱이 생기면 설정에서 읽는다.
+    /// 후보 글꼴 크기(포인트). 설정 파일 [mac] candidate_font_size(설정 앱 일반 탭).
     static var fontSize: CGFloat = 14
 
     // MARK: - Public Properties

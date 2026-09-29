@@ -254,6 +254,15 @@ void cssgsg_mozc_cancel(CssgsgMozc* m) {
   Clear(*m);
 }
 
+void cssgsg_mozc_reload(CssgsgMozc* m) {
+  if (m == nullptr) return;
+  absl::MutexLock lock(&m->mu);
+  Clear(*m);
+  Command c;
+  c.mutable_input()->set_type(Input::RELOAD);
+  m->handler->EvalCommand(&c);
+}
+
 void cssgsg_mozc_set_learning(CssgsgMozc* m, int32_t enabled) {
   if (m == nullptr) return;
   absl::MutexLock lock(&m->mu);

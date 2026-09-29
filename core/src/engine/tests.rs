@@ -630,3 +630,143 @@ fn hanja_key_is_ignored_in_secure_fields_and_other_modes() {
     s.type_keys("s{sp}").unwrap();
     assert!(s.candidates.as_ref().unwrap().notes.is_empty());
 }
+
+// ---------------------------------------------------------------- 단축키(설정의 [shortcuts])
+
+fn ko_with(config: &str) -> Sim {
+    let mut s = sim_with(config);
+    s.type_keys("{rs}").unwrap();
+    s
+}
+
+#[test]
+fn combo_shortcuts_switch_languages_even_in_secure_fields() {
+    let mut s = sim_with("[shortcuts]\ntoggle_english = \"control+space\"\ntoggle_non_english = \"\"\n");
+    s.type_keys("{rs}").unwrap();
+    assert_eq!(s.engine.mode(), Mode::En, "오른쪽 Shift 탭은 이제 아무 일도 안 한다");
+    s.type_keys("{C-sp}").unwrap();
+    assert_eq!(s.engine.mode(), Mode::Ko);
+    s.type_keys("{ls}").unwrap();
+    assert_eq!(s.engine.mode(), Mode::Ko, "한↔일 단축키가 없다");
+    s.ctx.secure_field = true;
+    s.type_keys("{C-sp}").unwrap();
+    assert_eq!(s.engine.mode(), Mode::En, "비밀번호 칸에서도 전환은 된다");
+}
+
+#[test]
+fn hanja_shortcut_follows_the_setting() {
+    // 오른쪽 Option 탭으로 바꾸면 그것이 한자 키이고, Option+Return은 예전처럼 앱으로 간다.
+    let mut s = ko_with("[shortcuts]\nhanja = \"tap:alt_right\"\n");
+    s.type_keys("kre").unwrap();
+    s.tap(Key::ALT_RIGHT, Mods::ALT_R);
+    assert_eq!((s.text.as_str(), s.preedit.as_str()), ("", "國"));
+    s.tap(Key::ALT_RIGHT, Mods::ALT_R);
+    assert_eq!(s.preedit, "局", "변환 중에 다시 누르면 다음 후보");
+    s.type_keys("{ent}kre{A-ent}").unwrap();
+    assert_eq!((s.text.as_str(), s.preedit.as_str()), ("局국", ""), "Option+Return은 조합을 확정하고 앱으로");
+
+    let mut s = ko_with("[shortcuts]\nhanja = \"control+h\"\n");
+    s.type_keys("kre{C-h}").unwrap();
+    assert_eq!(s.preedit, "國");
+}
+
+#[test]
+fn japanese_conversion_keys_can_be_turned_off() {
+    let mut s = sim_with("[ja]\nconvert_with_space = false\n");
+    s.type_keys("{ls}ckeuwl{sp}").unwrap();
+    assert_eq!((s.text.as_str(), s.preedit.as_str()), ("にほんご ", ""), "Space는 확정하고 스페이스");
+    assert!(s.candidates.is_none());
+    let mut s = sim_with("[ja]\nconvert_with_space = false\nfull_width_space = true\n");
+    s.type_keys("{ls}ckeuwl{sp}").unwrap();
+    assert_eq!(s.text, "にほんご\u{3000}");
+    let mut s = sim_with("[ja]\nconvert_with_tab = false\n");
+    s.type_keys("{ls}ckeuwl{tab}").unwrap();
+    assert_eq!(s.text, "にほんご\t", "Tab은 확정하고 앱으로");
+    s.type_keys("ckeuwl{sp}").unwrap();
+    assert_eq!(s.candidates.as_ref().map(|c| c.items[0].as_str()), Some("にほんご"), "Space는 그대로 변환");
+}
+
+#[test]
+fn yen_sign_on_the_backslash_key() {
+    assert_eq!(typed("{ls}\\"), "¥");
+    assert_eq!(typed("{ls}|"), "｜");
+    let mut s = sim_with("[ja]\nyen_sign = false\n");
+    s.type_keys("{ls}\\").unwrap();
+    assert_eq!(s.screen(), "＼");
+    let mut s = sim_with("[ja]\nyen_sign = false\npunctuation = \"half_width_western\"\n");
+    s.type_keys("{ls}\\").unwrap();
+    assert_eq!(s.screen(), "\\");
+}
+
+// ---------------------------------------------------------------- 빠른 탭 전환 보정
+
+/// 한국어 모드에서 오른쪽 Shift를 누른 채 j를 치고, `release`초 뒤에 Shift를 뗀다(시각은 초).
+fn rolled_tap(config: &str, letter_at: f64, release_at: f64) -> Sim {
+    let mut s = ko_with(config);
+    s.event(KeyEvent::down(Key::SHIFT_RIGHT, Mods(Mods::SHIFT_R), 10.0));
+    s.event(KeyEvent::down(Key::J, Mods(Mods::SHIFT_R), 10.0 + letter_at));
+    if let Some(t) = s.pending_timer.filter(|&t| t <= 10.0 + release_at) {
+        s.fire_timer(t);
+    }
+    s.event(KeyEvent::up(Key::SHIFT_RIGHT, Mods(0), 10.0 + release_at));
+    s
+}
+
+const BUFFERING: &str = "tap_buffering = true\n";
+
+#[test]
+fn quick_tap_buffering_switches_before_the_rolled_letter() {
+    // 오른쪽 Shift를 떼기 전에 j를 쳤지만 곧 뗐다: 영어로 바꾼 뒤 j(Graphite h)를 Shift 없이 친다.
+    let s = rolled_tap(BUFFERING, 0.03, 0.05);
+    assert_eq!((s.engine.mode(), s.screen().as_str()), (Mode::En, "h"));
+    // 기본(끔)에서는 Shift를 누른 채 친 j라서 한국어 Shift+j이고 전환하지 않는다.
+    let plain = rolled_tap("", 0.03, 0.05);
+    assert_eq!(plain.engine.mode(), Mode::Ko);
+    let mut expected = ko_with("");
+    expected.type_keys("J").unwrap();
+    assert_eq!(plain.screen(), expected.screen());
+}
+
+#[test]
+fn quick_tap_buffering_keeps_shifted_letters_when_not_a_tap() {
+    let mut shifted_j = ko_with("");
+    shifted_j.type_keys("J").unwrap();
+    // 늦게 뗐다(글자를 누르고 50ms 넘게): 탭이 아니라 Shift 글자.
+    let late = rolled_tap(BUFFERING, 0.03, 0.12);
+    assert_eq!((late.engine.mode(), late.screen()), (Mode::Ko, shifted_j.screen()));
+    // 타이머가 먼저 울렸다: 누른 그대로 치고, 그 Shift는 이제 탭이 아니다.
+    let mut s = ko_with(BUFFERING);
+    s.event(KeyEvent::down(Key::SHIFT_RIGHT, Mods(Mods::SHIFT_R), 10.0));
+    let out = s.event(KeyEvent::down(Key::J, Mods(Mods::SHIFT_R), 10.03));
+    assert!(out.consumed && out.commit.is_empty() && out.timer_ms.is_some());
+    assert_eq!(s.screen(), "", "잡아 둔 동안은 아무것도 안 보인다");
+    let early = s.fire_timer(10.05);
+    assert!(early.commit.is_empty() && early.timer_ms.is_some(), "시간 전이면 다시 청한다");
+    s.fire_timer(s.pending_timer.unwrap());
+    assert_eq!(s.screen(), shifted_j.screen());
+    s.event(KeyEvent::up(Key::SHIFT_RIGHT, Mods(0), 10.08));
+    assert_eq!(s.engine.mode(), Mode::Ko);
+}
+
+#[test]
+fn quick_tap_buffering_flushes_on_the_next_key_and_respects_combos() {
+    // 잡아 둔 뒤 다른 글자: 둘 다 Shift 글자(대문자·기호를 치는 중이다).
+    let mut s = ko_with(BUFFERING);
+    s.event(KeyEvent::down(Key::SHIFT_RIGHT, Mods(Mods::SHIFT_R), 10.0));
+    s.event(KeyEvent::down(Key::J, Mods(Mods::SHIFT_R), 10.02));
+    s.event(KeyEvent::down(Key::K, Mods(Mods::SHIFT_R), 10.04));
+    s.event(KeyEvent::up(Key::SHIFT_RIGHT, Mods(0), 10.05));
+    let mut expected = ko_with("");
+    expected.type_keys("JK").unwrap();
+    assert_eq!((s.engine.mode(), s.screen()), (Mode::Ko, expected.screen()));
+    // Shift를 쓰는 조합 단축키가 있으면 Shift 탭을 가로채지 않는다(NRIME와 같다).
+    let with_combo =
+        rolled_tap(&format!("{BUFFERING}[shortcuts]\ntoggle_non_english = \"shift+space\"\n"), 0.03, 0.05);
+    assert_eq!(with_combo.engine.mode(), Mode::Ko);
+    // 클릭: 누른 그대로 친다.
+    let mut s = ko_with(BUFFERING);
+    s.event(KeyEvent::down(Key::SHIFT_RIGHT, Mods(Mods::SHIFT_R), 10.0));
+    s.event(KeyEvent::down(Key::J, Mods(Mods::SHIFT_R), 10.02));
+    s.type_keys("{click}").unwrap();
+    assert_eq!(s.screen(), expected.screen().chars().take(1).collect::<String>());
+}

@@ -1,6 +1,6 @@
-// 업데이트 코드 스모크 테스트. 셸의 Update/SemanticVersion.swift, Update/Updater.swift와 같이 빌드한다(run.sh).
+// 업데이트 코드 스모크 테스트. 설정 앱의 Update/SemanticVersion.swift, Update/Updater.swift와 같이 빌드한다(run.sh).
 //
-//   update-smoke <fixture.json>                  버전 순서, 권할 릴리스, GitHub 응답 해석, 해시, AppleScript
+//   update-smoke <fixture.json>                  버전 순서, 채널별 권할 릴리스, GitHub 응답 해석, 해시, 설치 스크립트
 //   update-smoke --live <pkg 파일> <버전>        GitHub에 올라간 최신 릴리스를 앱과 같은 코드로 읽고, 파일을 받아 해시를 맞춰 본다
 import AppKit
 import Carbon
@@ -34,6 +34,9 @@ func release(_ tag: String, pkg: Bool = true, draft: Bool = false, prerelease: B
 }
 
 func offline(fixture: String) {
+    // 설치 안내 문구는 화면 언어를 따른다. 시험은 한국어로.
+    UILanguage.active = .ko
+
     // 버전 순서(semver)
     check(SemanticVersion.isNewer(remote: "0.1.1", than: "0.1.0"), "0.1.1 > 0.1.0")
     check(!SemanticVersion.isNewer(remote: "0.1.0", than: "0.1.0"), "같은 버전은 새것이 아님")
@@ -43,14 +46,30 @@ func offline(fixture: String) {
     check(SemanticVersion.isNewer(remote: "0.1.0", than: "0.1.0-beta.3"), "정식 > 같은 버전의 베타")
     check(!SemanticVersion.isNewer(remote: "garbage", than: "0.1.0"), "읽을 수 없는 태그는 권하지 않음")
 
-    // 권할 릴리스
-    check(Updater.offers(release("v0.1.1"), over: "0.1.0"), "새 정식 릴리스는 권함")
-    check(!Updater.offers(release("v0.1.0"), over: "0.1.0"), "같은 버전은 안 권함")
-    check(!Updater.offers(release("v0.1.1", pkg: false), over: "0.1.0"), "pkg 없는 릴리스는 안 권함")
-    check(!Updater.offers(release("v0.1.1", draft: true), over: "0.1.0"), "초안은 안 권함")
-    check(!Updater.offers(release("v0.2.0-beta.1", prerelease: true), over: "0.1.0"), "prerelease는 안 권함")
+    // 권할 릴리스: 정식 채널
+    check(UpdateLogic.offers(release("v0.1.1"), over: "0.1.0", channel: .stable), "새 정식 릴리스는 권함")
+    check(!UpdateLogic.offers(release("v0.1.0"), over: "0.1.0", channel: .stable), "같은 버전은 안 권함")
+    check(!UpdateLogic.offers(release("v0.1.1", pkg: false), over: "0.1.0", channel: .stable), "pkg 없는 릴리스는 안 권함")
+    check(!UpdateLogic.offers(release("v0.1.1", draft: true), over: "0.1.0", channel: .stable), "초안은 안 권함")
+    check(!UpdateLogic.offers(release("v0.2.0-beta.1", prerelease: true), over: "0.1.0", channel: .stable),
+          "정식 채널은 prerelease를 안 권함")
+    // 베타 채널: prerelease도 권하고, 목록에서 가장 높은 버전을 고른다
+    check(UpdateLogic.offers(release("v0.2.0-beta.1", prerelease: true), over: "0.1.0", channel: .beta),
+          "베타 채널은 prerelease를 권함")
+    check(!UpdateLogic.offers(release("v0.2.0-beta.1", draft: true, prerelease: true), over: "0.1.0", channel: .beta),
+          "베타 채널도 초안은 안 권함")
+    let list = [
+        release("v0.2.0-beta.2", prerelease: true), release("v0.1.1"), release("v0.2.0-beta.10", prerelease: true),
+        release("v0.3.0-beta.1", pkg: false, prerelease: true), release("v0.9.0", draft: true), release("garbage"),
+    ]
+    check(UpdateLogic.pick(list, over: "0.1.0", channel: .beta)?.version == "0.2.0-beta.10",
+          "베타: 목록에서 가장 높은 버전(beta.10 > beta.2, pkg 없는 것·초안 제외)")
+    check(UpdateLogic.pick(list, over: "0.1.0", channel: .stable)?.version == "0.1.1", "정식: prerelease 제외")
+    check(UpdateLogic.pick(list + [release("v0.2.0")], over: "0.2.0-beta.10", channel: .beta)?.version == "0.2.0",
+          "베타를 쓰던 사람도 같은 버전의 정식 릴리스를 받음")
+    check(UpdateLogic.pick(list, over: "0.2.0-beta.10", channel: .beta) == nil, "더 높은 것이 없으면 권하지 않음")
 
-    // 실제 GitHub 응답 모양
+    // 실제 GitHub 응답 모양. 정식(/releases/latest)은 릴리스 하나, 베타(/releases)는 목록이다.
     do {
         let data = try Data(contentsOf: URL(fileURLWithPath: fixture))
         let r = try JSONDecoder().decode(GitHubRelease.self, from: data)
@@ -59,54 +78,63 @@ func offline(fixture: String) {
         check(r.pkgAsset?.digest?.hasPrefix("sha256:") == true, "응답 해석: sha256 해시")
         check(r.htmlURL?.hasPrefix("https://github.com/") == true, "응답 해석: 릴리스 페이지 주소")
         check(r.draft == false && r.prerelease == false, "응답 해석: draft/prerelease")
+        check(UpdateLogic.decode(data, channel: .stable)?.map(\.version) == ["1.0.10"], "응답 해석: 정식 채널은 하나")
+        let listData = Data("[".utf8) + data + Data(",".utf8) + data + Data("]".utf8)
+        check(UpdateLogic.decode(listData, channel: .beta)?.count == 2, "응답 해석: 베타 채널은 목록")
+        check(UpdateLogic.decode(data, channel: .beta) == nil, "응답 해석: 모양이 다르면 nil")
     } catch {
         check(false, "응답 해석: \(error)")
     }
+    check(UpdateChannel.stable.url.path.hasSuffix("/releases/latest"), "정식 채널 주소")
+    check(UpdateChannel.beta.url.path.hasSuffix("/releases") && UpdateChannel.beta.url.query == "per_page=20", "베타 채널 주소")
 
     // 해시
     let temp = FileManager.default.temporaryDirectory.appendingPathComponent("cssgsg-update-smoke-\(getpid())")
     try? Data("abc".utf8).write(to: temp)
     defer { try? FileManager.default.removeItem(at: temp) }
     let abc = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-    check(Updater.fileMatchesDigest(at: temp, expected: "sha256:" + abc) == true, "해시 일치")
-    check(Updater.fileMatchesDigest(at: temp, expected: "SHA256:" + abc.uppercased()) == true, "해시 대소문자 무시")
-    check(Updater.fileMatchesDigest(at: temp, expected: "sha256:" + String(repeating: "0", count: 64)) == false, "해시 불일치")
-    check(Updater.fileMatchesDigest(at: temp, expected: nil) == nil, "해시 없음 → nil(설치 안 함)")
-    check(Updater.fileMatchesDigest(at: URL(fileURLWithPath: "/nonexistent/x"), expected: "sha256:" + abc) == false,
+    check(UpdateLogic.fileMatchesDigest(at: temp, expected: "sha256:" + abc) == true, "해시 일치")
+    check(UpdateLogic.fileMatchesDigest(at: temp, expected: "SHA256:" + abc.uppercased()) == true, "해시 대소문자 무시")
+    check(UpdateLogic.fileMatchesDigest(at: temp, expected: "sha256:" + String(repeating: "0", count: 64)) == false, "해시 불일치")
+    check(UpdateLogic.fileMatchesDigest(at: temp, expected: nil) == nil, "해시 없음 → nil(설치 안 함)")
+    check(UpdateLogic.fileMatchesDigest(at: URL(fileURLWithPath: "/nonexistent/x"), expected: "sha256:" + abc) == false,
           "파일 없음 → 불일치")
 
     // 버전 문자열 거르기
-    check(Updater.safe("0.1.1-beta.2") == "0.1.1-beta.2", "safe: 보통 버전은 그대로")
-    check(Updater.safe("1.0\"; rm -rf /") == "1.0rm-rf", "safe: 따옴표·공백·기호 제거")
-    check(Updater.safe("1.0한") == "1.0", "safe: ASCII만")
+    check(UpdateLogic.safe("0.1.1-beta.2") == "0.1.1-beta.2", "safe: 보통 버전은 그대로")
+    check(UpdateLogic.safe("1.0\"; rm -rf /") == "1.0rm-rf", "safe: 따옴표·공백·기호 제거")
+    check(UpdateLogic.safe("1.0한") == "1.0", "safe: ASCII만")
 
     // 셸 인용: 까다로운 글자가 든 문자열이 셸을 거쳐 그대로 돌아오는지
     for text in ["/tmp/a \"b\"/c d\\e's.pkg", "it's", "$(rm -rf /)", "`x`", "a;b&&c|d", "공백 있는 이름"] {
-        let echoed = run("/bin/sh", ["-c", "printf '%s' " + Updater.shellQuote(text)]).out
+        let echoed = run("/bin/sh", ["-c", "printf '%s' " + UpdateLogic.shellQuote(text)]).out
         check(echoed == text, "셸 인용 왕복: \(text)")
     }
 
     // 설치 명령(관리자 권한): installer 하나. 셸이 어떤 인자로 받는지
     let pkgPath = "/tmp/a \"b\"/c d\\e's.pkg"
-    let command = Updater.installCommand(pkgPath: pkgPath)
+    let command = UpdateLogic.installCommand(pkgPath: pkgPath)
     func argv(_ step: String) -> [String] {
         run("/bin/sh", ["-c", "printf '%s\\n' " + step]).out.split(separator: "\n", omittingEmptySubsequences: false).dropLast().map(String.init)
     }
     check(argv(command) == ["/usr/sbin/installer", "-pkg", pkgPath, "-target", "/"], "설치 명령 인자: \(argv(command))")
 
-    // 다시 띄우기: osascript가 끝날 때까지 기다렸다가 사용자 세션에서 연다(여는 명령은 echo로 바꿔 시험)
-    let sleeper = Process()
-    sleeper.executableURL = URL(fileURLWithPath: "/bin/sleep")
-    sleeper.arguments = ["0.6"]
-    try? sleeper.run()
+    // 설치 셸: 설치(osascript)가 성공하면 1초 뒤 입력기와 설정 앱을 연다(여는 명령은 echo로 바꿔 시험).
+    let apple = "do shell script \"it's \\\"quoted\\\" $(x)\""
     let started = Date()
-    let relaunch = run("/bin/sh", ["-c", Updater.relaunchScript(waitingFor: sleeper.processIdentifier, opener: "/bin/echo")])
+    let ok = run("/bin/sh", ["-c", UpdateLogic.installScript(appleScript: apple, osascript: "/bin/echo", opener: "/bin/echo")])
     let waited = Date().timeIntervalSince(started)
-    check(relaunch.out == "-g \(Updater.installedAppPath)\n", "다시 띄우기: open -g 설치 자리 (\(relaunch.out.trimmingCharacters(in: .newlines)))")
-    check(waited >= 1.5, String(format: "다시 띄우기: 설치(0.6초)가 끝나고 1초 더 기다린 뒤 연다 (%.2f초)", waited))
+    let lines = ok.out.split(separator: "\n").map(String.init)
+    check(ok.status == 0 && lines.count == 3, "설치 셸: 성공하면 세 줄 (\(lines.count))")
+    check(lines.first == "-e " + apple, "설치 셸: AppleScript가 osascript에 그대로 간다")
+    check(lines.dropFirst().first == "-g \(UpdateLogic.installedAppPath)", "설치 셸: 입력기를 뒤에서 연다")
+    check(lines.last == "-a \(UpdateLogic.installedSettingsPath) --args --tab about", "설치 셸: 설정 앱을 정보 탭으로 연다")
+    check(waited >= 1, String(format: "설치 셸: 설치가 끝나고 1초 기다린 뒤 연다 (%.2f초)", waited))
+    let cancelled = run("/bin/sh", ["-c", UpdateLogic.installScript(appleScript: apple, osascript: "/usr/bin/false", opener: "/bin/echo")])
+    check(cancelled.status != 0 && cancelled.out.isEmpty, "설치 셸: 취소·실패하면 아무것도 열지 않는다")
 
     // AppleScript: 문법 확인 + 리터럴을 되읽으면 셸 명령과 한 글자도 다르지 않은지
-    let script = Updater.installerScript(command: command, version: "0.1.2")
+    let script = UpdateLogic.installerScript(command: command, version: "0.1.2")
     let compiled = run("/usr/bin/osacompile", ["-e", script, "-o", temp.path + ".scpt"])
     try? FileManager.default.removeItem(atPath: temp.path + ".scpt")
     check(compiled.status == 0, "AppleScript 문법 \(compiled.status == 0 ? "" : compiled.out)")
@@ -121,7 +149,7 @@ func live(pkg: String, version: String) {
     let semaphore = DispatchSemaphore(value: 0)
     var body: Data?
     var status = 0
-    var request = URLRequest(url: Updater.latestReleaseURL)
+    var request = URLRequest(url: UpdateChannel.stable.url)
     request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
     URLSession.shared.dataTask(with: request) { data, response, _ in
         body = data
@@ -134,14 +162,26 @@ func live(pkg: String, version: String) {
         return
     }
     check(r.version == version, "최신 릴리스 = \(r.version) (기대 \(version))")
-    check(Updater.offers(r, over: "0.0.1"), "옛 버전 앱은 이 릴리스를 권받음")
-    check(!Updater.offers(r, over: version), "같은 버전 앱은 권받지 않음")
+    check(UpdateLogic.offers(r, over: "0.0.1", channel: .stable), "옛 버전 앱은 이 릴리스를 권받음")
+    check(!UpdateLogic.offers(r, over: version, channel: .stable), "같은 버전 앱은 권받지 않음")
+    // 베타 채널 목록에도 있고, 베타 채널의 옛 버전 앱은 이것이나 더 높은 시험판을 권받는다.
+    var betaBody: Data?
+    URLSession.shared.dataTask(with: URLRequest(url: UpdateChannel.beta.url)) { data, _, _ in
+        betaBody = data
+        semaphore.signal()
+    }.resume()
+    semaphore.wait()
+    let betaList = betaBody.flatMap { UpdateLogic.decode($0, channel: .beta) } ?? []
+    check(betaList.contains { $0.version == version }, "베타 채널 목록에 \(version)이 있음")
+    let betaPick = UpdateLogic.pick(betaList, over: "0.0.1", channel: .beta)
+    check(betaPick.map { !SemanticVersion.isNewer(remote: version, than: $0.version) } == true,
+          "베타 채널 옛 버전 앱은 \(betaPick?.version ?? "없음")을 권받음(≥ \(version))")
     guard let asset = r.pkgAsset, let url = URL(string: asset.browserDownloadURL) else {
         check(false, "pkg 파일이 붙어 있음")
         return
     }
     check(asset.name == "cssgsg.pkg", "파일 이름 cssgsg.pkg (고정 링크 releases/latest/download/cssgsg.pkg)")
-    check(Updater.fileMatchesDigest(at: URL(fileURLWithPath: pkg), expected: asset.digest) == true,
+    check(UpdateLogic.fileMatchesDigest(at: URL(fileURLWithPath: pkg), expected: asset.digest) == true,
           "GitHub 해시 = 로컬 pkg 해시")
     var downloaded: URL?
     URLSession.shared.downloadTask(with: url) { location, _, _ in
@@ -155,7 +195,7 @@ func live(pkg: String, version: String) {
     }.resume()
     semaphore.wait()
     if let downloaded {
-        check(Updater.fileMatchesDigest(at: downloaded, expected: asset.digest) == true, "받은 파일 해시 일치(앱과 같은 확인)")
+        check(UpdateLogic.fileMatchesDigest(at: downloaded, expected: asset.digest) == true, "받은 파일 해시 일치(앱과 같은 확인)")
         try? FileManager.default.removeItem(at: downloaded)
     } else {
         check(false, "파일 받기")

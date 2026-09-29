@@ -44,6 +44,8 @@ struct EngineOutput {
     var capsLockOff = false
     /// 한자 학습이 바뀌었다(저장한다).
     var learningChanged = false
+    /// 0이 아니면 이만큼(밀리초) 뒤에 timer(now:)를 부른다(빠른 탭 전환 보정이 글자를 잡아 두었다).
+    var timerMs: UInt32 = 0
 }
 
 /// 러스트 코어 엔진. 입력기 프로세스에 하나만 있다(모드는 앱 전체 공통, NRIME와 같다).
@@ -101,6 +103,12 @@ final class CoreEngine {
         return ok
     }
 
+    /// Mozc 사용자 사전을 다시 읽는다(설정 앱이 고친 뒤). 변환 중이면 읽기로 돌아간다.
+    @discardableResult
+    func reloadUserDictionary() -> Bool {
+        cssgsg_engine_reload_dictionary(engine) != 0
+    }
+
     /// 한자 학습(TSV)을 불러온다. 읽은 항목 수.
     @discardableResult
     func loadHanjaLearning(_ tsv: String) -> Int {
@@ -134,6 +142,9 @@ final class CoreEngine {
 
     func setMode(_ mode: InputMode) -> EngineOutput { Self.copy(cssgsg_engine_set_mode(engine, mode.rawValue)) }
 
+    /// 결과의 timerMs만큼 기다린 뒤 부른다. now는 키 이벤트(NSEvent.timestamp)와 같은 시계, 부팅 뒤 초다.
+    func timer(now: TimeInterval) -> EngineOutput { Self.copy(cssgsg_engine_timer(engine, now)) }
+
     private static func copy(_ pointer: UnsafePointer<CssgsgOutput>?) -> EngineOutput {
         guard let o = pointer?.pointee else { return EngineOutput() }
         var out = EngineOutput()
@@ -142,6 +153,7 @@ final class CoreEngine {
         out.capsLockOff = o.caps_lock_off != 0
         out.mode = o.mode >= 0 ? InputMode(rawValue: o.mode) : nil
         out.learningChanged = o.learning_changed != 0
+        out.timerMs = o.timer_ms
         if o.preedit_changed != 0 {
             let text = o.preedit.map { String(cString: $0) } ?? ""
             var segments: [PreeditUpdate.Segment] = []

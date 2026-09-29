@@ -34,6 +34,11 @@ impl TapTracker {
         (solo && ev.time - t0 <= threshold_secs).then_some(key)
     }
 
+    /// 지금 탭이 될 수 있는 수식키와 누른 시각(빠른 탭 전환 보정이 본다).
+    pub fn candidate(&self) -> Option<(Key, f64)> {
+        self.candidate
+    }
+
     /// 마우스 클릭 등으로 진행 중인 탭을 무효로 한다.
     pub fn cancel(&mut self) {
         self.candidate = None;

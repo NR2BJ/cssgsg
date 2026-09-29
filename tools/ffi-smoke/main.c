@@ -51,14 +51,47 @@ int main(void) {
     /* 맥 셸 설정: 기본값과 [mac] 표 */
     CssgsgMacSettings m = cssgsg_engine_mac_settings(e);
     CHECK(m.hud == 1 && m.hud_at_mouse == 0 && m.newline_replay_ms == 120);
+    CHECK(m.candidate_font_size == 14 && m.shift_enter_delay_ms == 15);
     m = cssgsg_engine_mac_settings(NULL);
-    CHECK(m.hud == 1 && m.newline_replay_ms == 120);
-    CssgsgEngine *c = cssgsg_engine_new("[mac]\nhud = false\nhud_position = \"mouse\"\nnewline_replay_ms = 80");
+    CHECK(m.hud == 1 && m.newline_replay_ms == 120 && m.candidate_font_size == 14 && m.shift_enter_delay_ms == 15);
+    CssgsgEngine *c = cssgsg_engine_new("[mac]\nhud = false\nhud_position = \"mouse\"\nnewline_replay_ms = 80\n"
+                                        "candidate_font_size = 18\nshift_enter_delay_ms = 25");
     CHECK(c != NULL);
     m = cssgsg_engine_mac_settings(c);
     CHECK(m.hud == 0 && m.hud_at_mouse == 1 && m.newline_replay_ms == 80);
+    CHECK(m.candidate_font_size == 18 && m.shift_enter_delay_ms == 25);
     cssgsg_engine_free(c);
     CHECK(cssgsg_engine_new("[mac]\nnewline_replay_ms = 5") == NULL);
+
+    /* 빠른 탭 전환 보정: 오른쪽 Shift를 누른 채 친 글자는 잡아 두고 타이머를 청한다(timer_ms). */
+    CssgsgEngine *b = cssgsg_engine_new("tap_buffering = true");
+    CHECK(b != NULL);
+    cssgsg_engine_set_mode(b, CSSGSG_MODE_EN);
+    CssgsgKeyEvent rs = { cssgsg_key_from_mac_keycode(0x3C), 1, 0, CSSGSG_MOD_SHIFT_R, 10.0 };
+    CssgsgKeyEvent rs_j = { cssgsg_key_from_mac_keycode(0x26), 1, 0, CSSGSG_MOD_SHIFT_R, 10.05 };
+    cssgsg_engine_handle_key(b, &rs, NULL);
+    o = cssgsg_engine_handle_key(b, &rs_j, NULL);
+    CHECK(o->consumed == 1 && o->commit[0] == '\0' && o->timer_ms > 0 && o->timer_ms <= 100);
+    /* 시간이 다 되면(수식키를 떼지 않았다) 누른 그대로 친다: Shift+j → H */
+    o = cssgsg_engine_timer(b, 10.2);
+    CHECK(o->consumed == 1 && strcmp(o->commit, "H") == 0 && o->timer_ms == 0);
+    o = cssgsg_engine_timer(b, 10.3);
+    CHECK(o->consumed == 0 && o->commit[0] == '\0' && o->timer_ms == 0);
+    CssgsgKeyEvent rs_up = { cssgsg_key_from_mac_keycode(0x3C), 0, 0, 0, 10.4 };
+    cssgsg_engine_handle_key(b, &rs_up, NULL);
+    /* 잡아 둔 뒤 곧 떼면 탭: 전환하고(영어 → 한국어) 그 글자는 Shift 없이 친다 */
+    rs.time = 20.0;
+    rs_j.time = 20.05;
+    rs_up.time = 20.08;
+    cssgsg_engine_handle_key(b, &rs, NULL);
+    cssgsg_engine_handle_key(b, &rs_j, NULL);
+    o = cssgsg_engine_handle_key(b, &rs_up, NULL);
+    CHECK(o->mode == CSSGSG_MODE_KO && o->consumed == 1 && o->preedit_changed == 1 && strlen(o->preedit) > 0);
+    /* 사용자 사전 다시 읽기: Mozc가 없으면 할 일이 없다 */
+    CHECK(cssgsg_engine_reload_dictionary(b) == 1);
+    CHECK(cssgsg_engine_reload_dictionary(NULL) == 0);
+    CHECK(cssgsg_engine_timer(NULL, 1.0) == NULL);
+    cssgsg_engine_free(b);
 
     /* 한자: 조합 중인 국 + Option+Enter → 國(조합), 후보 뜻, 확정, 학습 저장/불러오기.
      * 새 필드는 구조체 끝에 있어서 헤더와 러스트의 배치가 어긋나면 여기서 값이 틀린다. */

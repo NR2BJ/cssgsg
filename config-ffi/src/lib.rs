@@ -1,4 +1,4 @@
-//! 설정 앱용 C ABI: 설정 파일(TOML) ↔ JSON. 헤더는 `config-ffi/include/cssgsg_config.h`.
+//! 설정 앱용 C ABI: 설정 파일(TOML) ↔ JSON, Mozc 사용자 사전 파일 ↔ JSON. 헤더는 `config-ffi/include/cssgsg_config.h`.
 //!
 //! 설정 앱은 입력기 코어 정적 라이브러리(Mozc가 묶여 있다)를 링크하지 않고 이것만 링크한다.
 //! 설정의 모양과 값 검사는 코어의 [`Config`] 한 곳에만 있다.
@@ -12,6 +12,8 @@ use std::panic::catch_unwind;
 use std::ptr;
 
 use cssgsg_core::Config;
+
+pub mod userdict;
 
 thread_local! {
     static OUT: RefCell<CString> = RefCell::new(CString::default());
@@ -80,6 +82,54 @@ pub unsafe extern "C" fn cssgsg_config_toml(json: *const c_char) -> *const c_cha
     give(catch_unwind(|| toml_from_json(&json)))
 }
 
+/// Mozc 사용자 사전 파일(`user_dictionary.db`)을 JSON으로: `{"dictionaries":[{"id","name","entries":[{"key","value","comment","pos","locale"}]}]}`.
+/// 파일이 없으면 빈 목록. 오류면 NULL(`cssgsg_config_error`).
+///
+/// # Safety
+/// `path`는 NUL로 끝나는 문자열이어야 한다.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn cssgsg_userdict_json(path: *const c_char) -> *const c_char {
+    // SAFETY: 위 약속대로.
+    let path = unsafe { arg(path) }.unwrap_or_default();
+    give(catch_unwind(|| {
+        let storage = userdict::load(&path)?;
+        serde_json::to_string(&storage).map_err(|e| e.to_string())
+    }))
+}
+
+/// JSON(`{"dictionaries":[...]}`)을 사용자 사전 파일에 쓴다. 같은 id의 사전은 모르는 필드를 지킨다.
+/// 성공하면 1, 오류(틀린 항목 등)면 0(`cssgsg_config_error`).
+///
+/// # Safety
+/// `path`와 `json`은 NUL로 끝나는 문자열이어야 한다.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn cssgsg_userdict_save(path: *const c_char, json: *const c_char) -> u8 {
+    // SAFETY: 위 약속대로.
+    let (path, json) = unsafe { (arg(path).unwrap_or_default(), arg(json).unwrap_or_default()) };
+    let result = catch_unwind(|| {
+        let storage: userdict::Storage = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+        userdict::save(&path, storage.dictionaries)
+    })
+    .unwrap_or_else(|_| Err("사전 저장 중 패닉".into()));
+    match result {
+        Ok(()) => 1,
+        Err(err) => {
+            ERR.with(|e| *e.borrow_mut() = cstring(&err));
+            0
+        }
+    }
+}
+
+/// 맥 키코드의 설정 파일 키 이름(`enter`, `a`, `f13` …). 수식키나 모르는 키면 NULL. 단축키 녹화에 쓴다.
+#[unsafe(no_mangle)]
+pub extern "C" fn cssgsg_config_key_name(mac_keycode: u16) -> *const c_char {
+    let key = cssgsg_core::Key::from_mac_keycode(mac_keycode);
+    match cssgsg_core::shortcut::key_name(key) {
+        Some(name) => give(Ok(Ok(name.to_string()))),
+        None => ptr::null(),
+    }
+}
+
 /// 이 스레드의 마지막 오류(없으면 빈 문자열).
 #[unsafe(no_mangle)]
 pub extern "C" fn cssgsg_config_error() -> *const c_char {
@@ -94,7 +144,9 @@ mod tests {
     fn json_and_toml_round_trip() {
         let json = json_from_toml(None).unwrap();
         assert!(json.contains(r#""ko_layout":"chamshin-v18""#), "{json}");
-        assert!(json.contains(r#""shift_right":"toggle_english""#), "{json}");
+        assert!(json.contains(r#""toggle_english":"tap:shift_right""#), "{json}");
+        assert!(json.contains(r#""hanja":"alt+enter""#), "{json}");
+        assert!(!json.contains("taps"), "옛 탭 표는 JSON에 내보내지 않는다");
         // 기본 설정 파일은 모두 주석이고, 다시 읽으면 같은 JSON이다.
         let text = toml_from_json(&json).unwrap();
         assert_eq!(Config::from_toml(&text).unwrap(), Config::default());
@@ -108,6 +160,19 @@ mod tests {
         );
         let back: serde_json::Value = serde_json::from_str(&json_from_toml(Some(&text)).unwrap()).unwrap();
         assert_eq!(back, serde_json::from_str::<serde_json::Value>(&changed).unwrap());
+    }
+
+    #[test]
+    fn key_names_for_the_recorder() {
+        let name = |code| {
+            let p = cssgsg_config_key_name(code);
+            (!p.is_null()).then(|| unsafe { CStr::from_ptr(p) }.to_str().unwrap().to_owned())
+        };
+        assert_eq!(name(0x24).as_deref(), Some("enter"));
+        assert_eq!(name(0x31).as_deref(), Some("space"));
+        assert_eq!(name(0x00).as_deref(), Some("a"));
+        assert_eq!(name(0x69).as_deref(), Some("f13"));
+        assert_eq!(name(0x38), None, "수식키");
     }
 
     #[test]

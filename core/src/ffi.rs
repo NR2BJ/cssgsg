@@ -78,6 +78,8 @@ pub struct CssgsgOutput {
     pub learning_changed: u8,
     /// 후보마다 같이 보일 뜻(candidate_count개, 빈 문자열 가능). 뜻이 없는 후보창이면 NULL.
     pub candidate_notes: *const *const c_char,
+    /// 0이 아니면 이만큼(밀리초) 뒤에 `cssgsg_engine_timer`를 불러 달라(빠른 탭 전환 보정).
+    pub timer_ms: u32,
 }
 
 /// 맥 셸 설정(설정 파일의 `[mac]`). 엔진은 쓰지 않는다.
@@ -88,6 +90,10 @@ pub struct CssgsgMacSettings {
     /// 1이면 HUD를 마우스 옆에, 0이면 커서 위에.
     pub hud_at_mouse: u8,
     pub newline_replay_ms: u32,
+    /// 후보창 글자 크기(포인트).
+    pub candidate_font_size: u32,
+    /// 조합 중 Shift+Enter·⌘+키 재전송 전에 기다리는 시간(밀리초).
+    pub shift_enter_delay_ms: u32,
 }
 
 pub struct CssgsgEngine {
@@ -135,6 +141,7 @@ fn empty_output() -> CssgsgOutput {
         candidate_grid: 0,
         learning_changed: 0,
         candidate_notes: ptr::null(),
+        timer_ms: 0,
     }
 }
 
@@ -149,6 +156,7 @@ impl CssgsgEngine {
         o.consumed = out.consumed as u8;
         o.caps_lock_off = out.caps_lock_off as u8;
         o.learning_changed = out.learning_changed as u8;
+        o.timer_ms = out.timer_ms.unwrap_or(0);
         o.mode = out.mode.map_or(-1, |m| m as i32);
         o.commit = self.commit.as_ptr();
 
@@ -298,6 +306,24 @@ pub unsafe extern "C" fn cssgsg_engine_handle_key(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn cssgsg_engine_commit(e: *mut CssgsgEngine) -> *const CssgsgOutput {
     unsafe { run(e, |engine| engine.commit_all()) }
+}
+
+/// `timer_ms`만큼 기다린 뒤 부른다. `now`는 키 이벤트와 같은 시계(초, NSEvent.timestamp)다.
+/// # Safety
+/// `e`는 NULL이거나 `cssgsg_engine_new`가 돌려준, 아직 해제하지 않은 포인터여야 한다.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn cssgsg_engine_timer(e: *mut CssgsgEngine, now: f64) -> *const CssgsgOutput {
+    unsafe { run(e, |engine| engine.timer(now)) }
+}
+
+/// 변환기(Mozc)의 사용자 사전을 다시 읽는다(설정 앱이 고친 뒤).
+/// # Safety
+/// `e`는 NULL이거나 `cssgsg_engine_new`가 돌려준, 아직 해제하지 않은 포인터여야 한다.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn cssgsg_engine_reload_dictionary(e: *mut CssgsgEngine) -> u8 {
+    // SAFETY: 위 약속대로.
+    let Some(e) = (unsafe { e.as_mut() }) else { return 0 };
+    catch_unwind(AssertUnwindSafe(|| e.engine.reload_converter())).is_ok() as u8
 }
 
 /// 마우스 클릭: 조합을 확정하고 진행 중인 수식키 탭을 무효로 한다.
@@ -454,6 +480,8 @@ pub unsafe extern "C" fn cssgsg_engine_mac_settings(e: *const CssgsgEngine) -> C
         hud: mac.hud as u8,
         hud_at_mouse: (mac.hud_position == crate::config::HudPosition::Mouse) as u8,
         newline_replay_ms: mac.newline_replay_ms,
+        candidate_font_size: mac.candidate_font_size,
+        shift_enter_delay_ms: mac.shift_enter_delay_ms,
     }
 }
 

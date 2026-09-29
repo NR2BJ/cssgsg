@@ -31,6 +31,12 @@ enum Cssgsg {
         case hanjaLearningCleared = "com.cssgsg.hanja-learning-cleared"
         /// 끝낸다(Mozc 학습 파일을 지운 뒤). 다음 키 입력 때 macOS가 다시 띄운다.
         case restart = "com.cssgsg.restart"
+        /// 입력기 상태(키 보내기 권한)를 기본값 저장소에 다시 적어 달라(설정 앱 정보 탭).
+        case statusRequest = "com.cssgsg.status-request"
+        /// 키 보내기 권한을 청한다(시스템 창). 권한은 입력기 프로세스가 받아야 해서 입력기가 청한다.
+        case requestPostEventAccess = "com.cssgsg.request-post-event-access"
+        /// Mozc 사용자 사전을 고쳤다: 다시 읽는다.
+        case userDictionaryChanged = "com.cssgsg.user-dictionary-changed"
 
         func post() {
             CFNotificationCenterPostNotification(
@@ -42,6 +48,17 @@ enum Cssgsg {
 
     /// 이미 떠 있는 설정 앱에 이 탭을 보이라고 한다. 처음 띄울 때는 `--tab 이름` 인자로 준다.
     static let showSettingsTab = Notification.Name("com.cssgsg.settings.show-tab")
+
+    // MARK: - 입력기 상태 (입력기가 자기 기본값 저장소에 적고 설정 앱이 읽는다)
+
+    /// 입력기에 키 보내기(손쉬운 사용) 권한이 있는지. 권한은 프로세스마다라 입력기가 적어 둔 값을 읽는다.
+    static let postEventAllowedKey = "postEventAllowed"
+
+    static func imePreference<T>(_ key: String) -> T? {
+        let domain = imeBundleID as CFString
+        CFPreferencesAppSynchronize(domain)
+        return CFPreferencesCopyAppValue(key as CFString, domain) as? T
+    }
 
     // MARK: - 입력 소스
 
@@ -60,5 +77,43 @@ enum Cssgsg {
         if let url = URL(string: "x-apple.systempreferences:com.apple.Keyboard-Settings.extension") {
             NSWorkspace.shared.open(url)
         }
+    }
+}
+
+/// 설정 앱과 입력기 메뉴의 화면 언어. 설정 앱의 기본값 저장소(com.cssgsg.settings)의 appLanguage에 둔다.
+enum UILanguage: String, CaseIterable, Identifiable {
+    case ko, en, ja
+
+    var id: String { rawValue }
+
+    /// 언어 이름은 늘 그 언어로 쓴다(고르는 사람이 알아보게).
+    var name: String {
+        switch self {
+        case .ko: return "한국어"
+        case .en: return "English"
+        case .ja: return "日本語"
+        }
+    }
+
+    static let preferenceKey = "appLanguage"
+
+    /// 설정 앱에서 고른 언어(없으면 한국어). 입력기는 메뉴를 열 때마다 다시 읽는다.
+    static func stored() -> UILanguage {
+        let domain = Cssgsg.settingsBundleID as CFString
+        CFPreferencesAppSynchronize(domain)
+        let raw = CFPreferencesCopyAppValue(preferenceKey as CFString, domain) as? String
+        return raw.flatMap(UILanguage.init(rawValue:)) ?? .ko
+    }
+
+    /// 지금 화면 언어. 설정 앱은 언어를 바꿀 때, 입력기는 메뉴를 열 때 맞춘다.
+    static var active: UILanguage = stored()
+}
+
+/// 화면 문구를 지금 언어로 고른다. 문구 세 벌을 쓰는 자리에 같이 둬서 빠진 번역이 없게 한다.
+func tr(_ ko: String, _ en: String, _ ja: String) -> String {
+    switch UILanguage.active {
+    case .ko: return ko
+    case .en: return en
+    case .ja: return ja
     }
 }

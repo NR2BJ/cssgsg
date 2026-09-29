@@ -122,6 +122,25 @@ func selfTest() -> Bool {
         }
     }
 
+    // 빠른 탭 전환 보정(tap_buffering): 탭 수식키를 누른 채 친 글자는 잡아 두고 타이머를 청한다.
+    do {
+        let config = "tap_buffering = true"
+        let t = Typist(layout: layout, mode: .en, config: config)
+        t.press(.rightShift)
+        t.key(UInt16(kVK_ANSI_J))
+        check(t.screen.isEmpty && t.lastTimerMs > 0 && t.lastTimerMs <= 100, "탭 보정: 오른쪽 Shift+j를 잡아 두고 타이머(\(t.lastTimerMs)ms)")
+        t.release(.rightShift, after: 0.01)
+        check(t.mode == .ko && t.screen.count == 1 && t.doc.markedRange().length == 1,
+              "탭 보정: 곧 떼면 탭 → 한국어로 바꾸고 j를 Shift 없이(조합 \(t.screen))")
+        let u = Typist(layout: layout, mode: .en, config: config)
+        u.press(.rightShift)
+        u.key(UInt16(kVK_ANSI_J))
+        u.fireTimer(after: 0.2)
+        check(u.screen == "H" && u.lastTimerMs == 0, "탭 보정: 떼지 않고 시간이 지나면 누른 그대로 H")
+        u.release(.rightShift, after: 0.3)
+        check(u.mode == .en && u.screen == "H", "탭 보정: 그 뒤에 떼도 전환 안 함")
+    }
+
     // 반복 키
     do {
         let t = Typist(layout: layout, mode: .ko)

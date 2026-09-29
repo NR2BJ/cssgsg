@@ -22,6 +22,7 @@ unsafe extern "C" {
     fn cssgsg_mozc_commit(m: *mut RawMozc) -> *const c_char;
     fn cssgsg_mozc_cancel(m: *mut RawMozc);
     fn cssgsg_mozc_set_learning(m: *mut RawMozc, enabled: i32);
+    fn cssgsg_mozc_reload(m: *mut RawMozc);
 }
 
 /// C API가 돌려주는 화면(mozc/cssgsg/cssgsg_mozc.h).
@@ -103,6 +104,11 @@ impl Converter for MozcConverter {
     fn cancel(&mut self) {
         // SAFETY: 살아 있는 인스턴스.
         unsafe { cssgsg_mozc_cancel(self.raw) }
+    }
+
+    fn reload(&mut self) {
+        // SAFETY: 살아 있는 인스턴스.
+        unsafe { cssgsg_mozc_reload(self.raw) }
     }
 }
 

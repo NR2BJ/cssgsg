@@ -22,6 +22,8 @@ pub struct Sim {
     pub preedit: String,
     pub candidates: Option<Candidates>,
     pub caps: bool,
+    /// 엔진이 청한 타이머 시각(빠른 탭 전환 보정). `event`로 넣었을 때만 채운다.
+    pub pending_timer: Option<f64>,
     time: f64,
 }
 
@@ -34,6 +36,7 @@ impl Sim {
             preedit: String::new(),
             candidates: None,
             caps: false,
+            pending_timer: None,
             time: 1.0,
         }
     }
@@ -128,6 +131,22 @@ impl Sim {
         let ev = KeyEvent::up(key, self.mods(mod_bits), self.time);
         let out = self.engine.handle_key(&ev, &self.ctx);
         self.apply(Some(&ev), &out);
+    }
+
+    /// 이벤트 하나를 그대로 넣는다(겹쳐 누르기처럼 키열 문법으로 못 쓰는 시험용). 타이머 요청은 `pending_timer`에 남는다.
+    pub fn event(&mut self, ev: KeyEvent) -> Output {
+        let out = self.engine.handle_key(&ev, &self.ctx);
+        self.apply(Some(&ev), &out);
+        self.pending_timer = out.timer_ms.map(|ms| ev.time + ms as f64 / 1000.0);
+        out
+    }
+
+    /// 셸처럼 타이머 시각에 엔진을 부른다.
+    pub fn fire_timer(&mut self, now: f64) -> Output {
+        let out = self.engine.timer(now);
+        self.apply(None, &out);
+        self.pending_timer = out.timer_ms.map(|ms| now + ms as f64 / 1000.0);
+        out
     }
 
     /// 수식키를 혼자 짧게 누른다.

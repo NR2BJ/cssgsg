@@ -80,6 +80,7 @@ typedef struct CssgsgOutput {
     uint8_t candidate_grid;      /* 격자(펼친) 모드면 1: 목록 9개/페이지, 격자 5열 × 6행 */
     uint8_t learning_changed;    /* 한자 학습이 바뀌었다(저장한다) */
     const char *const *candidate_notes; /* 후보마다 뜻(candidate_count개, "" 가능). 없는 후보창이면 NULL */
+    uint32_t timer_ms;           /* 0이 아니면 이만큼 뒤에 cssgsg_engine_timer를 부른다(빠른 탭 전환 보정) */
 } CssgsgOutput;
 
 /* config_toml이 NULL이면 기본 설정. 설정 오류면 NULL (cssgsg_last_error 참고). */
@@ -91,6 +92,10 @@ const CssgsgOutput *cssgsg_engine_handle_key(CssgsgEngine *engine, const CssgsgK
                                              const CssgsgContext *ctx);
 /* 조합 중인 것을 확정 (포커스 해제 등) */
 const CssgsgOutput *cssgsg_engine_commit(CssgsgEngine *engine);
+/* timer_ms만큼 기다린 뒤 부른다. now는 키 이벤트와 같은 시계(초). */
+const CssgsgOutput *cssgsg_engine_timer(CssgsgEngine *engine, double now);
+/* 변환기(Mozc)의 사용자 사전을 다시 읽는다(설정 앱이 고친 뒤). */
+uint8_t cssgsg_engine_reload_dictionary(CssgsgEngine *engine);
 /* 마우스 클릭: 확정 + 진행 중인 수식키 탭 무효 */
 const CssgsgOutput *cssgsg_engine_mouse_down(CssgsgEngine *engine);
 /* 확정 없이 비우기 (입력기 활성화 때) */
@@ -116,6 +121,8 @@ typedef struct CssgsgMacSettings {
     uint8_t hud;               /* 모드를 바꿀 때 A/한/あ를 잠깐 보인다 */
     uint8_t hud_at_mouse;      /* 1이면 마우스 옆, 0이면 커서 위 */
     uint32_t newline_replay_ms; /* Codex류 Shift+Enter 다시 보내기 전 대기(밀리초) */
+    uint32_t candidate_font_size; /* 후보창 글자 크기(포인트) */
+    uint32_t shift_enter_delay_ms; /* 조합 중 Shift+Enter·⌘+키 재전송 전 대기(밀리초) */
 } CssgsgMacSettings;
 CssgsgMacSettings cssgsg_engine_mac_settings(const CssgsgEngine *engine);
 

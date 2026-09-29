@@ -5,11 +5,12 @@
 
 /Library/Input Methods에 설치한다. 설치한 뒤 입력 소스에 직접 추가한다(macOS는 입력기가 스스로 추가되지 못하게 한다):
 시스템 설정 → 키보드 → 텍스트 입력 → 입력 소스 "편집…" → + → 영어 → cssgsg.
-업데이트는 메뉴 막대의 cssgsg 메뉴 → 업데이트 확인으로 한다.]]></welcome>
+업데이트는 메뉴 막대의 cssgsg 메뉴 → 설정… → 정보 탭에서 한다.]]></welcome>
     <welcome language="en" mime-type="text/plain"><![CDATA[cssgsg — Korean (Chamshin Sebeolsik), English (Graphite) and Japanese (Shingetsu) input method.
 
 Installs into /Library/Input Methods. Then add it yourself (macOS does not let input methods enable themselves):
-System Settings → Keyboard → Text Input → Input Sources "Edit…" → + → English → cssgsg.]]></welcome>
+System Settings → Keyboard → Text Input → Input Sources "Edit…" → + → English → cssgsg.
+Updates: cssgsg menu in the menu bar → Settings… → About.]]></welcome>
     <options customize="never" require-scripts="false" hostArchitectures="arm64"/>
     <domains enable_anywhere="false" enable_currentUserHome="false" enable_localSystem="true"/>
     <os-version min="13.0"/>

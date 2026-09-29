@@ -44,6 +44,8 @@ const char *cssgsg_mozc_commit(CssgsgMozc *m);
 void cssgsg_mozc_cancel(CssgsgMozc *m);
 /* 학습(확정한 후보를 다음에 먼저 내기)을 켜고 끈다. 기본은 켬. 끄면 결과가 늘 같다(테스트). */
 void cssgsg_mozc_set_learning(CssgsgMozc *m, int32_t enabled);
+/* 사용자 사전(user_dictionary.db)을 다시 읽는다(설정 앱이 고친 뒤). Mozc가 뒤에서 읽어 곧 반영된다. */
+void cssgsg_mozc_reload(CssgsgMozc *m);
 
 #ifdef __cplusplus
 }

@@ -12,11 +12,6 @@ use crate::hangul::KoComposer;
 use crate::hanja::{self, Cand, Learning};
 use crate::key::{Key, KeyEvent};
 
-/// 맥 한자 키: Option+Enter(macOS 기본 한국어 입력기와 같다). Shift는 같이 눌러도 된다.
-pub(super) fn is_hanja_key(ev: &KeyEvent) -> bool {
-    matches!(ev.key, Key::ENTER | Key::NUMPAD_ENTER) && ev.mods.alt() && !ev.mods.ctrl() && !ev.mods.meta()
-}
-
 /// 한자 변환 중 상태.
 pub(super) struct HanjaConv {
     /// 바꾸는 글자(조합 중이던 음절이나 자음).
@@ -57,6 +52,17 @@ impl Engine {
         self.hanja_learning = learning;
     }
 
+    /// 한자 단축키(기본 Option+Return, 설정의 shortcuts.hanja): 변환 중이면 다음 후보, 아니면 변환을 시작한다.
+    pub(super) fn hanja_shortcut(&mut self) -> Output {
+        match self.hanja.as_mut() {
+            Some(h) => {
+                h.selected = (h.selected + 1) % h.cands.len();
+                Output::eat()
+            }
+            None => self.hanja_start(),
+        }
+    }
+
     /// 한자 키: 조합 중인 글자 하나를 바꾸기 시작한다. 첫 후보가 바로 조합에 보이고 후보창이 뜬다.
     /// 조합 중이 아니면 키를 앱에 넘기고, 조합 중인데 후보가 없으면(한자가 없는 음절) 키만 먹는다.
     pub(super) fn hanja_start(&mut self) -> Output {
@@ -74,7 +80,7 @@ impl Engine {
     }
 
     /// 변환 중 키. 후보창 조작은 일본어 변환과 같다.
-    /// - Space / ↓ / 한자 키: 다음 후보, ↑: 이전 후보(끝에서 처음으로 돈다). Tab: 목록 ↔ 격자.
+    /// - Space / ↓: 다음 후보(한자 단축키도, `hanja_shortcut`), ↑: 이전 후보(끝에서 처음으로 돈다). Tab: 목록 ↔ 격자.
     /// - ←→: 목록에서는 페이지, 격자에서는 한 칸. PageUp/PageDown: 페이지.
     /// - 1~9: 지금 페이지에서 골라 확정. Enter: 확정. Esc/Backspace: 원래 글자(조합)로. 그 밖의 키: 확정하고 새로 처리.
     pub(super) fn hanja_key(&mut self, ev: &KeyEvent) -> Output {
@@ -87,7 +93,6 @@ impl Engine {
                 self.cand_grid = !grid;
                 return Output::eat();
             }
-            _ if is_hanja_key(ev) => Some((sel + 1) % n),
             Key::SPACE => Some((sel + 1) % n),
             Key::ARROW_DOWN if grid => within(sel + CAND_GRID_COLUMNS),
             Key::ARROW_UP if grid => sel.checked_sub(CAND_GRID_COLUMNS),

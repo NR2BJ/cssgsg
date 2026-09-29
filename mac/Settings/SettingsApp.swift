@@ -8,13 +8,15 @@ import SwiftUI
 struct SettingsApp: App {
     @NSApplicationDelegateAdaptor(SettingsAppDelegate.self) private var appDelegate
     @StateObject private var model = SettingsModel()
+    @StateObject private var dictionary = UserDictionaryModel()
+    @StateObject private var updater = Updater()
 
     var body: some Scene {
-        Window("cssgsg 설정", id: "settings") {
-            SettingsView(model: model)
-                .frame(minWidth: 560, idealWidth: 720, minHeight: 480, idealHeight: 640)
+        Window("cssgsg", id: "settings") {
+            SettingsView(model: model, dictionary: dictionary, updater: updater)
+                .frame(minWidth: 600, idealWidth: 740, minHeight: 520, idealHeight: 700)
         }
-        .defaultSize(width: 720, height: 640)
+        .defaultSize(width: 740, height: 700)
         .windowResizability(.contentMinSize)
     }
 }
@@ -26,7 +28,7 @@ final class SettingsAppDelegate: NSObject, NSApplicationDelegate {
 enum SettingsTab: String, CaseIterable {
     case general, korean, japanese, learn, about
 
-    /// 처음 띄울 때의 `--tab 이름` 인자.
+    /// 처음 띄울 때의 `--tab 이름` 인자(업데이트 뒤에는 about).
     static var fromArguments: SettingsTab {
         let args = CommandLine.arguments
         guard let i = args.firstIndex(of: "--tab"), i + 1 < args.count, let tab = SettingsTab(rawValue: args[i + 1]) else {
@@ -38,36 +40,61 @@ enum SettingsTab: String, CaseIterable {
 
 struct SettingsView: View {
     @ObservedObject var model: SettingsModel
+    @ObservedObject var dictionary: UserDictionaryModel
+    @ObservedObject var updater: Updater
     @State private var tab = SettingsTab.fromArguments
+    /// 화면 언어. 바꾸면 탭들을 새로 그린다(.id). 고른 탭은 이 뷰의 상태라 그대로다.
+    @AppStorage(UILanguage.preferenceKey) private var languageCode = UILanguage.stored().rawValue
+
+    private var language: Binding<UILanguage> {
+        Binding(
+            get: { UILanguage(rawValue: languageCode) ?? .ko },
+            set: { lang in
+                UILanguage.active = lang
+                languageCode = lang.rawValue
+            })
+    }
 
     var body: some View {
+        let _ = (UILanguage.active = UILanguage(rawValue: languageCode) ?? .ko)
         VStack(spacing: 0) {
             if let problem = model.fileProblem {
-                Banner(text: "설정 파일에 오류가 있어 입력기는 기본 설정으로 돌고 있다: \(problem)\n여기서 설정을 바꾸면 틀린 파일은 config.toml.bak으로 옮기고 새로 쓴다.")
+                Banner(text: tr("""
+                    설정 파일에 오류가 있어 입력기는 기본 설정으로 돌고 있다: \(problem)
+                    여기서 설정을 바꾸면 틀린 파일은 config.toml.bak으로 옮기고 새로 쓴다.
+                    """, """
+                    The settings file has an error, so the input method runs with defaults: \(problem)
+                    Changing a setting here moves the broken file to config.toml.bak and writes a new one.
+                    """, """
+                    設定ファイルにエラーがあるため、入力メソッドは既定の設定で動いています: \(problem)
+                    ここで設定を変えると、壊れたファイルを config.toml.bak に移して新しく書きます。
+                    """))
             }
             if let problem = model.writeProblem {
-                Banner(text: "설정을 쓰지 못했다: \(problem)")
+                Banner(text: tr("설정을 쓰지 못했다: \(problem)", "Could not save the settings: \(problem)", "設定を保存できません: \(problem)"))
             }
             TabView(selection: $tab) {
                 GeneralTab(model: model)
-                    .tabItem { Label("일반", systemImage: "keyboard") }
+                    .tabItem { Label(tr("일반", "General", "一般"), systemImage: "keyboard") }
                     .tag(SettingsTab.general)
                 KoreanTab(model: model)
-                    .tabItem { Label("한국어", systemImage: "character.book.closed") }
+                    .tabItem { Label(tr("한국어", "Korean", "韓国語"), systemImage: "character.book.closed") }
                     .tag(SettingsTab.korean)
-                JapaneseTab(model: model)
-                    .tabItem { Label("일본어", systemImage: "character.book.closed.ja") }
+                JapaneseTab(model: model, dictionary: dictionary)
+                    .tabItem { Label(tr("일본어", "Japanese", "日本語"), systemImage: "character.book.closed.ja") }
                     .tag(SettingsTab.japanese)
                 LearnTab()
-                    .tabItem { Label("배열 학습", systemImage: "graduationcap") }
+                    .tabItem { Label(tr("배열 학습", "Layouts", "配列の学習"), systemImage: "graduationcap") }
                     .tag(SettingsTab.learn)
-                AboutTab(model: model)
-                    .tabItem { Label("정보", systemImage: "info.circle") }
+                AboutTab(model: model, updater: updater, language: language)
+                    .tabItem { Label(tr("정보", "About", "情報"), systemImage: "info.circle") }
                     .tag(SettingsTab.about)
             }
             .padding(.top, 8)
         }
-        // 이미 떠 있을 때 입력기 메뉴(배열 학습…)가 탭을 알린다.
+        .id(languageCode)
+        .navigationTitle(tr("cssgsg 설정", "cssgsg Settings", "cssgsg 設定"))
+        // 이미 떠 있을 때 탭을 알려 온다(`--tab`은 처음 띄울 때만 먹는다).
         .onReceive(DistributedNotificationCenter.default().publisher(for: Cssgsg.showSettingsTab)) { note in
             if let name = note.object as? String, let target = SettingsTab(rawValue: name) { tab = target }
         }
@@ -75,21 +102,9 @@ struct SettingsView: View {
         // (설정 파일을 직접 고친 뒤 설정 앱을 열면 적용된다. 파일이 틀렸으면 입력기는 지금 설정을 지킨다).
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             model.reload()
+            model.refreshIMEStatus()
+            dictionary.reloadIfChanged()
             Cssgsg.Notice.configChanged.post()
         }
-    }
-}
-
-struct Banner: View {
-    let text: String
-
-    var body: some View {
-        Label(text, systemImage: "exclamationmark.triangle.fill")
-            .font(.callout)
-            .foregroundStyle(.primary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
-            .background(Color.orange.opacity(0.18))
-            .textSelection(.enabled)
     }
 }

@@ -11,15 +11,19 @@
   - 참신세벌식 v18(기본)·D v19 갈마들이 조합기. 키 단위 Backspace, ❖ 음절 조합 중지
   - Graphite: OS 레이아웃은 쿼티 그대로 두고 입력기가 글자만 바꾼다. 단축키는 쿼티 자리
   - 新月配列 가나 조합기: ☆/★ 앞치기, ゛ 뒤치기, 3타 단축, Caps Lock 가타카나
-  - 모드 전환: 오른쪽 Shift 탭 = 영어 ↔ 직전 비영어, 왼쪽 Shift 탭 = 한 ↔ 일 (NRIME 설정 그대로)
+  - 모드 전환: 오른쪽 Shift 탭 = 영어 ↔ 직전 비영어, 왼쪽 Shift 탭 = 한 ↔ 일 (NRIME 설정 그대로).
+    단축키는 설정 앱에서 녹화해 바꾼다(수식키 탭 또는 수식키+키 조합). 빠른 탭 전환 보정(실험적)도 있다
   - C ABI(`core/include/cssgsg.h`)와 C 스모크 테스트
 - [~] macOS 입력기 셸 (NRIME 플랫폼층 이식)
   - [x] M2a: IMKit 셸 뼈대. 키 → 코어 → 앱, 메뉴 막대 모드 표시(G/ㅊ/月), 조합 중 밑줄, 후보창
     - NRIME 우회책: ⌘/Ctrl 조합 확정 뒤 키 재전송, Chromium 조합 중 Shift+Enter, 마우스 클릭 확정, 비밀번호 칸은 쿼티
     - 셸 Swift 계층은 스모크 테스트로 검증했다. 실제 앱에서 쳐 보는 확인은 [확인 목록](docs/mac-checklist.md)으로 한다
-  - [x] 배포: pkg + GitHub 릴리스 + 메뉴의 업데이트 확인(NRIME 방식). 자체 서명 인증서로 서명해서 업데이트해도 권한이 남는다
+  - [x] 배포: pkg + GitHub 릴리스 + 설정 앱 정보 탭의 업데이트(정식·베타 채널, NRIME 방식). 자체 서명 인증서로 서명해서 업데이트해도 권한이 남는다
   - [~] M2b: 모드 HUD(커서 근처 G/ㅊ/月, 설정 `[mac]`) 완료. 입력 소스 복구, 비밀번호 칸 Graphite(나중에)
-  - [x] M2c: 설정 앱(0.4.0). 메뉴 막대 cssgsg → "설정…". 탭: 일반(수식키 탭·HUD), 한국어(배열·한자 기억), 일본어(기호·가타카나·Mozc 학습), 배열 학습, 정보
+  - [x] M2c: 설정 앱(0.4.0, 0.5.0에서 다시 짬). 메뉴 막대 cssgsg → "설정…"(메뉴는 설정·다시 시작·종료뿐). 화면 언어 한국어·English·日本語
+    - 일반: 단축키 녹화(영어 ↔ 비영어, 한 ↔ 일, 한자), 탭 인식 시간, 빠른 탭 전환 보정, 후보 글자 크기, HUD, Electron Shift+Enter 대기
+    - 한국어: 배열, 한자 기억. 일본어: 변환 키(Space·Tab), 기호(구두점·・·¥·전각 공백), 가타카나, 개인 사전(Mozc), 변환 단축키 설명서
+    - 배열 학습(배열마다 따로), 정보(버전, 입력 소스·키 보내기 권한, 업데이트, 화면 언어, 파일)
     - 바꾸면 입력기가 바로 다시 읽는다(다시 시작 없음). 원본은 늘 `config.toml`이고 직접 고쳐도 된다
 - [x] 일본어 한자 변환: Mozc를 입력기 프로세스 안에 정적 링크(0.2.0, [mozc/README.md](mozc/README.md))
 - [x] 한국어 한자 변환(0.3.1, Option+Enter, [CONCEPT.md](CONCEPT.md) §5.4): 조합 중인 글자 하나를 libhangul 사전으로 바꾼다.
@@ -38,7 +42,7 @@ mac/        macOS 입력기(cssgsg/, Swift + InputMethodKit)와 설정 앱(Setti
             project.yml → xcodegen → cssgsg.xcodeproj(생성물, 커밋 안 함)
 mozc/       Mozc C API 래퍼(cssgsg용). 소스·빌드는 build/mozc, build/mozc-out(tools/mozc/build.sh)
 tools/      ffi-smoke(C 헤더 확인), ohi-oracle(오이 차분 비교), crosscheck(배열 데이터 교차 검증),
-            mac(pkg·릴리스·서명 스크립트, 셸·업데이트 스모크 테스트), learn(학습 페이지 빌드)
+            mac(pkg·릴리스·서명 스크립트, 셸·업데이트·설정 앱 스모크 테스트), learn(학습 페이지 빌드)
 docs/       verification.md(검증 현황), mac-checklist.md(설치 뒤 확인 목록), releases/(릴리스 노트)
 learn/      배열 학습 페이지(설정 앱 학습 탭). template.html → tools/learn/build.mjs → index.html
 ```
@@ -70,11 +74,12 @@ curl -fL -o /tmp/cssgsg.pkg https://github.com/NR2BJ/cssgsg/releases/latest/down
 - **처음 설치한 뒤 로그아웃했다 다시 로그인한다.** 새로 설치한 입력기는 그래야 추가 목록에 나온다(macOS, 확인함).
 - **입력 소스에는 직접 추가한다.** macOS는 입력기가 스스로 입력 소스에 추가되지 못하게 한다.
   시스템 설정 → 키보드 → 텍스트 입력 → 입력 소스 "편집…" → 왼쪽 아래 + → **영어** → cssgsg → 추가.
-  추가하기 전까지 cssgsg 메뉴에 "⚠︎ 입력 소스에 추가하기…"가 보인다.
+  추가했는지는 설정 앱 정보 탭에 보인다.
 - 브라우저로 받은 pkg는 서명이 없어서 Gatekeeper가 막는다. 그때는 시스템 설정 → 개인정보 보호 및 보안에서 "그래도 열기"를 누른다(위 명령은 해당 없음).
-- 업데이트: 메뉴 막대 cssgsg 메뉴 → 업데이트 확인(하루 한 번 저절로도 확인한다). 관리자 암호를 한 번 묻고, 로그아웃은 필요 없다.
+- 업데이트: 메뉴 막대 cssgsg → 설정… → 정보 탭. 정식·베타 채널을 고르고(베타는 시험판도 받는다), 탭을 열 때 하루 한 번 저절로 확인한다.
+  관리자 암호를 한 번 묻고, 끝나면 입력기와 설정 앱이 다시 뜬다. 로그아웃은 필요 없다. (0.4.0까지는 메뉴 막대 메뉴의 "업데이트 확인")
 - 처음 실행 때 한 번 "손쉬운 사용"(키 이벤트 보내기) 권한을 물어본다. 없어도 입력은 되고, 조합 중 ⌘/Option+키 재전송과 Codex 줄바꿈만 빠진다.
-  릴리스는 고정 인증서로 서명하므로 업데이트해도 권한이 남는다. 권한이 없으면 메뉴에 "키 보내기 권한 허용…"이 보인다.
+  릴리스는 고정 인증서로 서명하므로 업데이트해도 권한이 남는다. 권한 상태와 허용 단추는 설정 앱 정보 탭에 있다.
 
 문제를 재현하려면 개발자 기록을 켠다(키 코드·수식키·시각만 남고 글자 내용은 남지 않는다).
 
@@ -113,7 +118,8 @@ node tools/crosscheck/chamshin.mjs                 # 참신 키 배치 ↔ 타�
 cd tools/ohi-oracle && npm install && node diff.mjs --count 20000   # 참신 조합 ↔ 오이 (무작위 키열)
 node tools/learn/build.mjs --check                # 학습 페이지 예시를 엔진으로 확인, index.html이 최신인지
 bash tools/mac/shell-smoke/run.sh                  # 맥 셸 Swift 계층(진짜 NSEvent) ↔ 러스트 시뮬레이터
-bash tools/mac/update-smoke/run.sh                 # 업데이트 코드: 버전 순서, GitHub 응답, 해시, 설치 AppleScript
+bash tools/mac/update-smoke/run.sh                 # 업데이트 코드: 버전 순서, 채널(정식·베타), GitHub 응답, 해시, 설치 스크립트
+bash tools/mac/settings-smoke/run.sh               # 설정 앱: 단축키 녹화(가짜 키 이벤트), 화면 글자, 사전 읽기 정리 (--shots: 화면 스냅숏)
 cargo test -p cssgsg-core --features mozc --test mozc   # 일본어 한자 변환(Mozc, 먼저 bash tools/mozc/build.sh)
 ```
 

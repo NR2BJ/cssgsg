@@ -63,6 +63,8 @@ h1 { margin: 0; font-size: 1.9rem; line-height: 1.2; letter-spacing: -0.02em; fo
 .tabs button { flex: 0 0 auto; border: 0; background: transparent; color: var(--muted); padding: 8px 14px; border-radius: 9px; font: 600 0.95rem var(--font-ui); cursor: pointer; }
 .tabs button small { color: var(--faint); font-weight: 500; margin-left: 5px; }
 .tabs button[aria-selected="true"] { background: var(--panel); color: var(--ink); box-shadow: 0 1px 2px rgb(0 0 0 / 0.1); }
+/* 탭 패널의 display: grid가 브라우저 기본 [hidden]을 이겨서 모든 배열이 한 페이지에 다 보였다(설정 앱·브라우저). 아티팩트 판은 겉틀이 이 규칙을 넣어 줘서 드러나지 않았다. */
+[hidden] { display: none !important; }
 section[role="tabpanel"] { display: grid; gap: 18px; padding-top: 8px; }
 .intro { display: grid; gap: 6px; }
 h2 { margin: 0; font-size: 1.5rem; line-height: 1.25; letter-spacing: -0.01em; text-wrap: balance; }

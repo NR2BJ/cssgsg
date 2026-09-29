@@ -2,53 +2,43 @@ import AppKit
 import Foundation
 import SwiftUI
 
-/// config.toml의 설정. 러스트 코어 `Config`의 JSON 모양이고 키 이름은 파일과 같다.
-/// 모양과 값 검사는 코어에 있고(config-ffi), 여기서는 그대로 받아 고칠 뿐이다.
+/// config.toml의 설정. 러스트 코어 `Config`의 JSON 모양이고 키 이름은 파일과 같다(snake_case ↔ camelCase는
+/// JSON 인코더·디코더가 바꾼다). 모양과 값 검사는 코어에 있고(config-ffi), 여기서는 그대로 받아 고칠 뿐이다.
 struct CssgsgConfig: Codable, Equatable {
     var koLayout: String
     var tapThresholdMs: Int
-    /// 탭 키 이름 → "toggle_english" / "toggle_non_english". 적지 않은 키는 아무 일도 하지 않는다.
-    var taps: [String: String]
+    /// 빠른 탭 전환 보정(실험적): 탭 수식키를 떼기 직전에 친 글자를 잠깐 잡아 두었다가 전환 뒤에 친다.
+    var tapBuffering: Bool
+    var tapOverlapMs: Int
     var capsShiftInverts: Bool
+    var shortcuts: Shortcuts
     var ja: Ja
     var mac: Mac
+
+    /// 단축키 글자열: "tap:shift_right"(수식키 탭), "alt+enter"(조합), ""(없음). ShortcutText가 화면 글자로 바꾼다.
+    struct Shortcuts: Codable, Equatable {
+        var toggleEnglish: String
+        var toggleNonEnglish: String
+        var hanja: String
+    }
 
     struct Ja: Codable, Equatable {
         var punctuation: String
         var slashNakaguro: Bool
         var fullWidthSpace: Bool
+        var yenSign: Bool
+        var convertWithSpace: Bool
+        var convertWithTab: Bool
         var capsKatakanaAutoOff: Bool
         var katakanaDirect: Bool
-
-        enum CodingKeys: String, CodingKey {
-            case punctuation
-            case slashNakaguro = "slash_nakaguro"
-            case fullWidthSpace = "full_width_space"
-            case capsKatakanaAutoOff = "caps_katakana_auto_off"
-            case katakanaDirect = "katakana_direct"
-        }
     }
 
     struct Mac: Codable, Equatable {
         var hud: Bool
         var hudPosition: String
+        var candidateFontSize: Int
+        var shiftEnterDelayMs: Int
         var newlineReplayMs: Int
-
-        enum CodingKeys: String, CodingKey {
-            case hud
-            case hudPosition = "hud_position"
-            case newlineReplayMs = "newline_replay_ms"
-        }
-    }
-
-    // 키 이름 바꾸기 전략(convertFromSnakeCase)은 taps 사전의 키(shift_right)까지 바꿔서 쓰지 않는다.
-    enum CodingKeys: String, CodingKey {
-        case koLayout = "ko_layout"
-        case tapThresholdMs = "tap_threshold_ms"
-        case taps
-        case capsShiftInverts = "caps_shift_inverts"
-        case ja
-        case mac
     }
 }
 
@@ -62,7 +52,9 @@ enum ConfigBridge {
         }()
         guard let json, let data = json.data(using: .utf8) else { return .failure(.lastError) }
         do {
-            return .success(try JSONDecoder().decode(CssgsgConfig.self, from: data))
+            let decoder = JSONDecoder()
+            decoder.keyDecodingStrategy = .convertFromSnakeCase
+            return .success(try decoder.decode(CssgsgConfig.self, from: data))
         } catch {
             return .failure(ConfigProblem(message: "\(error)"))
         }
@@ -70,8 +62,11 @@ enum ConfigBridge {
 
     /// 설정 → 파일 내용(설명이 달리고 기본값인 설정은 주석).
     static func render(_ config: CssgsgConfig) -> Result<String, ConfigProblem> {
-        guard let data = try? JSONEncoder().encode(config), let json = String(data: data, encoding: .utf8) else {
-            return .failure(ConfigProblem(message: "설정을 JSON으로 바꾸지 못했다"))
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        guard let data = try? encoder.encode(config), let json = String(data: data, encoding: .utf8) else {
+            return .failure(ConfigProblem(message: tr("설정을 JSON으로 바꾸지 못했다", "Could not encode the settings",
+                                                      "設定を JSON に変換できません")))
         }
         guard let pointer = json.withCString({ cssgsg_config_toml($0) }) else { return .failure(.lastError) }
         return .success(String(cString: pointer))
@@ -95,10 +90,13 @@ final class SettingsModel: ObservableObject {
     @Published private(set) var hanjaLearningCount = 0
     @Published private(set) var inputSourceAdded = false
     @Published private(set) var developerMode = false
+    /// 입력기의 키 보내기(손쉬운 사용) 권한. 모르면 nil(입력기가 떠 있지 않거나 아직 적지 않았다).
+    @Published private(set) var postEventAllowed: Bool?
+    @Published private(set) var imeRunning = false
 
     static let defaults: CssgsgConfig = {
         guard case let .success(config) = ConfigBridge.parse(nil) else {
-            fatalError("설정 라이브러리가 기본 설정을 주지 못했다: \(String(cString: cssgsg_config_error()))")
+            fatalError("설정 라이브러리가 기본 설정을 주지 못했다: \(ConfigProblem.lastError.message)")
         }
         return config
     }()
@@ -128,15 +126,21 @@ final class SettingsModel: ObservableObject {
         Binding(get: { self.config[keyPath: path] }, set: { value in self.update { $0[keyPath: path] = value } })
     }
 
-    /// 탭 키 하나의 동작("none"은 표에서 뺀다).
-    func tapBinding(_ key: String) -> Binding<String> {
-        Binding(
-            get: { self.config.taps[key] ?? "none" },
-            set: { value in
-                self.update { config in
-                    if value == "none" { config.taps.removeValue(forKey: key) } else { config.taps[key] = value }
-                }
-            })
+    /// 단축키 하나를 바꾼다. 받아 줄 수 없으면(다른 곳에 이미 쓰는 단축키 등) 까닭을 돌려주고 바꾸지 않는다.
+    func setShortcut(_ path: WritableKeyPath<CssgsgConfig.Shortcuts, String>, to value: String) -> String? {
+        reload()
+        let others: [WritableKeyPath<CssgsgConfig.Shortcuts, String>] =
+            [\.toggleEnglish, \.toggleNonEnglish, \.hanja].filter { $0 != path }
+        if !value.isEmpty, let taken = others.first(where: { config.shortcuts[keyPath: $0] == value }) {
+            return tr("이미 ‘\(ShortcutText.actionName(taken))’에 쓰고 있다.", "Already used for “\(ShortcutText.actionName(taken))”.",
+                      "すでに「\(ShortcutText.actionName(taken))」に使っています。")
+        }
+        var next = config
+        next.shortcuts[keyPath: path] = value
+        // 코어가 받아 주는지 먼저 본다(수식키 없는 글자 키 등). 설정 앱이 미리 거르지 못한 경우의 까닭은 코어의 말이다.
+        if case let .failure(problem) = ConfigBridge.render(next) { return problem.message }
+        update { $0.shortcuts[keyPath: path] = value }
+        return nil
     }
 
     func update(_ change: (inout CssgsgConfig) -> Void) {
@@ -180,6 +184,32 @@ final class SettingsModel: ObservableObject {
             try? write(text)
         }
         NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    // MARK: - 입력기 상태
+
+    /// 입력기에게 상태(키 보내기 권한)를 다시 적어 달라고 하고, 조금 뒤 읽는다. 입력기가 떠 있지 않으면 nil.
+    /// 그동안은 입력기가 지난번에 적어 둔 값을 보인다.
+    func refreshIMEStatus() {
+        imeRunning = !NSRunningApplication.runningApplications(withBundleIdentifier: Cssgsg.imeBundleID).isEmpty
+        guard imeRunning else {
+            postEventAllowed = nil
+            return
+        }
+        postEventAllowed = Cssgsg.imePreference(Cssgsg.postEventAllowedKey) as Bool?
+        Cssgsg.Notice.statusRequest.post()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            self?.postEventAllowed = Cssgsg.imePreference(Cssgsg.postEventAllowedKey) as Bool?
+        }
+    }
+
+    /// 키 보내기 권한: 입력기가 시스템 창을 청하고(처음 한 번만 뜬다), 손쉬운 사용 설정을 연다.
+    /// 권한은 입력기 프로세스가 받아야 해서 설정 앱이 직접 청하지 않는다. 켜는 것은 사용자가 한다.
+    func requestPostEventAccess() {
+        Cssgsg.Notice.requestPostEventAccess.post()
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     // MARK: - 학습
