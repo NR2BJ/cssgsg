@@ -83,6 +83,22 @@ impl KoLayout {
         if shift { self.shift.get(&key) } else { self.base.get(&key) }
     }
 
+    /// 배열의 모든 키 역할: (키, Shift 여부, 역할). 검증 도구가 쓴다.
+    pub fn entries(&self) -> impl Iterator<Item = (Key, bool, &Roles)> {
+        self.base.iter().map(|(k, r)| (*k, false, r)).chain(self.shift.iter().map(|(k, r)| (*k, true, r)))
+    }
+
+    /// 조합표: (앞, 뒤, 결과).
+    pub fn cho_combos(&self) -> impl Iterator<Item = (char, char, char)> + '_ {
+        self.cho.iter().map(|(&(a, b), &c)| (a, b, c))
+    }
+    pub fn jung_combos(&self) -> impl Iterator<Item = (char, char, char)> + '_ {
+        self.jung.iter().map(|(&(a, b), &c)| (a, b, c))
+    }
+    pub fn jong_combos(&self) -> impl Iterator<Item = (char, char, char)> + '_ {
+        self.jong.iter().map(|(&(a, b), &c)| (a, b, c))
+    }
+
     pub fn combine_cho(&self, a: char, b: char) -> Option<char> {
         self.cho.get(&(a, b)).copied()
     }

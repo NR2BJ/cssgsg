@@ -1,0 +1,4 @@
+# rustup이 이 버전을 자동으로 받아 쓴다(맥북, Codex 등 어디서 빌드해도 같은 컴파일러).
+[toolchain]
+channel = "1.98.1"
+components = ["rustfmt", "clippy"]

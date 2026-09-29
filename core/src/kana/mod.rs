@@ -3,7 +3,7 @@
 mod composer;
 mod layout;
 
-pub use composer::KanaComposer;
+pub use composer::{KanaComposer, Pending};
 pub use layout::KanaLayout;
 
 /// 히라가나를 가타카나로 바꾼다. 그 밖의 글자는 그대로 둔다.

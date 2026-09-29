@@ -23,12 +23,14 @@
 core/       Rust 코어: key, hangul, latin, kana, engine, ffi, sim
 layouts/    배열 데이터 (ko: 참신세벌식 TOML, en: Graphite, ja: 新月 공식 TSV 원본)
 cli/        cssgsg-cli: 터미널에서 쳐보는 도구
-tools/      ffi-smoke(C 헤더 확인), ohi-oracle(오이 차분 비교)
+tools/      ffi-smoke(C 헤더 확인), ohi-oracle(오이 차분 비교), crosscheck(배열 데이터 교차 검증)
+docs/       verification.md(검증 현황)
 ```
 
 ## 개발
 
-Rust는 rustup으로 설치했다(셸 PATH는 건드리지 않음). `export PATH="$HOME/.cargo/bin:$PATH"` 후:
+Rust는 rustup으로 설치했다(셸 PATH는 건드리지 않음). 버전은 `rust-toolchain.toml`에 고정돼 있어서 rustup이 알아서 맞춘다.
+`export PATH="$HOME/.cargo/bin:$PATH"` 후:
 
 ```bash
 cargo test
@@ -42,16 +44,25 @@ bash tools/ffi-smoke/run.sh
 키열 문법: 보통 글자는 쿼티 자리, 대문자와 Shift 기호는 Shift. `{sp}` `{bs}` `{ent}` `{esc}` `{tab}` `{left}` …,
 `{rs}` `{ls}`(오른쪽/왼쪽 Shift 탭), `{caps}`, `{click}`, `{M-c}`(⌘C) 같은 식이다.
 
-참신세벌식 정확도는 오이(Online Hangeul IME)와 무작위 키열로 비교한다. 오이는 GPL이라 레포에 넣지 않고 실행할 때 받는다.
+## 검증
+
+세 배열 모두 써본 적 없이 이 입력기로 배우게 되므로, 동작은 서로 독립된 출처끼리 대조해서 검증한다.
+무엇을 무엇과 어떻게 대조했는지와 결과는 [docs/verification.md](docs/verification.md)에 있다.
 
 ```bash
-cd tools/ohi-oracle && npm install && node diff.mjs --count 20000
+cargo test                                         # 전수·공식 파일 대조 포함 (참신 11,172 음절, 新月 공식 표, Graphite 공식 keylayout)
+node tools/crosscheck/chamshin.mjs                 # 참신 키 배치 ↔ 타닥 배열도·오이 배열표
+cd tools/ohi-oracle && npm install && node diff.mjs --count 20000   # 참신 조합 ↔ 오이 (무작위 키열)
 ```
 
 빌드 산출물은 `build/` 아래에 둔다(`~/Documents`가 Syncthing 동기화 폴더라서 `.stignore`가 막는 이름을 썼다).
 
+## 라이선스
+
+MIT ([LICENSE](LICENSE)). 배열 데이터의 원래 라이선스는 아래 출처를 따른다.
+
 ## 배열 출처
 
 - 참신세벌식: 원작자 공빈의 [확정안](https://cafe.daum.net/3bulsik/JMKX/147)(2026-02-12 수정)과 날개셋 `.ist` 속 사용법. `.ist` 파일 자체는 레포에 넣지 않는다.
-- Graphite: [rdavison/graphite-layout](https://github.com/rdavison/graphite-layout) (MIT)
-- 新月配列: [nagamine-git/shingetsu-layout](https://github.com/nagamine-git/shingetsu-layout) (MIT, `layouts/ja/shingetsu/`에 원본 TSV와 라이선스)
+- Graphite: [rdavison/graphite-layout](https://github.com/rdavison/graphite-layout) (MIT, 검증용 공식 keylayout은 `layouts/en/official/`)
+- 新月配列: [nagamine-git/shingetsu-layout](https://github.com/nagamine-git/shingetsu-layout) (MIT, `layouts/ja/shingetsu/`에 원본 TSV, 검증용 로마자 표, 라이선스)
