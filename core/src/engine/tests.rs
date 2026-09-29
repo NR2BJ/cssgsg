@@ -2,12 +2,24 @@ use super::*;
 use crate::key::Mods;
 use crate::sim::Sim;
 
+/// 영어 모드에서 시작하는 시뮬레이터(시험들은 영어에서 `{rs}`·`{ls}`로 옮겨 간다). 입력기는 한국어로 시작한다.
 fn sim() -> Sim {
-    Sim::new(Engine::new(Config::default()))
+    Sim::new(Engine::new(Config::default())).with_mode(Mode::En)
 }
 
 fn sim_with(config: &str) -> Sim {
-    Sim::new(Engine::new(Config::from_toml(config).unwrap()))
+    Sim::new(Engine::new(Config::from_toml(config).unwrap())).with_mode(Mode::En)
+}
+
+#[test]
+fn starts_in_korean() {
+    let engine = Engine::new(Config::default());
+    assert_eq!(engine.mode(), Mode::Ko);
+    let mut s = Sim::new(engine);
+    s.type_keys("jfs{rs}").unwrap();
+    assert_eq!((s.text.as_str(), s.engine.mode()), ("안", Mode::En), "영어 전환 뒤 다시 누르면 한국어");
+    s.type_keys("{rs}").unwrap();
+    assert_eq!(s.engine.mode(), Mode::Ko);
 }
 
 fn typed(keys: &str) -> String {
@@ -690,12 +702,59 @@ fn japanese_conversion_keys_can_be_turned_off() {
 fn yen_sign_on_the_backslash_key() {
     assert_eq!(typed("{ls}\\"), "¥");
     assert_eq!(typed("{ls}|"), "｜");
-    let mut s = sim_with("[ja]\nyen_sign = false\n");
-    s.type_keys("{ls}\\").unwrap();
-    assert_eq!(s.screen(), "＼");
-    let mut s = sim_with("[ja]\nyen_sign = false\npunctuation = \"half_width_western\"\n");
-    s.type_keys("{ls}\\").unwrap();
-    assert_eq!(s.screen(), "\\");
+    // ¥를 끄면 구두점 설정과 상관없이 반각 \(전각 ＼는 내지 않는다). 앱이 치므로 키를 넘긴다.
+    for punct in ["japanese", "full_width_western", "half_width_western"] {
+        let mut s = sim_with(&format!("[ja]\nyen_sign = false\npunctuation = \"{punct}\"\n"));
+        s.type_keys("{ls}ckeu\\").unwrap();
+        assert_eq!(s.screen(), "にほん\\", "{punct}");
+    }
+}
+
+#[test]
+fn down_arrow_is_not_a_conversion_key() {
+    // 변환 키는 Space와 Tab이다. ↓는 다른 화살표처럼 읽기를 확정하고 앱으로 간다.
+    let mut s = sim();
+    s.type_keys("{ls}ckeuwl{down}").unwrap();
+    assert_eq!((s.text.as_str(), s.preedit.as_str()), ("にほんご", ""));
+    assert!(s.candidates.is_none());
+    // 변환 중(후보창)의 ↓는 그대로 다음 후보다.
+    s.type_keys("ckeuwl{sp}{down}").unwrap();
+    assert_eq!(s.candidates.as_ref().and_then(|c| c.selected), Some(1));
+}
+
+#[test]
+fn hanja_combo_tells_left_from_right() {
+    // 기본은 NRIME처럼 왼쪽 Option+Return. 오른쪽 Option+Return은 한자가 아니다(조합을 확정하고 앱으로).
+    let mut s = ko_with("");
+    s.type_keys("kre").unwrap();
+    s.chord(Key::ALT_RIGHT, Mods::ALT_R, Key::ENTER);
+    assert_eq!((s.text.as_str(), s.preedit.as_str()), ("국", ""));
+    s.type_keys("kre").unwrap();
+    s.chord(Key::ALT_LEFT, Mods::ALT_L, Key::ENTER);
+    assert_eq!((s.text.as_str(), s.preedit.as_str()), ("국", "國"));
+}
+
+#[test]
+fn control_hanja_shortcut_keeps_the_composition() {
+    // ⌘/Control을 누르는 순간 조합을 확정하는데(NRIME, Electron의 ⌘ 단축키), 한자 단축키의 Control이면 남겨 둔다.
+    // 0.5.0은 여기서 확정해 버려서 Control+Return이 Discord에 그대로 가서 전송됐다.
+    let mut s = ko_with("[shortcuts]\nhanja = \"control_left+enter\"\n");
+    s.type_keys("kre").unwrap();
+    s.chord(Key::CONTROL_LEFT, Mods::CTRL_L, Key::ENTER);
+    assert_eq!((s.text.as_str(), s.preedit.as_str()), ("", "國"));
+    s.chord(Key::CONTROL_LEFT, Mods::CTRL_L, Key::ENTER);
+    assert_eq!(s.preedit, "局", "변환 중에 다시 누르면 다음 후보");
+    s.type_keys("{ent}").unwrap();
+    assert_eq!((s.text.as_str(), s.preedit.as_str()), ("局", ""));
+    // 다른 쪽 Control, 다른 키와의 조합은 전처럼 확정한다.
+    s.type_keys("kre").unwrap();
+    s.chord(Key::CONTROL_RIGHT, Mods::CTRL_R, Key::ENTER);
+    assert_eq!((s.text.as_str(), s.preedit.as_str()), ("局국", ""));
+    s.type_keys("kre{C-a}").unwrap();
+    assert_eq!((s.text.as_str(), s.preedit.as_str()), ("局국국", ""));
+    // 조합 중이 아니면 Control+Return은 앱으로 간다.
+    s.chord(Key::CONTROL_LEFT, Mods::CTRL_L, Key::ENTER);
+    assert_eq!(s.preedit, "");
 }
 
 // ---------------------------------------------------------------- 빠른 탭 전환 보정

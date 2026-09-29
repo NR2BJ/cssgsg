@@ -479,9 +479,9 @@ pub unsafe extern "C" fn cssgsg_engine_mac_settings(e: *const CssgsgEngine) -> C
     CssgsgMacSettings {
         hud: mac.hud as u8,
         hud_at_mouse: (mac.hud_position == crate::config::HudPosition::Mouse) as u8,
-        newline_replay_ms: mac.newline_replay_ms,
+        newline_replay_ms: mac.newline_replay_ms(),
         candidate_font_size: mac.candidate_font_size,
-        shift_enter_delay_ms: mac.shift_enter_delay_ms,
+        shift_enter_delay_ms: mac.shift_enter_delay_ms(),
     }
 }
 
@@ -518,7 +518,8 @@ mod tests {
         unsafe {
             let e = cssgsg_engine_new(ptr::null());
             assert!(!e.is_null());
-            assert_eq!(cssgsg_engine_mode(e), 0);
+            assert_eq!(cssgsg_engine_mode(e), 1, "한국어로 시작한다");
+            assert_eq!((*cssgsg_engine_set_mode(e, 0)).mode, 0);
             let out = &*cssgsg_engine_set_mode(e, 1);
             assert_eq!(out.mode, 1);
 
@@ -598,10 +599,14 @@ mod tests {
         unsafe {
             let e = cssgsg_engine_new(ptr::null());
             cssgsg_engine_set_mode(e, 1);
-            let cfg = CString::new("[mac]\nhud = false\nnewline_replay_ms = 300").unwrap();
+            let cfg = CString::new("[mac]\nhud = false\nnewline_delay_offset_ms = 30").unwrap();
             assert_eq!(cssgsg_engine_set_config(e, cfg.as_ptr()), 1);
             let m = cssgsg_engine_mac_settings(e);
-            assert_eq!((m.hud, m.newline_replay_ms), (0, 300));
+            assert_eq!(
+                (m.hud, m.shift_enter_delay_ms, m.newline_replay_ms),
+                (0, 45, 150),
+                "기본값 15·120에 30씩"
+            );
             assert_eq!(cssgsg_engine_mode(e), 1, "모드는 그대로");
             let bad = CString::new("ko_layout = \"nope\"").unwrap();
             assert_eq!(cssgsg_engine_set_config(e, bad.as_ptr()), 0);

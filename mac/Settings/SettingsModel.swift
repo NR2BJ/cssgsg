@@ -37,8 +37,12 @@ struct CssgsgConfig: Codable, Equatable {
         var hud: Bool
         var hudPosition: String
         var candidateFontSize: Int
-        var shiftEnterDelayMs: Int
-        var newlineReplayMs: Int
+        /// 줄바꿈 대기 조정(-50~50). 기본값은 Electron 15ms, Codex류 120ms(코어 MacConfig).
+        var newlineDelayOffsetMs: Int
+
+        /// 코어 MacConfig::shift_enter_delay_ms/newline_replay_ms와 같은 계산(화면에 보이기만 한다).
+        var electronDelayMs: Int { max(5, 15 + newlineDelayOffsetMs) }
+        var codexDelayMs: Int { max(5, 120 + newlineDelayOffsetMs) }
     }
 }
 

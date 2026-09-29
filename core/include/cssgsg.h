@@ -118,11 +118,11 @@ uint8_t cssgsg_engine_use_mozc(CssgsgEngine *engine, const char *data_path, cons
 
 /* 맥 셸 설정(설정 파일의 [mac]). 엔진은 쓰지 않는다. engine이 NULL이면 기본값. */
 typedef struct CssgsgMacSettings {
-    uint8_t hud;               /* 모드를 바꿀 때 A/한/あ를 잠깐 보인다 */
+    uint8_t hud;               /* 모드를 바꿀 때 G/ㅊ/月를 잠깐 보인다 */
     uint8_t hud_at_mouse;      /* 1이면 마우스 옆, 0이면 커서 위 */
-    uint32_t newline_replay_ms; /* Codex류 Shift+Enter 다시 보내기 전 대기(밀리초) */
+    uint32_t newline_replay_ms; /* Codex류 Shift+Enter 다시 보내기 전 대기(밀리초, 120 + 조정) */
     uint32_t candidate_font_size; /* 후보창 글자 크기(포인트) */
-    uint32_t shift_enter_delay_ms; /* 조합 중 Shift+Enter·⌘+키 재전송 전 대기(밀리초) */
+    uint32_t shift_enter_delay_ms; /* 조합 중 Shift+Enter·⌘+키 재전송 전 대기(밀리초, 15 + 조정, 5 이상) */
 } CssgsgMacSettings;
 CssgsgMacSettings cssgsg_engine_mac_settings(const CssgsgEngine *engine);
 

@@ -72,20 +72,17 @@ struct JapaneseTab: View {
                 Toggle(tr("Space로 변환", "Convert with Space", "Space で変換"), isOn: model.binding(\.ja.convertWithSpace))
                 Toggle(tr("Tab으로 변환", "Convert with Tab", "Tab で変換"), isOn: model.binding(\.ja.convertWithTab))
                 if !model.config.ja.convertWithSpace && !model.config.ja.convertWithTab {
-                    Label(tr("↓로만 변환한다.", "Only ↓ converts.", "↓ でのみ変換します。"), systemImage: "info.circle")
+                    Label(tr("둘 다 끄면 한자로 변환하지 않는다(가나만).", "With both off there is no kanji conversion (kana only).",
+                             "両方オフにすると漢字に変換しません（かなのみ）。"),
+                          systemImage: "info.circle")
                         .foregroundStyle(.secondary)
                 }
             } header: {
                 Text(tr("변환 키", "Conversion keys", "変換キー"))
             } footer: {
-                Text(tr("""
-                    읽기를 치는 중에 누르면 한자로 변환한다(↓도 늘 변환한다). 끈 키는 읽기를 확정하고, Space는 공백을 치고 Tab은 앱에 넘긴다.
-                    """, """
-                    Pressed while typing a reading, these convert it to kanji (↓ always does too). A key turned off commits the reading; \
-                    Space then types a space and Tab goes to the app.
-                    """, """
-                    読みの入力中に押すと漢字に変換します（↓ も常に変換）。オフにしたキーは読みを確定し、Space は空白を入力、Tab はアプリに渡します。
-                    """))
+                Text(tr("가나를 치는 중에 누르면 한자로 변환한다. 끈 키는 친 가나를 그대로 확정하고, Space는 공백을 치고 Tab은 앱에 넘긴다.",
+                        "Pressed while typing kana, these convert to kanji. A key turned off commits the kana as typed; Space then types a space and Tab goes to the app.",
+                        "かなの入力中に押すと漢字に変換します。オフにしたキーは入力したかなをそのまま確定し、Space は空白を入力、Tab はアプリに渡します。"))
             }
 
             Section {
@@ -94,21 +91,16 @@ struct JapaneseTab: View {
                     Text(tr("，．［］ 전각 서양식", "，．［］ Full-width Western", "，．［］ 全角欧文")).tag("full_width_western")
                     Text(tr(",.[] 반각", ",.[] Half-width", ",.[] 半角")).tag("half_width_western")
                 }
+                Picker(tr("공백", "Space", "空白"), selection: model.binding(\.ja.fullWidthSpace)) {
+                    Text(tr("반각", "Half-width", "半角")).tag(false)
+                    Text(tr("전각 (　)", "Full-width (　)", "全角（　）")).tag(true)
+                }
+                .pickerStyle(.segmented)
                 Toggle(tr("/ 자리로 ・를 친다", "Type ・ on the / key", "/ キーで ・ を入力"), isOn: model.binding(\.ja.slashNakaguro))
-                Toggle(tr("\\ 자리로 ¥를 친다", "Type ¥ on the \\ key", "\\ キーで ¥ を入力"), isOn: model.binding(\.ja.yenSign))
-                Toggle(tr("Space로 전각 공백(　)을 친다", "Type a full-width space (　) with Space", "Space で全角スペース（　）を入力"),
-                       isOn: model.binding(\.ja.fullWidthSpace))
+                Toggle(tr("\\ 자리로 ¥를 친다 (끄면 \\)", "Type ¥ on the \\ key (off: \\)", "\\ キーで ¥ を入力（オフなら \\）"),
+                       isOn: model.binding(\.ja.yenSign))
             } header: {
                 Text(tr("기호", "Symbols", "記号"))
-            } footer: {
-                Text(tr("""
-                    전각 공백은 변환하지 않는 Space에만 해당한다(읽기가 없을 때, 또는 Space 변환을 껐을 때). 읽기를 치는 중의 Space는 변환이다.
-                    """, """
-                    The full-width space applies only to a Space that doesn’t convert (nothing typed yet, or Space conversion off). \
-                    Space while typing a reading converts.
-                    """, """
-                    全角スペースは変換しない Space だけに効きます（読みがないとき、または Space 変換がオフのとき）。読みの入力中の Space は変換です。
-                    """))
             }
 
             Section(tr("가타카나 (Caps Lock)", "Katakana (Caps Lock)", "カタカナ（Caps Lock）")) {
@@ -149,8 +141,7 @@ struct JapaneseTab: View {
 
     private static var typingRows: [CheatSheet.Row] {
         [
-            .init(["Space", "Tab", "↓"], tr("변환 (Space·Tab은 위 설정을 따른다)", "Convert (Space and Tab follow the settings above)",
-                                            "変換（Space・Tab は上の設定に従う）")),
+            .init(["Space", "Tab"], tr("변환 (위 설정을 따른다)", "Convert (follows the settings above)", "変換（上の設定に従う）")),
             .init(["Return"], tr("읽기를 그대로 확정", "Commit the reading as is", "読みをそのまま確定")),
             .init(["⇧ Shift + Return"], tr("확정하고 줄바꿈", "Commit and start a new line", "確定して改行")),
             .init(["⌫ Delete"], tr("한 글자 지우기", "Delete one character", "一文字消す")),

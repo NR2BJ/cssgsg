@@ -16,7 +16,10 @@ int main(void) {
     printf("cssgsg %s\n", cssgsg_version());
     CssgsgEngine *e = cssgsg_engine_new(NULL);
     CHECK(e != NULL);
-    const CssgsgOutput *o = cssgsg_engine_set_mode(e, CSSGSG_MODE_KO);
+    CHECK(cssgsg_engine_mode(e) == CSSGSG_MODE_KO); /* 한국어로 시작한다 */
+    const CssgsgOutput *o = cssgsg_engine_set_mode(e, CSSGSG_MODE_EN);
+    CHECK(o->mode == CSSGSG_MODE_EN);
+    o = cssgsg_engine_set_mode(e, CSSGSG_MODE_KO);
     CHECK(o->mode == CSSGSG_MODE_KO);
 
     CssgsgKeyEvent k = key(0x28, 1.0); /* k → ㄱ */
@@ -54,14 +57,19 @@ int main(void) {
     CHECK(m.candidate_font_size == 14 && m.shift_enter_delay_ms == 15);
     m = cssgsg_engine_mac_settings(NULL);
     CHECK(m.hud == 1 && m.newline_replay_ms == 120 && m.candidate_font_size == 14 && m.shift_enter_delay_ms == 15);
-    CssgsgEngine *c = cssgsg_engine_new("[mac]\nhud = false\nhud_position = \"mouse\"\nnewline_replay_ms = 80\n"
-                                        "candidate_font_size = 18\nshift_enter_delay_ms = 25");
+    /* 줄바꿈 대기는 조정값 하나: Electron 15 + 조정, Codex 120 + 조정 */
+    CssgsgEngine *c = cssgsg_engine_new("[mac]\nhud = false\nhud_position = \"mouse\"\n"
+                                        "candidate_font_size = 18\nnewline_delay_offset_ms = -40");
     CHECK(c != NULL);
     m = cssgsg_engine_mac_settings(c);
     CHECK(m.hud == 0 && m.hud_at_mouse == 1 && m.newline_replay_ms == 80);
-    CHECK(m.candidate_font_size == 18 && m.shift_enter_delay_ms == 25);
+    CHECK(m.candidate_font_size == 18 && m.shift_enter_delay_ms == 5);
     cssgsg_engine_free(c);
-    CHECK(cssgsg_engine_new("[mac]\nnewline_replay_ms = 5") == NULL);
+    CHECK(cssgsg_engine_new("[mac]\nnewline_delay_offset_ms = 99") == NULL);
+    /* 0.5.0 파일의 절댓값은 조정값으로 옮긴다 */
+    c = cssgsg_engine_new("[mac]\nnewline_replay_ms = 150");
+    CHECK(c != NULL && cssgsg_engine_mac_settings(c).newline_replay_ms == 150);
+    cssgsg_engine_free(c);
 
     /* 빠른 탭 전환 보정: 오른쪽 Shift를 누른 채 친 글자는 잡아 두고 타이머를 청한다(timer_ms). */
     CssgsgEngine *b = cssgsg_engine_new("tap_buffering = true");

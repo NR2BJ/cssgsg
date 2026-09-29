@@ -5,7 +5,9 @@
 //! - 보통 글자: 쿼티 자리의 키. 대문자와 Shift 기호(!@# …)는 Shift를 누른 것으로 본다.
 //! - `{이름}`: 특수 키. sp bs ent esc tab left right up down pgup pgdn del
 //!   rs(오른쪽 Shift 탭) ls(왼쪽 Shift 탭) caps(Caps Lock 토글) click(마우스 클릭)
-//! - `{S-이름}`: Shift+특수 키. `{M-x}` ⌘/Win+x, `{C-x}` Ctrl+x, `{A-x}` Option/Alt+x. 한자 키는 `{A-ent}`.
+//! - `{S-이름}`: Shift+특수 키. `{M-x}` ⌘/Win+x, `{C-x}` Ctrl+x, `{A-x}` Option/Alt+x(모두 왼쪽). 한자 키는 `{A-ent}`.
+//!   입력기가 실제로 받는 순서대로 수식키 누름 → 키 → 수식키 뗌을 보낸다(Shift 대문자도 같다).
+//!   0.5.0은 키 하나만 보내서, ⌘/Control을 누르는 순간의 확정을 시험하지 못했다.
 //!
 //! 앱 화면은 확정 글자 + 조합 글자이고 커서는 늘 끝이다(화살표는 커서를 옮기지 않는다). 선택은 없다.
 
@@ -69,8 +71,11 @@ impl Sim {
                 self.special(&name)?;
             } else {
                 let (key, shift) = char_key(c).ok_or_else(|| format!("키로 칠 수 없는 글자 {c:?}"))?;
-                let mods = if shift { Mods::SHIFT_L } else { 0 };
-                self.press(key, mods);
+                if shift {
+                    self.chord(Key::SHIFT_LEFT, Mods::SHIFT_L, key);
+                } else {
+                    self.press(key, 0);
+                }
             }
         }
         Ok(())
@@ -78,11 +83,11 @@ impl Sim {
 
     fn special(&mut self, name: &str) -> Result<(), String> {
         if let Some((prefix, rest)) = name.split_once('-') {
-            let bit = match prefix {
-                "S" => Mods::SHIFT_L,
-                "M" => Mods::META_L,
-                "C" => Mods::CTRL_L,
-                "A" => Mods::ALT_L,
+            let (modifier, bit) = match prefix {
+                "S" => (Key::SHIFT_LEFT, Mods::SHIFT_L),
+                "M" => (Key::META_LEFT, Mods::META_L),
+                "C" => (Key::CONTROL_LEFT, Mods::CTRL_L),
+                "A" => (Key::ALT_LEFT, Mods::ALT_L),
                 _ => return Err(format!("알 수 없는 수식키 {prefix:?}")),
             };
             let key = match named_key(rest) {
@@ -95,7 +100,7 @@ impl Sim {
                     }
                 }
             };
-            self.press(key, bit);
+            self.chord(modifier, bit, key);
             return Ok(());
         }
         match name {
@@ -150,6 +155,19 @@ impl Sim {
     }
 
     /// 수식키를 혼자 짧게 누른다.
+    /// 수식키를 누른 채 키 하나를 친다: 수식키 누름, 키 누름·뗌, 수식키 뗌(입력기가 받는 순서).
+    pub fn chord(&mut self, modifier: Key, bit: u32, key: Key) {
+        self.time += 0.03;
+        let ev = KeyEvent::down(modifier, self.mods(bit), self.time);
+        let out = self.engine.handle_key(&ev, &self.ctx);
+        self.apply(Some(&ev), &out);
+        self.press(key, bit);
+        self.time += 0.03;
+        let ev = KeyEvent::up(modifier, self.mods(0), self.time);
+        let out = self.engine.handle_key(&ev, &self.ctx);
+        self.apply(Some(&ev), &out);
+    }
+
     pub fn tap(&mut self, key: Key, bit: u32) {
         self.time += 0.03;
         let ev = KeyEvent::down(key, self.mods(bit), self.time);

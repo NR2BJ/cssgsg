@@ -302,14 +302,12 @@ enum TextInputGeometry {
     }
 
     /// Convert Quartz (top-left origin) coordinates to AppKit (bottom-left origin).
+    /// cssgsg: 두 좌표계는 늘 주 화면(메뉴 막대 화면, NSScreen.screens[0], AppKit 원점)을 기준으로 뒤집힌다.
+    /// NRIME 코드는 x가 걸치는 화면의 높이를 써서, 높이가 다른 모니터를 쓰면 위아래가 어긋났다.
     private static func convertFromQuartz(_ quartzRect: CGRect) -> NSRect? {
-        guard let screenHeight = NSScreen.screens.first(where: {
-            $0.frame.contains(NSPoint(x: quartzRect.midX, y: 0))
-        })?.frame.height ?? NSScreen.main?.frame.height else {
-            return nil
-        }
+        guard let primary = NSScreen.screens.first else { return nil }
 
-        let flippedY = screenHeight - quartzRect.origin.y - quartzRect.size.height
+        let flippedY = primary.frame.maxY - quartzRect.origin.y - quartzRect.size.height
         return NSRect(x: quartzRect.origin.x, y: flippedY, width: max(quartzRect.size.width, 1), height: quartzRect.size.height)
     }
 

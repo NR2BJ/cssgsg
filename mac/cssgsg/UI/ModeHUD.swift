@@ -37,10 +37,18 @@ final class ModeHUD {
         }
 
         let panel = ensurePanel()
-        label?.stringValue = text
         panel.setContentSize(size)
         panel.contentView?.frame = NSRect(origin: .zero, size: size)
-        label?.frame = NSRect(origin: .zero, size: size)
+        if let label {
+            label.stringValue = text
+            // 글자 칸은 글자 높이만큼만 두고 가운데에 놓는다(칸을 상자 높이로 두면 글자가 위로 붙는다).
+            let height = min(size.height, ceil(label.intrinsicContentSize.height))
+            label.frame = NSRect(x: 0, y: ((size.height - height) / 2).rounded(), width: size.width, height: height)
+        }
+        DeveloperLogger.shared.log("HUD", "shown", metadata: [
+            "caret": caret.map { String(format: "(%.0f,%.0f,%.0f,%.0f)", $0.minX, $0.minY, $0.width, $0.height) } ?? "-",
+            "origin": String(format: "(%.0f,%.0f)", origin.x, origin.y),
+        ])
 
         fadeTimer?.invalidate()
         generation &+= 1

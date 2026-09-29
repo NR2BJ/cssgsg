@@ -71,19 +71,25 @@ MainActor.assumeIsolated {
         send(.flagsChanged, 0x3D, optionR)
         send(.keyDown, 0x24, optionR)
     }
-    check(r.result == "alt+enter", "녹화: 오른쪽 Option+Return → alt+enter(조합은 좌우 없음) (\(r.result))")
+    check(r.result == "alt_right+enter", "녹화: 오른쪽 Option+Return → alt_right+enter(좌우를 가린다) (\(r.result))")
+    r = record {
+        // 기기 비트가 없는 이벤트: flagsChanged로 기억한 쪽을 쓴다
+        send(.flagsChanged, 0x3D, NSEvent.ModifierFlags.option.rawValue)
+        send(.keyDown, 0x24, NSEvent.ModifierFlags.option.rawValue)
+    }
+    check(r.result == "alt_right+enter", "녹화: 기기 비트가 없어도 누른 쪽을 기억한다 (\(r.result))")
     r = record {
         send(.flagsChanged, 0x3B, controlL)
         send(.flagsChanged, 0x38, controlL | shiftL)
         send(.keyDown, 0x31, controlL | shiftL)
     }
-    check(r.result == "control+shift+space", "녹화: Control+Shift+Space, 파일에 적는 순서 (\(r.result))")
+    check(r.result == "control_left+shift_left+space", "녹화: 왼쪽 Control+왼쪽 Shift+Space, 파일에 적는 순서 (\(r.result))")
     r = record {
         send(.flagsChanged, 0x37, commandL)
         send(.flagsChanged, 0x3A, commandL | optionL)
         send(.keyDown, 0x28, commandL | optionL)
     }
-    check(r.result == "alt+meta+k", "녹화: ⌘⌥K → alt+meta+k (\(r.result))")
+    check(r.result == "(녹화 중)" && r.rejected?.contains("⌘") == true, "녹화: ⌘ 조합은 거부하고 계속 녹화 (\(r.rejected ?? "-"))")
     r = record { send(.keyDown, 0x69, 0) }
     check(r.result == "f13", "녹화: F13은 수식키 없이도 된다 (\(r.result))")
     r = record { send(.keyDown, 0x35, 0) }
@@ -105,7 +111,7 @@ MainActor.assumeIsolated {
         send(.keyDown, 0x00, shiftL)
         send(.flagsChanged, 0x38, 0)
     }
-    check(r.result == "shift+a", "녹화: Shift+A는 조합이고 그 뒤 뗌은 탭이 아니다 (\(r.result))")
+    check(r.result == "shift_left+a", "녹화: Shift+A는 조합이고 그 뒤 뗌은 탭이 아니다 (\(r.result))")
     r = record {
         send(.flagsChanged, 0x3C, shiftR)
         send(.flagsChanged, 0x3C, 0)
@@ -121,8 +127,9 @@ MainActor.assumeIsolated {
     // 화면 글자
     let labels: [(UILanguage, String, String)] = [
         (.ko, "tap:shift_right", "오른쪽 Shift 탭"), (.en, "tap:shift_right", "Right Shift tap"),
-        (.ja, "tap:alt_left", "左Option タップ"), (.ko, "alt+enter", "Option + Return"),
-        (.en, "control+shift+space", "Control + Shift + Space"), (.en, "meta+f5", "Command + F5"),
+        (.ja, "tap:alt_left", "左Option タップ"), (.ko, "alt_left+enter", "왼쪽 Option + Return"),
+        (.ko, "alt+enter", "Option + Return"), (.ja, "alt_right+enter", "右Option + Return"),
+        (.en, "control_left+shift_right+space", "Left Control + Right Shift + Space"), (.en, "meta+f5", "Command + F5"),
         (.ko, "", "없음"), (.en, "", "None"), (.ja, "", "なし"), (.en, "alt+bracket_left", "Option + ["),
     ]
     for (lang, value, text) in labels {

@@ -15,7 +15,7 @@ use crate::hotkey::TapTracker;
 use crate::kana::{KanaComposer, KanaLayout, to_katakana};
 use crate::key::{Key, KeyEvent, Mods};
 use crate::latin::{LatinLayout, qwerty_char_for};
-use crate::shortcut::{ModFamilies, ShortcutAction};
+use crate::shortcut::ShortcutAction;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(i32)]
@@ -159,7 +159,8 @@ impl Engine {
             .unwrap_or_else(|| KoLayout::builtin("chamshin-v18").unwrap());
         Self {
             config,
-            mode: Mode::En,
+            // 입력기를 켜면 한국어로 시작한다(2026-09-29 사용자 요청).
+            mode: Mode::Ko,
             last_non_en: Mode::Ko,
             ko_layout,
             ko: KoComposer::new(),
@@ -313,6 +314,15 @@ impl Engine {
             && !ev.repeat
             && matches!(ev.key, Key::META_LEFT | Key::META_RIGHT | Key::CONTROL_LEFT | Key::CONTROL_RIGHT)
         {
+            // 한자 단축키가 이 Control을 쓰면(예: 왼쪽 Control+Return) 조합을 남겨 둔다. 여기서 확정하면 단축키가 올 때
+            // 바꿀 글자가 없어서 Return이 앱으로 간다(Discord에서 전송, 0.5.0). Control+키는 Chrome도 입력기에 보낸다.
+            if self.mode == Mode::Ko
+                && !ctx.secure_field
+                && self.config.shortcuts.hanja.combo_uses(ev.key)
+                && (self.hanja.is_some() || !self.ko.preedit().is_empty())
+            {
+                return Output::pass();
+            }
             return Output::commit_pass(self.take_composition());
         }
 
@@ -364,12 +374,11 @@ impl Engine {
             return None;
         }
         let (modifier, pressed) = self.taps.candidate()?;
-        let family = family_bit(modifier)?;
         let only_it = !ev.mods.any_held_except(modifier.modifier_bit());
         if self.config.shortcuts.for_tap(modifier).is_none()
             || ev.time - pressed >= threshold
             || !only_it
-            || self.config.shortcuts.combo_uses(family)
+            || self.config.shortcuts.combo_uses_family_of(modifier)
         {
             return None;
         }
@@ -517,12 +526,13 @@ impl Engine {
                 }
                 return Output::pass();
             }
-            Key::SPACE | Key::TAB | Key::ARROW_DOWN if !self.kana.reading().is_empty() => {
+            Key::SPACE | Key::TAB if !self.kana.reading().is_empty() => {
                 self.kana.cancel_pending();
-                let trigger = match k {
-                    Key::SPACE => self.config.ja.convert_with_space,
-                    Key::TAB => self.config.ja.convert_with_tab,
-                    _ => true,
+                // 변환 키는 Space와 Tab 둘이다(설정). ↓는 변환 키가 아니다(사용자 결정, 다른 화살표처럼 확정하고 앱으로).
+                let trigger = if k == Key::SPACE {
+                    self.config.ja.convert_with_space
+                } else {
+                    self.config.ja.convert_with_tab
                 };
                 if !trigger {
                     // 변환 키가 아니다: 읽기를 확정한다. Space는 스페이스를 넣고 Tab은 앱에 넘긴다.
@@ -785,21 +795,11 @@ fn millis(secs: f64) -> u32 {
     (secs * 1000.0).ceil().max(1.0) as u32
 }
 
-/// 수식키의 종류 비트(조합 단축키와 견준다).
-fn family_bit(modifier: Key) -> Option<u8> {
-    Some(match modifier {
-        Key::SHIFT_LEFT | Key::SHIFT_RIGHT => ModFamilies::SHIFT,
-        Key::CONTROL_LEFT | Key::CONTROL_RIGHT => ModFamilies::CONTROL,
-        Key::ALT_LEFT | Key::ALT_RIGHT => ModFamilies::ALT,
-        Key::META_LEFT | Key::META_RIGHT => ModFamilies::META,
-        _ => return None,
-    })
-}
-
 /// 일본어 모드의 가나 배열 밖 기호(Shift 기호 등). NRIME의 전각/반각 규칙과 같다.
 fn ja_symbol(cfg: &JaConfig, ascii: char) -> String {
-    if ascii == '\\' && cfg.yen_sign {
-        return "¥".into();
+    // \ 자리는 ¥ 아니면 반각 \ 하나다. 전각 ＼는 쓸 데가 없고, ¥를 끄는 까닭은 경로·코드에 쓸 \다.
+    if ascii == '\\' {
+        return if cfg.yen_sign { "¥".into() } else { "\\".into() };
     }
     match cfg.punctuation {
         JaPunct::HalfWidthWestern => ascii.to_string(),

@@ -29,16 +29,16 @@ struct GeneralTab: View {
             } footer: {
                 Text(tr("""
                     단추를 누르고 쓸 키를 누른다. 수식키 하나만 혼자 짧게 눌렀다 떼면 탭, 수식키와 다른 키를 같이 누르면 조합이다. \
-                    조합의 수식키는 왼쪽·오른쪽을 가리지 않는다. Esc는 취소.
+                    수식키는 왼쪽·오른쪽을 가린다(왼쪽 Option + Return과 오른쪽 Option + Return은 다르다). ⌘ 조합은 쓸 수 없다. Esc는 취소.
                     영어 ↔ 비영어: 영어와 방금 쓰던 언어(한국어·일본어)를 오간다. 한국어 ↔ 일본어: 영어에서 누르면 둘 중 방금 쓰지 않은 쪽으로 간다.
                     """, """
                     Click a button, then press the keys. Pressing a single modifier alone briefly is a tap; a modifier with another key is a combination. \
-                    Combinations don’t distinguish left and right modifiers. Esc cancels.
+                    Left and right modifiers are distinct (Left Option + Return ≠ Right Option + Return). ⌘ combinations aren’t allowed. Esc cancels.
                     English ↔ non-English switches between English and the language you used last (Korean or Japanese). \
                     Korean ↔ Japanese, pressed in English, goes to the one you didn’t use last.
                     """, """
                     ボタンを押してから使うキーを押します。修飾キーを一つだけ短く押して離すとタップ、修飾キーと別のキーを一緒に押すと組み合わせです。\
-                    組み合わせの修飾キーは左右を区別しません。Esc で取り消し。
+                    修飾キーは左右を区別します（左Option + Return と右Option + Return は別）。⌘ の組み合わせは使えません。Esc で取り消し。
                     英語 ↔ 英語以外：英語と直前に使った言語（韓国語・日本語）を行き来します。韓国語 ↔ 日本語：英語で押すと直前に使っていない方へ切り替えます。
                     """))
             }
@@ -49,35 +49,12 @@ struct GeneralTab: View {
                         model.update { $0.tapThresholdMs = ms }
                     }
                 }
-                Toggle(tr("빠른 탭 전환 보정 (실험적)", "Fast tap correction (experimental)", "高速タップ補正（実験的）"),
-                       isOn: model.binding(\.tapBuffering))
-                if model.config.tapBuffering {
-                    LabeledContent(tr("겹침 허용", "Overlap allowance", "重なりの許容")) {
-                        ValueSlider(value: model.config.tapOverlapMs, range: 30...80, step: 5) { ms in
-                            model.update { $0.tapOverlapMs = ms }
-                        }
-                    }
-                }
             } header: {
                 Text(tr("수식키 탭", "Modifier taps", "修飾キーのタップ"))
             } footer: {
-                Text(tr("""
-                    수식키를 탭 인식 시간보다 오래 누르면 탭이 아니다.
-                    빠른 탭 전환 보정: 탭 수식키를 떼기 전에 다음 글자를 눌러 버려도, 겹친 시간이 겹침 허용보다 짧으면 탭으로 보고 \
-                    전환한 뒤 그 글자를 친다. 켜면 탭 수식키를 누른 채 친 글자는 겹침 허용만큼 늦게 나온다. \
-                    그 수식키를 조합 단축키에도 쓰면 보정하지 않는다. Shift 탭을 쓰면 Shift로 대문자를 아주 빠르게 칠 때 전환으로 잘못 볼 수 있다.
-                    """, """
-                    Holding a modifier longer than the tap time limit is not a tap.
-                    Fast tap correction: if you press the next letter before releasing a tap modifier and the overlap is shorter \
-                    than the allowance, it still counts as a tap — the mode switches, then the letter is typed. Letters typed while \
-                    holding a tap modifier appear after the allowance delay. Not applied when that modifier is also used in a combination. \
-                    With a Shift tap, very fast Shift+letter capitals can be mistaken for a switch.
-                    """, """
-                    修飾キーをタップ判定時間より長く押すとタップになりません。
-                    高速タップ補正：タップ用の修飾キーを離す前に次の文字を押しても、重なりが許容時間より短ければタップとみなし、\
-                    切り替えてからその文字を入力します。オンにすると、タップ用の修飾キーを押したまま打った文字は許容時間だけ遅れて出ます。\
-                    その修飾キーを組み合わせにも使っている場合は補正しません。Shift のタップを使うと、Shift で大文字をとても速く打ったときに切り替えと誤認することがあります。
-                    """))
+                Text(tr("수식키를 탭 인식 시간보다 오래 누르면 탭이 아니다.",
+                        "Holding a modifier longer than the tap time limit is not a tap.",
+                        "修飾キーをタップ判定時間より長く押すとタップになりません。"))
             }
 
             Section(tr("후보창", "Candidate window", "候補ウィンドウ")) {
@@ -101,33 +78,35 @@ struct GeneralTab: View {
             }
 
             Section {
-                LabeledContent(tr("Shift+Enter 대기", "Shift+Enter delay", "Shift+Enter の待ち時間")) {
-                    ValueSlider(value: model.config.mac.shiftEnterDelayMs, range: 5...50, step: 5) { ms in
-                        model.update { $0.mac.shiftEnterDelayMs = ms }
+                LabeledContent(tr("줄바꿈 대기 조정", "Newline delay adjustment", "改行待ち時間の調整")) {
+                    ValueSlider(value: model.config.mac.newlineDelayOffsetMs, range: -50...50, step: 5, signed: true) { ms in
+                        model.update { $0.mac.newlineDelayOffsetMs = ms }
                     }
                 }
-                DisclosureGroup(tr("고급", "Advanced", "詳細")) {
-                    LabeledContent(tr("Codex 줄바꿈 대기", "Codex newline delay", "Codex の改行待ち時間")) {
-                        ValueSlider(value: model.config.mac.newlineReplayMs, range: 20...500, step: 10) { ms in
-                            model.update { $0.mac.newlineReplayMs = ms }
-                        }
-                    }
+                LabeledContent(tr("지금 대기", "Current delays", "現在の待ち時間")) {
+                    Text(tr("Electron \(model.config.mac.electronDelayMs)ms · Codex \(model.config.mac.codexDelayMs)ms",
+                            "Electron \(model.config.mac.electronDelayMs) ms · Codex \(model.config.mac.codexDelayMs) ms",
+                            "Electron \(model.config.mac.electronDelayMs)ms・Codex \(model.config.mac.codexDelayMs)ms"))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
                 }
             } header: {
-                Text(tr("Electron 앱 (Discord, Slack …)", "Electron apps (Discord, Slack …)", "Electron アプリ（Discord、Slack …）"))
+                Text(tr("조합 중 Shift+Enter", "Shift+Enter while composing", "変換中の Shift+Enter"))
             } footer: {
                 Text(tr("""
-                    조합 중 Shift+Enter를 누르면 글자를 확정하고 이만큼 기다렸다 줄을 바꾼다(조합 중 ⌘+키도 이만큼 기다렸다 다시 보낸다). \
-                    줄바꿈이 확정한 글자를 먹으면 늘린다.
-                    고급: Codex처럼 Enter를 전송으로 받는 앱은 줄바꿈 대신 Shift+Enter 키를 다시 보내는데, 그 전에 기다리는 시간이다.
+                    Shift+Enter를 누르면 글자를 확정하고 조금 기다렸다 줄을 바꾼다. 기다리는 시간은 앱 종류마다 따로 있다(더하지 않는다): \
+                    Discord·Slack 같은 Electron 앱은 15ms(⌘+키 다시 보내기도 같다), Codex처럼 Enter를 전송으로 받는 앱은 120ms 뒤에 \
+                    Shift+Enter 키를 다시 보낸다(NRIME에서 찾은 값). 줄바꿈이 확정한 글자를 먹거나 전송되면 늘리고, 느리면 줄인다.
                     """, """
-                    Shift+Enter while composing commits the text, waits this long, then inserts the newline (⌘+key while composing \
-                    is re-sent after the same wait). Increase it if the newline swallows the committed text.
-                    Advanced: apps that treat Enter as send, like Codex, get Shift+Enter re-sent instead; this is the wait before that.
+                    Shift+Enter commits the text, waits briefly, then starts a new line. Each kind of app has its own wait (they \
+                    don’t add up): Electron apps like Discord and Slack 15 ms (also used to re-send ⌘+key); apps that treat Enter as \
+                    send, like Codex, get Shift+Enter re-sent after 120 ms (values found in NRIME). Increase if the newline eats the \
+                    text or sends the message; decrease if it feels slow.
                     """, """
-                    変換中に Shift+Enter を押すと、文字を確定してこの時間だけ待ってから改行します（変換中の ⌘+キーも同じだけ待って送り直します）。\
-                    改行が確定した文字を消してしまう場合は長くします。
-                    詳細：Codex のように Enter を送信として扱うアプリでは改行の代わりに Shift+Enter を送り直します。その前の待ち時間です。
+                    Shift+Enter を押すと文字を確定し、少し待ってから改行します。待ち時間はアプリの種類ごとに別です（足し合わせません）：\
+                    Discord・Slack などの Electron アプリは 15ms（⌘+キーの送り直しも同じ）、Codex のように Enter を送信として扱う\
+                    アプリは 120ms 後に Shift+Enter を送り直します（NRIME で見つけた値）。改行が確定した文字を消したり送信されたりしたら\
+                    長く、遅く感じたら短くします。
                     """))
             }
         }

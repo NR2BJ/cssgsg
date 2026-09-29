@@ -12,7 +12,7 @@
   - Graphite: OS 레이아웃은 쿼티 그대로 두고 입력기가 글자만 바꾼다. 단축키는 쿼티 자리
   - 新月配列 가나 조합기: ☆/★ 앞치기, ゛ 뒤치기, 3타 단축, Caps Lock 가타카나
   - 모드 전환: 오른쪽 Shift 탭 = 영어 ↔ 직전 비영어, 왼쪽 Shift 탭 = 한 ↔ 일 (NRIME 설정 그대로).
-    단축키는 설정 앱에서 녹화해 바꾼다(수식키 탭 또는 수식키+키 조합). 빠른 탭 전환 보정(실험적)도 있다
+    단축키는 설정 앱에서 녹화해 바꾼다(수식키 탭 또는 수식키+키 조합, 수식키 좌우를 가린다). 입력기를 켜면 한국어로 시작한다
   - C ABI(`core/include/cssgsg.h`)와 C 스모크 테스트
 - [~] macOS 입력기 셸 (NRIME 플랫폼층 이식)
   - [x] M2a: IMKit 셸 뼈대. 키 → 코어 → 앱, 메뉴 막대 모드 표시(G/ㅊ/月), 조합 중 밑줄, 후보창
@@ -21,12 +21,12 @@
   - [x] 배포: pkg + GitHub 릴리스 + 설정 앱 정보 탭의 업데이트(정식·베타 채널, NRIME 방식). 자체 서명 인증서로 서명해서 업데이트해도 권한이 남는다
   - [~] M2b: 모드 HUD(커서 근처 G/ㅊ/月, 설정 `[mac]`) 완료. 입력 소스 복구, 비밀번호 칸 Graphite(나중에)
   - [x] M2c: 설정 앱(0.4.0, 0.5.0에서 다시 짬). 메뉴 막대 cssgsg → "설정…"(메뉴는 설정·다시 시작·종료뿐). 화면 언어 한국어·English·日本語
-    - 일반: 단축키 녹화(영어 ↔ 비영어, 한 ↔ 일, 한자), 탭 인식 시간, 빠른 탭 전환 보정, 후보 글자 크기, HUD, Electron Shift+Enter 대기
-    - 한국어: 배열, 한자 기억. 일본어: 변환 키(Space·Tab), 기호(구두점·・·¥·전각 공백), 가타카나, 개인 사전(Mozc), 변환 단축키 설명서
+    - 일반: 단축키 녹화(영어 ↔ 비영어, 한 ↔ 일, 한자), 탭 인식 시간, 후보 글자 크기, HUD, 조합 중 Shift+Enter 줄바꿈 대기 조정
+    - 한국어: 배열, 한자 기억. 일본어: 변환 키(Space·Tab), 기호(구두점·공백 전각/반각·・·¥), 가타카나, 개인 사전(Mozc), 변환 단축키 설명서
     - 배열 학습(배열마다 따로), 정보(버전, 입력 소스·키 보내기 권한, 업데이트, 화면 언어, 파일)
     - 바꾸면 입력기가 바로 다시 읽는다(다시 시작 없음). 원본은 늘 `config.toml`이고 직접 고쳐도 된다
 - [x] 일본어 한자 변환: Mozc를 입력기 프로세스 안에 정적 링크(0.2.0, [mozc/README.md](mozc/README.md))
-- [x] 한국어 한자 변환(0.3.1, Option+Enter, [CONCEPT.md](CONCEPT.md) §5.4): 조합 중인 글자 하나를 libhangul 사전으로 바꾼다.
+- [x] 한국어 한자 변환(0.3.1, 왼쪽 Option+Return(설정에서 바꾼다), [CONCEPT.md](CONCEPT.md) §5.4): 조합 중인 글자 하나를 libhangul 사전으로 바꾼다.
   후보창에 뜻(國 나라 국)을 같이 보이고, 자음 하나 + Option+Return은 기호표(ㅁ → ※☆★…). 고른 후보를 기억한다
 - [ ] Windows TSF (나중)
 
@@ -104,7 +104,8 @@ bash tools/mac/release.sh 0.1.1 --notes-file docs/releases/v0.1.1.md    # 검사
 ### 키열 문법
 
 보통 글자는 쿼티 자리, 대문자와 Shift 기호는 Shift. `{sp}` `{bs}` `{ent}` `{esc}` `{tab}` `{left}` …,
-`{rs}` `{ls}`(오른쪽/왼쪽 Shift 탭), `{caps}`, `{click}`, `{M-c}`(⌘C), `{A-ent}`(Option+Enter, 한자) 같은 식이다.
+`{rs}` `{ls}`(오른쪽/왼쪽 Shift 탭), `{caps}`, `{click}`, `{M-c}`(⌘C), `{A-ent}`(왼쪽 Option+Enter, 한자) 같은 식이다.
+수식키 조합은 입력기가 받는 순서대로 수식키 누름 → 키 → 수식키 뗌으로 보낸다.
 예: `cargo run -q -p cssgsg-cli -- type "ishfsudskre{A-ent}"` → 대한민國(조합 중인 국만 바뀐다).
 
 ## 검증
@@ -119,7 +120,7 @@ cd tools/ohi-oracle && npm install && node diff.mjs --count 20000   # 참신 조
 node tools/learn/build.mjs --check                # 학습 페이지 예시를 엔진으로 확인, index.html이 최신인지
 bash tools/mac/shell-smoke/run.sh                  # 맥 셸 Swift 계층(진짜 NSEvent) ↔ 러스트 시뮬레이터
 bash tools/mac/update-smoke/run.sh                 # 업데이트 코드: 버전 순서, 채널(정식·베타), GitHub 응답, 해시, 설치 스크립트
-bash tools/mac/settings-smoke/run.sh               # 설정 앱: 단축키 녹화(가짜 키 이벤트), 화면 글자, 사전 읽기 정리 (--shots: 화면 스냅숏)
+bash tools/mac/settings-smoke/run.sh               # 설정 앱: 단축키 녹화(가짜 키 이벤트, 좌우), 화면 글자, 사전 읽기 정리 (--shots: 화면 스냅숏)
 cargo test -p cssgsg-core --features mozc --test mozc   # 일본어 한자 변환(Mozc, 먼저 bash tools/mozc/build.sh)
 ```
 

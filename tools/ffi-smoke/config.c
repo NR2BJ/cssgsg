@@ -22,18 +22,19 @@ int main(void) {
     CHECK(toml != NULL && strstr(toml, "\nfull_width_space = true\n") != NULL);
     /* 파일 → JSON: 적은 값과 기본값 */
     json = cssgsg_config_json("[mac]\nhud = false\n");
-    CHECK(json != NULL && strstr(json, "\"hud\":false") != NULL && strstr(json, "\"newline_replay_ms\":120") != NULL);
+    CHECK(json != NULL && strstr(json, "\"hud\":false") != NULL && strstr(json, "\"newline_delay_offset_ms\":0") != NULL);
     /* 오류 */
     CHECK(cssgsg_config_json("tap_threshold_ms = 1") == NULL);
     CHECK(strstr(cssgsg_config_error(), "tap_threshold_ms") != NULL);
-    CHECK(cssgsg_config_toml("{\"mac\":{\"newline_replay_ms\":5}}") == NULL);
-    CHECK(strstr(cssgsg_config_error(), "newline_replay_ms") != NULL);
+    CHECK(cssgsg_config_toml("{\"mac\":{\"newline_delay_offset_ms\":80}}") == NULL);
+    CHECK(strstr(cssgsg_config_error(), "newline_delay_offset_ms") != NULL);
     /* 단축키는 글자열이고, 틀린 것은 까닭과 함께 거부한다 */
     json = cssgsg_config_json(NULL);
     CHECK(json != NULL && strstr(json, "\"toggle_english\":\"tap:shift_right\"") != NULL
-          && strstr(json, "\"hanja\":\"alt+enter\"") != NULL && strstr(json, "\"candidate_font_size\":14") != NULL);
-    toml = cssgsg_config_toml("{\"shortcuts\":{\"toggle_non_english\":\"control+shift+space\"}}");
-    CHECK(toml != NULL && strstr(toml, "\ntoggle_non_english = \"control+shift+space\"\n") != NULL);
+          && strstr(json, "\"hanja\":\"alt_left+enter\"") != NULL && strstr(json, "\"candidate_font_size\":14") != NULL);
+    toml = cssgsg_config_toml("{\"shortcuts\":{\"toggle_non_english\":\"control_left+shift_right+space\"}}");
+    CHECK(toml != NULL && strstr(toml, "\ntoggle_non_english = \"control_left+shift_right+space\"\n") != NULL);
+    CHECK(cssgsg_config_toml("{\"shortcuts\":{\"hanja\":\"meta_left+enter\"}}") == NULL); /* ⌘ 조합 */
     CHECK(cssgsg_config_toml("{\"shortcuts\":{\"hanja\":\"a\"}}") == NULL);
     CHECK(strstr(cssgsg_config_error(), "hanja") != NULL);
     CHECK(cssgsg_config_toml("{\"shortcuts\":{\"toggle_non_english\":\"tap:shift_right\"}}") == NULL);

@@ -22,6 +22,11 @@ struct SettingsApp: App {
 }
 
 final class SettingsAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // 배열 학습 페이지를 미리 읽어 둔다(탭을 누르면 바로 보이게).
+        _ = LearnPage.shared
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 }
 

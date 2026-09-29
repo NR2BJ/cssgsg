@@ -175,21 +175,23 @@ fn reload_picks_up_the_user_dictionary() {
     let _serial = serial();
     let (_, profile) = paths();
     let mut m = mozc();
-    let reading = "くもつくもつ";
-    let word = "蜘蛛津雲津";
-    let has_word = |m: &mut MozcConverter| {
+    // 두 번째 읽기에는 작은 가나(ゃ っ)와 장음 부호(ー)가 있다(NRIME 때 등록이 안 되던 것).
+    let words = [("くもつくもつ", "蜘蛛津雲津"), ("ちゃっきゅーもつ", "茶っ究ー津")];
+    let has_word = |m: &mut MozcConverter, (reading, word): (&str, &str)| {
         let v = m.start(reading).unwrap();
         m.cancel();
         v.candidates.iter().any(|c| c == word)
     };
-    assert!(!has_word(&mut m), "사전에 없는 낱말로 시험한다");
+    for w in words {
+        assert!(!has_word(&mut m, w), "사전에 없는 낱말로 시험한다: {w:?}");
+    }
     let path = std::path::Path::new(&profile).join("user_dictionary.db");
-    std::fs::write(&path, user_dictionary(&[(reading, word)])).unwrap();
+    std::fs::write(&path, user_dictionary(&words)).unwrap();
     m.reload();
     // Mozc는 사용자 사전을 뒤에서 읽는다: 조금 기다린다.
     let found = (0..40).any(|_| {
         std::thread::sleep(std::time::Duration::from_millis(50));
-        has_word(&mut m)
+        words.iter().all(|&w| has_word(&mut m, w))
     });
     std::fs::remove_file(&path).ok();
     m.reload();

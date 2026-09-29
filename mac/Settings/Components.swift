@@ -21,6 +21,8 @@ struct ValueSlider: View {
     let range: ClosedRange<Double>
     let step: Double
     var unit = "ms"
+    /// 0을 가운데 둔 조정값이면 +/-를 붙인다.
+    var signed = false
     let commit: (Int) -> Void
     @State private var draft: Double?
 
@@ -33,10 +35,14 @@ struct ValueSlider: View {
                 }
             }
             .frame(minWidth: 160)
-            Text("\(Int((draft ?? Double(value)).rounded()))\(unit)")
+            Text(label(Int((draft ?? Double(value)).rounded())))
                 .monospacedDigit()
                 .frame(minWidth: 52, alignment: .trailing)
         }
+    }
+
+    private func label(_ v: Int) -> String {
+        signed && v > 0 ? "+\(v)\(unit)" : "\(v)\(unit)"
     }
 }
 
