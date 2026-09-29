@@ -1,6 +1,8 @@
-// 맥 셸 스모크 테스트의 타자기. 셸의 KeyTranslation.swift(ModifierState), CoreEngine.swift와 같이 빌드한다(run.sh).
+// 맥 셸 스모크 테스트의 타자기. 셸의 KeyTranslation.swift(ModifierState), CoreEngine.swift,
+// TextApplier.swift와 같이 빌드한다(run.sh).
 //
 // CGEvent로 만든 진짜 NSEvent를 IMKit 컨트롤러가 받는 순서대로 셸 코드에 넣고, 앱 화면을 흉내 낸다.
+// 글자는 입력기와 같은 TextApplier가 가짜 문서(FakeDocument, NSTextInputClient 규칙)에 넣는다.
 // 키열 문법과 화면 규칙은 러스트 시뮬레이터(core/src/sim.rs)와 같아서 cssgsg-cli batch와 줄마다 비교할 수 있다.
 //
 // 러스트 시뮬레이터와 일부러 다르게 한 것(실제 입력 흐름에 맞춘다)
@@ -122,14 +124,86 @@ func makeEvent(_ type: CGEventType, code: UInt16, flags: UInt64, at seconds: Dou
     return NSEvent(cgEvent: cg)!
 }
 
+// MARK: - 가짜 문서
+
+/// NSTextInputClient 규칙대로 움직이는 문서. 커서는 늘 조합 글자 끝(=문서 끝)이다(러스트 시뮬레이터와 같다).
+/// 앱마다 다른 점을 흉내 내는 스위치(입력기에 보이는 것만 바뀌고 문서 자체는 규칙대로 움직인다).
+final class FakeDocument: TextClient {
+    let storage = NSMutableString()
+    private(set) var marked: NSRange?
+    var selection = NSRange(location: 0, length: 0)
+    /// replacementRange를 무시하는 앱.
+    var ignoresReplacementRange = false
+    /// 글자를 읽어 주지 않는 앱(Chromium은 조합 중에 조합 밖 글자를 주지 않는다).
+    var readable = true
+    /// 조합 글자 자리를 알려 주지 않는 앱.
+    var reportsMarkedRange = true
+    /// 조합 글자 자리를 틀리게 알려 주는 앱(이 위치라고 한다).
+    var reportedMarkedLocation: Int?
+
+    var string: String { storage as String }
+
+    /// 바꿀 구간: replacementRange가 있으면 그것, 없으면 조합 글자, 그것도 없으면 선택.
+    private func target(_ replacement: NSRange) -> NSRange {
+        if replacement.location != NSNotFound && !ignoresReplacementRange { return replacement }
+        return marked ?? selection
+    }
+
+    func insertText(_ text: String, replacementRange: NSRange) {
+        let r = target(replacementRange)
+        storage.replaceCharacters(in: r, with: text)
+        marked = nil
+        selection = NSRange(location: r.location + (text as NSString).length, length: 0)
+    }
+
+    func setMarkedText(_ text: Any, selectionRange: NSRange, replacementRange: NSRange) {
+        let s = (text as? NSAttributedString)?.string ?? (text as? String) ?? ""
+        let r = target(replacementRange)
+        storage.replaceCharacters(in: r, with: s)
+        let length = (s as NSString).length
+        marked = length > 0 ? NSRange(location: r.location, length: length) : nil
+        selection = NSRange(location: r.location + min(selectionRange.location, length), length: 0)
+    }
+
+    func markedRange() -> NSRange {
+        guard reportsMarkedRange, let m = marked else { return NSRange(location: NSNotFound, length: 0) }
+        return NSRange(location: reportedMarkedLocation ?? m.location, length: m.length)
+    }
+    func selectedRange() -> NSRange { selection }
+
+    func substring(_ range: NSRange) -> String? {
+        guard readable, range.location != NSNotFound, NSMaxRange(range) <= storage.length else { return nil }
+        return storage.substring(with: range)
+    }
+
+    /// 앱이 받은 글자 키. 시뮬레이터처럼 확정 글자 끝(조합 글자 앞)에 넣는다.
+    func typed(_ text: String) {
+        let at = marked?.location ?? selection.location
+        storage.insert(text, at: at)
+        let n = (text as NSString).length
+        if let m = marked { marked = NSRange(location: m.location + n, length: m.length) }
+        selection.location += n
+    }
+
+    /// 앱이 받은 Backspace: 확정 글자 끝의 한 글자(유니코드 스칼라)를 지운다.
+    func deleteBackward() {
+        let end = marked?.location ?? selection.location
+        guard end > 0 else { return }
+        let low = (0xDC00...0xDFFF).contains(Int(storage.character(at: end - 1)))
+        let n = low && end >= 2 ? 2 : 1
+        storage.deleteCharacters(in: NSRange(location: end - n, length: n))
+        if let m = marked { marked = NSRange(location: m.location - n, length: m.length) }
+        selection.location -= n
+    }
+}
+
 // MARK: - 타자기
 
 /// 키열을 IMKit 이벤트 순서대로 셸 코드(ModifierState → CoreEngine)에 넣고 앱 화면을 흉내 낸다.
 final class Typist {
     let engine = CoreEngine(configTOML: nil)
     let layout: AbcLayout
-    private(set) var text = ""
-    private(set) var preedit = ""
+    let doc = FakeDocument()
     private(set) var mode: InputMode
     /// 마지막으로 엔진에 넣은 키 이벤트와 그 NSEvent(자체 점검용).
     private(set) var lastKey: CssgsgKeyEvent?
@@ -154,7 +228,7 @@ final class Typist {
         apply(engine.setMode(mode))
     }
 
-    var screen: String { text + preedit }
+    var screen: String { doc.string }
 
     private var flags: UInt64 {
         let all = held | (caps ? Flag.alphaShift : 0) | Flag.nonCoalesced
@@ -210,24 +284,35 @@ final class Typist {
         let key = modifiers.keyDown(event)
         lastEvent = event
         lastKey = key
-        let out = engine.handle(key)
-        apply(out)
+        var out = engine.handle(key)
+        if let context = out.hanjaContext {
+            // 입력기 컨트롤러와 같다: 앱 글자를 읽어 변환을 시작하고, 글자는 TextApplier가 이미 넣었다.
+            let (result, trace) = TextApplier.beginHanja(context, engine: engine, doc: doc)
+            lastHanja = trace
+            applyNonText(result)
+            out = result
+        } else {
+            apply(out)
+        }
         clock += 0.03
         guard !out.consumed, event.modifierFlags.intersection([.command, .control, .option]).isEmpty else { return }
         // 엔진이 넘긴 키는 앱이 ABC 배열대로 처리한다.
         switch Int(code) {
         case kVK_Delete:
-            if !text.isEmpty { text.unicodeScalars.removeLast() }
+            doc.deleteBackward()
         case kVK_Return, kVK_ANSI_KeypadEnter:
-            text += "\n"
+            doc.typed("\n")
         case kVK_Tab:
-            text += "\t"
+            doc.typed("\t")
         default:
             if let c = layout.char(code, shift: event.modifierFlags.contains(.shift), caps: caps) {
-                text.append(c)
+                doc.typed(String(c))
             }
         }
     }
+
+    /// 마지막 한자 변환 시작 과정(자체 점검용).
+    private(set) var lastHanja: TextApplier.HanjaTrace?
 
     func click() {
         deliverPending()
@@ -235,13 +320,11 @@ final class Typist {
     }
 
     private func apply(_ out: EngineOutput) {
-        if !out.commit.isEmpty {
-            text += out.commit
-            preedit = ""
-        }
-        if let p = out.preedit {
-            preedit = p.text
-        }
+        TextApplier.apply(out, to: doc)
+        applyNonText(out)
+    }
+
+    private func applyNonText(_ out: EngineOutput) {
         if let m = out.mode {
             mode = m
         }

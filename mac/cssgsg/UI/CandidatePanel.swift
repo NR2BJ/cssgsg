@@ -14,6 +14,10 @@ final class CandidatePanel {
     /// All candidate strings (full list across all pages).
     private(set) var candidates: [String] = []
 
+    /// cssgsg: 후보마다 같이 보일 뜻(한자 훈음 등). 없으면 빈 배열.
+    /// 목록에서는 후보 옆에 흐리게, 격자에서는 고른 후보의 뜻을 아래 페이지 줄에 보인다.
+    private(set) var notes: [String] = []
+
     /// Currently selected index in the full candidate list.
     private(set) var selectedIndex: Int = 0
 
@@ -68,8 +72,10 @@ final class CandidatePanel {
 
     /// Show the candidate panel with the given candidates, positioned near the caret.
     /// cssgsg: 목록/격자 모드는 엔진이 정한다(Tab은 엔진이 처리한다). candidates는 전체 후보, selectedIndex는 전체 기준.
-    func show(candidates: [String], selectedIndex: Int = 0, grid: Bool = false, client: (any IMKTextInput)? = nil) {
+    func show(candidates: [String], notes: [String] = [], selectedIndex: Int = 0, grid: Bool = false,
+              client: (any IMKTextInput)? = nil) {
         self.candidates = candidates
+        self.notes = notes.count == candidates.count ? notes : []
         self.selectedIndex = max(0, min(selectedIndex, candidates.count - 1))
 
         if candidates.isEmpty {
@@ -149,6 +155,11 @@ final class CandidatePanel {
         guard index >= 0 && index < candidates.count else { return }
         selectedIndex = index
         updateDisplay()
+    }
+
+    /// cssgsg: index번 후보의 뜻(없으면 "").
+    private func note(at index: Int) -> String {
+        index >= 0 && index < notes.count ? notes[index] : ""
     }
 
     /// Get the currently selected candidate string, or nil if empty.
@@ -278,13 +289,13 @@ final class CandidatePanel {
         let fontSize = cachedFontSize
 
         // List mode: measure all candidates to find the widest
-        let listAttrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: fontSize)]
         var listMaxWidth: CGFloat = 160
-        for item in candidates {
-            let size = (item as NSString).size(withAttributes: listAttrs)
+        for (i, item) in candidates.enumerated() {
+            let size = CandidateRowView.rowText(item, note: note(at: i), selected: false, fontSize: fontSize).size()
             listMaxWidth = max(listMaxWidth, size.width + 50)
         }
-        cachedListMaxWidth = min(listMaxWidth, 400)
+        // 뜻이 있으면(한자) 조금 더 넓게 둔다. 넘치면 뜻 끝이 …로 잘린다.
+        cachedListMaxWidth = min(listMaxWidth, notes.isEmpty ? 400 : 480)
 
         // Reset grid cache — will be computed on first grid display
         cachedGridCellWidth = 0
@@ -377,6 +388,7 @@ final class CandidatePanel {
             let row = CandidateRowView(
                 number: number == 0 ? 0 : number,
                 text: item,
+                note: note(at: globalIndex),
                 isSelected: isSelected,
                 width: maxWidth,
                 fontSize: fontSize,
@@ -423,7 +435,9 @@ final class CandidatePanel {
         let bottomPadding: CGFloat = 4
         let pageLabelHeight = max(16, ceil(pageFontSize * 1.6))
         let pageLabelSpacing: CGFloat = 2
-        let showPageLabel = totalPages > 1
+        // cssgsg: 격자 칸에는 뜻을 못 넣으니, 고른 후보의 뜻을 페이지 줄에 같이 보인다.
+        let selectedNote = note(at: selectedIndex)
+        let showPageLabel = totalPages > 1 || !selectedNote.isEmpty
         let pageIndicatorHeight: CGFloat = showPageLabel ? (pageLabelSpacing + pageLabelHeight) : 0
         let gridHeight = CGFloat(actualRows) * cellHeight
         let totalHeight = topPadding + gridHeight + pageIndicatorHeight + bottomPadding
@@ -442,7 +456,9 @@ final class CandidatePanel {
         )
 
         if showPageLabel {
-            pageLabel.stringValue = "\(page + 1)/\(totalPages)"
+            let pages = totalPages > 1 ? "\(page + 1)/\(totalPages)" : ""
+            pageLabel.stringValue = [selectedNote, pages].filter { !$0.isEmpty }.joined(separator: "   ")
+            pageLabel.lineBreakMode = .byTruncatingHead
             pageLabel.isHidden = false
             pageLabel.frame = NSRect(x: 0, y: bottomPadding,
                                      width: panelWidth, height: pageLabelHeight)
@@ -588,15 +604,37 @@ final class CandidatePanel {
 
 // MARK: - CandidateRowView
 
-/// A single row in the candidate panel: [number] [text]
+/// A single row in the candidate panel: [number] [text] [note]
 private class CandidateRowView: NSView {
 
     private let numberLabel: NSTextField
     private let textLabel: NSTextField
+    /// cssgsg: 후보 뒤에 흐리게 붙이는 뜻(없으면 "").
+    private let text: String
+    private let note: String
+    private let fontSize: CGFloat
 
-    init(number: Int, text: String, isSelected: Bool, width: CGFloat,
+    /// cssgsg: 후보 글자와 뜻을 한 줄로(같은 기준선). 뜻은 작고 흐리게.
+    static func rowText(_ text: String, note: String, selected: Bool, fontSize: CGFloat) -> NSAttributedString {
+        let s = NSMutableAttributedString(string: text, attributes: [
+            .font: NSFont.systemFont(ofSize: fontSize),
+            .foregroundColor: selected ? NSColor.white : NSColor.labelColor,
+        ])
+        if !note.isEmpty {
+            s.append(NSAttributedString(string: "  " + note, attributes: [
+                .font: NSFont.systemFont(ofSize: max(8, fontSize - 3)),
+                .foregroundColor: selected ? NSColor(white: 1, alpha: 0.75) : NSColor.secondaryLabelColor,
+            ]))
+        }
+        return s
+    }
+
+    init(number: Int, text: String, note: String = "", isSelected: Bool, width: CGFloat,
          fontSize: CGFloat = 14, numberFontSize: CGFloat = 12, rowHeight: CGFloat = 24) {
         let numberWidth = max(22, ceil(numberFontSize * 1.8))
+        self.text = text
+        self.note = note
+        self.fontSize = fontSize
 
         numberLabel = NSTextField(labelWithString: number > 0 ? "\(number)." : "")
         numberLabel.font = NSFont.monospacedDigitSystemFont(ofSize: numberFontSize, weight: .regular)
@@ -648,10 +686,10 @@ private class CandidateRowView: NSView {
         } else {
             layer?.backgroundColor = NSColor.clear.cgColor
         }
-        let textColor: NSColor = isSelected ? .white : .labelColor
         let secondaryColor: NSColor = isSelected ? .init(white: 1, alpha: 0.7) : .secondaryLabelColor
         numberLabel.textColor = secondaryColor
-        textLabel.textColor = textColor
+        textLabel.attributedStringValue = Self.rowText(text, note: note, selected: isSelected, fontSize: fontSize)
+        textLabel.lineBreakMode = .byTruncatingTail
     }
 }
 

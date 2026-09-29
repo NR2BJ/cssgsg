@@ -21,15 +21,18 @@
   - [~] M2b: 모드 HUD(커서 근처 G/ㅊ/月, 설정 `[mac]`) 완료. 입력 소스 복구, 비밀번호 칸 Graphite(나중에)
   - [ ] M2c: 설정 앱(학습 탭 포함). 그전까지는 메뉴 막대 → "설정 파일 열기"로 `config.toml`을 고친다
 - [x] 일본어 한자 변환: Mozc를 입력기 프로세스 안에 정적 링크(0.2.0, [mozc/README.md](mozc/README.md))
-- [ ] 한국어 한자 변환(Option+Enter): 조사 끝, 설계는 [CONCEPT.md](CONCEPT.md) §5.4
+- [x] 한국어 한자 변환(0.3.0, Option+Enter, [CONCEPT.md](CONCEPT.md) §5.4): libhangul 사전(30만 항목)을 코어에 넣었다.
+  조합 중 음절과 커서 앞 한글(또는 선택한 글)을 조합으로 끌어와 바꾸고, 길이가 다른 후보(大韓民國·民國·國)를 한 목록에 뜻과 같이 보인다.
+  자음 하나 + Option+Enter는 기호표(ㅁ → ※☆★…). 고른 후보를 기억한다
 - [ ] 설정 앱(학습 탭 포함)
 - [ ] Windows TSF (나중)
 
 ## 구조
 
 ```
-core/       Rust 코어: key, hangul, latin, kana, engine, ffi, sim
+core/       Rust 코어: key, hangul, hanja, latin, kana, engine, ffi, sim
 layouts/    배열 데이터 (ko: 참신세벌식 TOML, en: Graphite, ja: 新月 공식 TSV 원본)
+dict/       사전 원본 (ko: libhangul 한자·기호 사전, 고치지 않고 코어에 넣는다)
 cli/        cssgsg-cli: 터미널에서 쳐보는 도구
 mac/        macOS 입력기(Swift + InputMethodKit). project.yml → xcodegen → cssgsg.xcodeproj(생성물, 커밋 안 함)
 mozc/       Mozc C API 래퍼(cssgsg용). 소스·빌드는 build/mozc, build/mozc-out(tools/mozc/build.sh)
@@ -95,7 +98,8 @@ bash tools/mac/release.sh 0.1.1 --notes-file docs/releases/v0.1.1.md    # 검사
 ### 키열 문법
 
 보통 글자는 쿼티 자리, 대문자와 Shift 기호는 Shift. `{sp}` `{bs}` `{ent}` `{esc}` `{tab}` `{left}` …,
-`{rs}` `{ls}`(오른쪽/왼쪽 Shift 탭), `{caps}`, `{click}`, `{M-c}`(⌘C) 같은 식이다.
+`{rs}` `{ls}`(오른쪽/왼쪽 Shift 탭), `{caps}`, `{click}`, `{M-c}`(⌘C), `{A-ent}`(Option+Enter, 한자) 같은 식이다.
+시뮬레이터는 한자 변환에 커서 앞 글자를 준다: `cargo run -q -p cssgsg-cli -- type "ishfsudskre{A-ent}"` → 大韓民國.
 
 ## 검증
 
@@ -125,3 +129,5 @@ MIT ([LICENSE](LICENSE)). 배열 데이터의 원래 라이선스는 아래 출�
 - 참신세벌식: 원작자 공빈의 [확정안](https://cafe.daum.net/3bulsik/JMKX/147)(2026-02-12 수정)과 날개셋 `.ist` 속 사용법. `.ist` 파일 자체는 레포에 넣지 않는다.
 - Graphite: [rdavison/graphite-layout](https://github.com/rdavison/graphite-layout) (MIT, 검증용 공식 keylayout은 `layouts/en/official/`)
 - 新月配列: [nagamine-git/shingetsu-layout](https://github.com/nagamine-git/shingetsu-layout) (MIT, `layouts/ja/shingetsu/`에 원본 TSV, 검증용 로마자 표, 라이선스)
+- 한자·기호 사전: [libhangul](https://github.com/libhangul/libhangul) `data/hanja`의 `hanja.txt`·`mssymbol.txt` (파일마다 BSD-3 고지, `dict/ko/`에 원본과 라이선스). 라이브러리 코드는 쓰지 않는다.
+- 앱에 들어가는 다른 소프트웨어·데이터 고지문 전체는 [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt)(`bash tools/make-notices.sh`로 만든다).

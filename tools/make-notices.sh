@@ -28,6 +28,7 @@ trap 'rm -f "$TMP"' EXIT
   section "zlib" "https://zlib.net" "$EXT/zlib+/LICENSE"
   section "Graphite keyboard layout" "https://github.com/rdavison/graphite-layout" "$ROOT/layouts/en/official/LICENSE"
   section "Shingetsu (新月配列) layout data" "https://github.com/nagamine-git/shingetsu-layout" "$ROOT/layouts/ja/shingetsu/LICENSE"
+  section "libhangul hanja dictionary data (hanja.txt, mssymbol.txt)" "https://github.com/libhangul/libhangul/tree/main/data/hanja  commit $(awk -F'`' '/고정 커밋/ {print $2; exit}' "$ROOT/dict/ko/README.md")" "$ROOT/dict/ko/LICENSE"
 } > "$TMP"
 
 if [ "${1:-}" = "--check" ]; then

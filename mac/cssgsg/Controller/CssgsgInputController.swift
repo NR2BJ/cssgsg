@@ -70,6 +70,9 @@ final class CssgsgInputController: IMKInputController {
             if secure {
                 return false
             }
+            if let context = out.hanjaContext {
+                return beginHanja(context, client: client)
+            }
             return finish(out, event: event, client: client)
 
         default:
@@ -105,41 +108,46 @@ final class CssgsgInputController: IMKInputController {
         return out.consumed
     }
 
+    /// 한자 키: 앱 글자를 읽어 변환을 시작한다. 바꿀 것이 없으면 false(Option+Enter를 앱에 넘긴다).
+    private func beginHanja(_ context: HanjaContext, client: any IMKTextInput) -> Bool {
+        let (out, trace) = TextApplier.beginHanja(context, engine: CoreEngine.shared, doc: IMKTextClient(client: client))
+        applyUI(out, client: client)
+        DeveloperLogger.shared.log("Hanja", "begin", metadata: [
+            "anchor": context == .composing ? "composing" : "caret",
+            "anchorKnown": "\(trace.anchorKnown)",
+            "beforeLen": trace.beforeLength.map { "\($0)" } ?? "unreadable",
+            "selectedLen": "\(trace.selectedLength)",
+            "selectionUnreadable": "\(trace.selectionUnreadable)",
+            "replaceBefore": "\(trace.replaceBefore)",
+            "restarted": "\(trace.restarted)",
+            "consumed": "\(out.consumed)",
+            "app": client.bundleIdentifier() ?? "unknown",
+        ])
+        return out.consumed
+    }
+
     private func apply(_ out: EngineOutput, client: any IMKTextInput, allowCommit: Bool = true) {
         // 모드가 바뀌면 HUD를 띄운다. 자리는 확정하기 전에 잰다(확정한 뒤에는 앱마다 커서 자리가 어긋난다).
         let settings = CoreEngine.shared.macSettings
         let hudCaret: NSRect? = out.mode != nil && settings.hud != 0 && settings.hud_at_mouse == 0
             ? TextInputGeometry.caretRect(for: client)?.rect : nil
-        let replacement = NSRange(location: NSNotFound, length: NSNotFound)
-        let committed = !out.commit.isEmpty && allowCommit
-        if committed {
-            client.insertText(out.commit as NSString, replacementRange: replacement)
-        } else if !out.commit.isEmpty {
+        if !out.commit.isEmpty && !allowCommit {
             DeveloperLogger.shared.log("Controller", "commit dropped in secure field", metadata: ["length": "\(out.commit.count)"])
         }
-        if let preedit = out.preedit {
-            if !preedit.text.isEmpty {
-                client.setMarkedText(
-                    Self.marked(preedit),
-                    selectionRange: NSRange(location: preedit.caret, length: 0),
-                    replacementRange: replacement
-                )
-            } else if !committed {
-                // 확정 없이 조합이 사라졌을 때만 지운다. insertText가 이미 조합 글자를 대신했으면 부르지 않는다.
-                client.setMarkedText(
-                    "" as NSString,
-                    selectionRange: NSRange(location: 0, length: 0),
-                    replacementRange: replacement
-                )
-            }
-        }
+        TextApplier.apply(out, to: IMKTextClient(client: client), allowCommit: allowCommit)
+        applyUI(out, client: client, hudCaret: hudCaret)
+    }
+
+    /// 글자 밖의 것: 후보창, 모드 표시와 HUD, Caps Lock, 한자 학습 저장.
+    private func applyUI(_ out: EngineOutput, client: any IMKTextInput, hudCaret: NSRect? = nil) {
+        let settings = CoreEngine.shared.macSettings
         switch out.candidates {
         case .unchanged:
             break
         case .hide:
             NSApp.candidatePanel?.hide()
-        case let .show(items, selected, grid):
-            NSApp.candidatePanel?.show(candidates: items, selectedIndex: selected ?? 0, grid: grid, client: client)
+        case let .show(items, notes, selected, grid):
+            NSApp.candidatePanel?.show(candidates: items, notes: notes, selectedIndex: selected ?? 0, grid: grid, client: client)
         }
         if let mode = out.mode {
             (NSApp.delegate as? AppDelegate)?.updateStatus(mode)
@@ -150,20 +158,9 @@ final class CssgsgInputController: IMKInputController {
         if out.capsLockOff {
             CapsLock.set(false)
         }
-    }
-
-    /// 조합 중 글자에 밑줄. 변환 중이면 문절마다 나누고 포커스된 문절은 굵게.
-    private static func marked(_ p: PreeditUpdate) -> NSAttributedString {
-        let s = NSMutableAttributedString(string: p.text)
-        let full = NSRange(location: 0, length: s.length)
-        if p.segments.isEmpty {
-            s.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: full)
+        if out.learningChanged {
+            HanjaLearningStore.shared.scheduleSave()
         }
-        for (i, seg) in p.segments.enumerated() where NSMaxRange(seg.range) <= s.length {
-            let style: NSUnderlineStyle = seg.focused ? .thick : .single
-            s.addAttributes([.underlineStyle: style.rawValue, .markedClauseSegment: i], range: seg.range)
-        }
-        return s
     }
 
     // MARK: - 활성화 / 비활성화
@@ -231,5 +228,26 @@ final class CssgsgInputController: IMKInputController {
             "preeditLen": "\(out.preedit?.text.count ?? -1)",
             "mode": out.mode.map { "\($0.rawValue)" } ?? "-",
         ])
+    }
+}
+
+/// IMK 클라이언트를 TextApplier가 쓰는 모양으로 감싼다.
+struct IMKTextClient: TextClient {
+    let client: any IMKTextInput
+
+    func insertText(_ text: String, replacementRange: NSRange) {
+        client.insertText(text as NSString, replacementRange: replacementRange)
+    }
+
+    func setMarkedText(_ text: Any, selectionRange: NSRange, replacementRange: NSRange) {
+        client.setMarkedText(text, selectionRange: selectionRange, replacementRange: replacementRange)
+    }
+
+    func markedRange() -> NSRange { client.markedRange() }
+
+    func selectedRange() -> NSRange { client.selectedRange() }
+
+    func substring(_ range: NSRange) -> String? {
+        client.attributedSubstring(from: range)?.string
     }
 }

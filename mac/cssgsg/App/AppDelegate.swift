@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let engine = CoreEngine.shared
         KeyEventReposter.replayDelay = TimeInterval(engine.macSettings.newline_replay_ms) / 1000
         startMozc(engine)
+        HanjaLearningStore.shared.load(into: engine)
         setupStatusItem()
         updateStatus(engine.mode)
         InputSourceSetup.register()
@@ -30,6 +31,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             "version": Updater.currentVersion,
             "configError": engine.configError ?? "none",
         ])
+    }
+
+    /// 끝낼 때(메뉴의 다시 시작 포함) 한자 학습을 바로 저장한다(평소에는 2초씩 모아 저장).
+    func applicationWillTerminate(_ notification: Notification) {
+        HanjaLearningStore.shared.saveNow()
     }
 
     /// Mozc(일본어 한자 변환)를 켠다. 준비는 10~20ms라 시작할 때 바로 한다.

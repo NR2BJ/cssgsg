@@ -18,7 +18,7 @@ const UPPER = [..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"];
 const OTHER = [..."0123456789-=`\\!@#$%^&*()_+~|:\"<>?"];
 const SPECIAL = [
   "{sp}", "{sp}", "{bs}", "{bs}", "{ent}", "{esc}", "{tab}", "{rs}", "{ls}", "{caps}", "{click}",
-  "{left}", "{del}", "{S-ent}", "{S-sp}", "{S-[}", "{S-]}", "{M-a}", "{C-c}", "{A-a}",
+  "{left}", "{del}", "{S-ent}", "{S-sp}", "{S-[}", "{S-]}", "{M-a}", "{C-c}", "{A-a}", "{A-ent}",
 ];
 
 const lines = [];

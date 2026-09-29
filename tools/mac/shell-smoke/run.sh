@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # 맥 셸 스모크 테스트: 셸의 Swift 계층(NSEvent → KeyTranslation → CoreEngine → C ABI)을 검증한다.
 #
-# 1. 자체 점검: 수식키 좌우·눌림/뗌 판정, NSEvent 시각 단위로 탭 판정, 자동 반복, ABC 배열 표.
+# 1. 자체 점검: 수식키 좌우·눌림/뗌 판정, NSEvent 시각 단위로 탭 판정, 자동 반복, ABC 배열 표,
+#    한자 변환의 앱 글자 끌어오기(보통 앱, replacementRange를 무시하는 앱, 글자를 안 읽어 주는 앱, 선택).
 # 2. 무작위 키열을 모드마다 러스트 시뮬레이터(cssgsg-cli batch)와 셸 코드에 같이 넣고 화면을 줄마다 비교한다.
+#    셸 쪽 글자는 입력기와 같은 TextApplier가 가짜 문서(NSTextInputClient 규칙)에 넣는다. {A-ent}는 한자 변환.
 #    글자 → 맥 키코드는 macOS ABC 배열 데이터에서 얻으므로, 코어의 맥 키코드 표도 같이 검증된다.
 #
 # bash tools/mac/shell-smoke/run.sh [모드별 줄 수, 기본 3000]
@@ -16,7 +18,7 @@ cargo build --release -q -p cssgsg-core -p cssgsg-cli
 mkdir -p "$OUT"
 swiftc -O -module-name shellsmoke \
   -import-objc-header mac/cssgsg/cssgsg-Bridging-Header.h -I core/include \
-  mac/cssgsg/Engine/CoreEngine.swift mac/cssgsg/Engine/KeyTranslation.swift \
+  mac/cssgsg/Engine/CoreEngine.swift mac/cssgsg/Engine/KeyTranslation.swift mac/cssgsg/Engine/TextApplier.swift \
   tools/mac/shell-smoke/Typist.swift tools/mac/shell-smoke/main.swift \
   -L build/cargo/release -lcssgsg_core -o "$OUT/shell-smoke"
 

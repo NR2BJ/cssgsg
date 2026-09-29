@@ -8,6 +8,7 @@ pub mod convert;
 pub mod engine;
 pub mod ffi;
 pub mod hangul;
+pub mod hanja;
 pub mod hotkey;
 pub mod kana;
 pub mod key;
