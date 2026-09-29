@@ -79,34 +79,41 @@ struct GeneralTab: View {
 
             Section {
                 LabeledContent(tr("줄바꿈 대기 조정", "Newline delay adjustment", "改行待ち時間の調整")) {
-                    ValueSlider(value: model.config.mac.newlineDelayOffsetMs, range: -50...50, step: 5, signed: true) { ms in
+                    ValueSlider(value: model.config.mac.newlineDelayOffsetMs, range: -10...50, step: 5, signed: true) { ms in
                         model.update { $0.mac.newlineDelayOffsetMs = ms }
                     }
                 }
-                LabeledContent(tr("지금 대기", "Current delays", "現在の待ち時間")) {
-                    Text(tr("Electron \(model.config.mac.electronDelayMs)ms · Codex \(model.config.mac.codexDelayMs)ms",
-                            "Electron \(model.config.mac.electronDelayMs) ms · Codex \(model.config.mac.codexDelayMs) ms",
-                            "Electron \(model.config.mac.electronDelayMs)ms・Codex \(model.config.mac.codexDelayMs)ms"))
+                LabeledContent(tr("지금 대기", "Current delay", "現在の待ち時間")) {
+                    Text("\(model.config.mac.electronDelayMs)ms")
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
+                }
+                DisclosureGroup(tr("고급", "Advanced", "詳細")) {
+                    LabeledContent(tr("Codex 줄바꿈 대기", "Codex newline delay", "Codex の改行待ち時間")) {
+                        ValueSlider(value: model.config.mac.newlineReplayMs, range: 20...500, step: 10) { ms in
+                            model.update { $0.mac.newlineReplayMs = ms }
+                        }
+                    }
                 }
             } header: {
                 Text(tr("조합 중 Shift+Enter", "Shift+Enter while composing", "変換中の Shift+Enter"))
             } footer: {
                 Text(tr("""
-                    Shift+Enter를 누르면 글자를 확정하고 조금 기다렸다 줄을 바꾼다. 기다리는 시간은 앱 종류마다 따로 있다(더하지 않는다): \
-                    Discord·Slack 같은 Electron 앱은 15ms(⌘+키 다시 보내기도 같다), Codex처럼 Enter를 전송으로 받는 앱은 120ms 뒤에 \
-                    Shift+Enter 키를 다시 보낸다(NRIME에서 찾은 값). 줄바꿈이 확정한 글자를 먹거나 전송되면 늘리고, 느리면 줄인다.
+                    Discord·Slack 같은 Electron 앱: Shift+Enter를 누르면 글자를 확정하고 기본 15ms(NRIME에서 찾은 값)에 조정값을 \
+                    더한 만큼 기다렸다 줄을 바꾼다(⌘+키 다시 보내기도 같다). −10이면 5ms로 가장 짧다. 줄바꿈이 확정한 글자를 먹으면 늘린다.
+                    고급: Codex처럼 Enter를 전송으로 받는 앱은 확정하고 이만큼 기다렸다 Shift+Enter 키를 다시 보낸다. 위 조정과 따로 \
+                    쓰인다(더하지 않는다). 짧으면 줄바꿈이 먹힌다. 기본 120ms는 NRIME 실험값이다.
                     """, """
-                    Shift+Enter commits the text, waits briefly, then starts a new line. Each kind of app has its own wait (they \
-                    don’t add up): Electron apps like Discord and Slack 15 ms (also used to re-send ⌘+key); apps that treat Enter as \
-                    send, like Codex, get Shift+Enter re-sent after 120 ms (values found in NRIME). Increase if the newline eats the \
-                    text or sends the message; decrease if it feels slow.
+                    Electron apps like Discord and Slack: Shift+Enter commits the text, waits 15 ms (found in NRIME) plus the \
+                    adjustment, then starts a new line (⌘+key re-sending uses the same wait). −10 gives the shortest, 5 ms. Increase it \
+                    if the newline eats the committed text.
+                    Advanced: apps that treat Enter as send, like Codex, get Shift+Enter re-sent after this delay. It is separate from \
+                    the adjustment above (they don’t add up). Too short and the newline is lost. The 120 ms default comes from NRIME tests.
                     """, """
-                    Shift+Enter を押すと文字を確定し、少し待ってから改行します。待ち時間はアプリの種類ごとに別です（足し合わせません）：\
-                    Discord・Slack などの Electron アプリは 15ms（⌘+キーの送り直しも同じ）、Codex のように Enter を送信として扱う\
-                    アプリは 120ms 後に Shift+Enter を送り直します（NRIME で見つけた値）。改行が確定した文字を消したり送信されたりしたら\
-                    長く、遅く感じたら短くします。
+                    Discord・Slack などの Electron アプリ：Shift+Enter を押すと文字を確定し、既定の 15ms（NRIME で見つけた値）に調整値を\
+                    足した時間だけ待ってから改行します（⌘+キーの送り直しも同じ）。−10 で最短の 5ms。改行が確定した文字を消すなら長くします。
+                    詳細：Codex のように Enter を送信として扱うアプリは、確定してこの時間だけ待ってから Shift+Enter を送り直します。\
+                    上の調整とは別です（足し合わせません）。短すぎると改行が消えます。既定の 120ms は NRIME の実験値です。
                     """))
             }
         }

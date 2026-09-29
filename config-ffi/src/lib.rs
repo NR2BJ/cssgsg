@@ -146,7 +146,10 @@ mod tests {
         assert!(json.contains(r#""ko_layout":"chamshin-v18""#), "{json}");
         assert!(json.contains(r#""toggle_english":"tap:shift_right""#), "{json}");
         assert!(json.contains(r#""hanja":"alt_left+enter""#), "{json}");
-        assert!(json.contains(r#""newline_delay_offset_ms":0"#), "{json}");
+        assert!(
+            json.contains(r#""newline_delay_offset_ms":0"#) && json.contains(r#""newline_replay_ms":120"#),
+            "{json}"
+        );
         assert!(!json.contains("taps"), "옛 탭 표는 JSON에 내보내지 않는다");
         // 기본 설정 파일은 모두 주석이고, 다시 읽으면 같은 JSON이다.
         let text = toml_from_json(&json).unwrap();

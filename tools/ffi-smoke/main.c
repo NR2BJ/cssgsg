@@ -57,18 +57,20 @@ int main(void) {
     CHECK(m.candidate_font_size == 14 && m.shift_enter_delay_ms == 15);
     m = cssgsg_engine_mac_settings(NULL);
     CHECK(m.hud == 1 && m.newline_replay_ms == 120 && m.candidate_font_size == 14 && m.shift_enter_delay_ms == 15);
-    /* 줄바꿈 대기는 조정값 하나: Electron 15 + 조정, Codex 120 + 조정 */
+    /* 줄바꿈 대기: Electron은 15 + 조정(-10~50), Codex는 따로 적은 값 */
     CssgsgEngine *c = cssgsg_engine_new("[mac]\nhud = false\nhud_position = \"mouse\"\n"
-                                        "candidate_font_size = 18\nnewline_delay_offset_ms = -40");
+                                        "candidate_font_size = 18\nnewline_delay_offset_ms = -10\nnewline_replay_ms = 80");
     CHECK(c != NULL);
     m = cssgsg_engine_mac_settings(c);
     CHECK(m.hud == 0 && m.hud_at_mouse == 1 && m.newline_replay_ms == 80);
     CHECK(m.candidate_font_size == 18 && m.shift_enter_delay_ms == 5);
     cssgsg_engine_free(c);
     CHECK(cssgsg_engine_new("[mac]\nnewline_delay_offset_ms = 99") == NULL);
-    /* 0.5.0 파일의 절댓값은 조정값으로 옮긴다 */
-    c = cssgsg_engine_new("[mac]\nnewline_replay_ms = 150");
+    CHECK(cssgsg_engine_new("[mac]\nnewline_replay_ms = 5") == NULL);
+    /* 0.5.0 파일: Electron 절댓값은 조정값으로 옮기고 Codex 값은 그대로 */
+    c = cssgsg_engine_new("[mac]\nshift_enter_delay_ms = 25\nnewline_replay_ms = 150");
     CHECK(c != NULL && cssgsg_engine_mac_settings(c).newline_replay_ms == 150);
+    CHECK(cssgsg_engine_mac_settings(c).shift_enter_delay_ms == 25);
     cssgsg_engine_free(c);
 
     /* 빠른 탭 전환 보정: 오른쪽 Shift를 누른 채 친 글자는 잡아 두고 타이머를 청한다(timer_ms). */

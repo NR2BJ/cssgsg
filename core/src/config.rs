@@ -90,31 +90,24 @@ pub struct MacConfig {
     pub hud_position: HudPosition,
     /// 후보창 글자 크기(포인트).
     pub candidate_font_size: u32,
-    /// 조합 중 Shift+Enter 줄바꿈 대기를 앱 종류별 기본값에서 이만큼(밀리초, -50~50) 늘이거나 줄인다.
-    /// 기본값(NRIME 실험값): Electron 앱은 확정한 뒤 15ms 기다렸다 줄바꿈을 넣고(⌘/Option+키 재전송도 같다),
-    /// Codex처럼 줄바꿈 입력을 전송으로 받는 앱은 120ms 기다렸다 Shift+Enter 키를 다시 보낸다. 둘은 따로 쓰인다(더하지 않는다).
+    /// Electron 앱 줄바꿈 대기 조정(밀리초, -10~50). 조합 중 Shift+Enter면 확정한 뒤 기본 15ms(NRIME 실험값)에 이것을
+    /// 더한 만큼 기다렸다 줄바꿈을 넣는다. ⌘/Option+키 재전송도 같다. -10이면 5ms로 가장 짧다.
     pub newline_delay_offset_ms: i32,
-    /// 0.5.0의 `shift_enter_delay_ms`·`newline_replay_ms`(절댓값). 읽으면 `newline_delay_offset_ms`로 옮긴다.
+    /// Codex처럼 줄바꿈 입력을 전송으로 받는 앱: 확정한 뒤 Shift+Enter 키를 다시 보내기까지(밀리초, 20~1000).
+    /// 위 조정과 따로 쓰인다(더하지 않는다). 기본 120은 NRIME 실험값이다(2026-09-30: 사용자가 다시 재 볼 예정).
+    pub newline_replay_ms: u32,
+    /// 0.5.0의 Electron 절댓값. 읽으면 `newline_delay_offset_ms`로 옮긴다.
     #[serde(skip_serializing)]
     pub shift_enter_delay_ms: Option<u32>,
-    #[serde(skip_serializing)]
-    pub newline_replay_ms: Option<u32>,
 }
 
 impl MacConfig {
     /// Electron 앱의 기본 줄바꿈 대기(밀리초).
     pub const SHIFT_ENTER_BASE_MS: i32 = 15;
-    /// Codex류 앱의 기본 Shift+Enter 재전송 대기(밀리초).
-    pub const NEWLINE_REPLAY_BASE_MS: i32 = 120;
 
-    /// Electron 앱: 확정한 뒤 줄바꿈을 넣기까지(⌘/Option+키 재전송도) 기다리는 시간. 5ms보다 짧게는 하지 않는다.
+    /// Electron 앱: 확정한 뒤 줄바꿈을 넣기까지(⌘/Option+키 재전송도) 기다리는 시간.
     pub fn shift_enter_delay_ms(&self) -> u32 {
         (Self::SHIFT_ENTER_BASE_MS + self.newline_delay_offset_ms).max(5) as u32
-    }
-
-    /// Codex류 앱: 확정한 뒤 Shift+Enter 키를 다시 보내기까지 기다리는 시간.
-    pub fn newline_replay_ms(&self) -> u32 {
-        (Self::NEWLINE_REPLAY_BASE_MS + self.newline_delay_offset_ms).max(5) as u32
     }
 }
 
@@ -125,8 +118,8 @@ impl Default for MacConfig {
             hud_position: HudPosition::Caret,
             candidate_font_size: 14,
             newline_delay_offset_ms: 0,
+            newline_replay_ms: 120,
             shift_enter_delay_ms: None,
-            newline_replay_ms: None,
         }
     }
 }
@@ -242,15 +235,15 @@ impl Config {
         {
             c.shortcuts = shortcuts_from_legacy_taps(&taps)?;
         }
-        // 0.5.0의 절댓값 두 개 → 기본값과의 차이. Codex 값이 있으면 그것을, 없으면 Electron 값을 따른다.
-        let (shift_enter, replay) = (c.mac.shift_enter_delay_ms.take(), c.mac.newline_replay_ms.take());
-        if !has_offset {
-            let offset = match (replay, shift_enter) {
-                (Some(ms), _) => ms as i32 - MacConfig::NEWLINE_REPLAY_BASE_MS,
-                (None, Some(ms)) => ms as i32 - MacConfig::SHIFT_ENTER_BASE_MS,
-                (None, None) => 0,
-            };
-            c.mac.newline_delay_offset_ms = offset.clamp(-50, 50);
+        // 0.5.0의 Electron 절댓값 → 기본값과의 차이(조정값이 적혀 있으면 그것). Codex 값(newline_replay_ms)은 그대로 쓴다.
+        if let Some(ms) = c.mac.shift_enter_delay_ms.take()
+            && !has_offset
+        {
+            c.mac.newline_delay_offset_ms = (ms as i32 - MacConfig::SHIFT_ENTER_BASE_MS).clamp(-10, 50);
+        }
+        // 0.5.1의 조정값은 Codex와 같이 움직여서 -50까지 됐다. 이제 Electron만이라 -10(5ms) 밑은 -10으로 본다.
+        if (-50..-10).contains(&c.mac.newline_delay_offset_ms) {
+            c.mac.newline_delay_offset_ms = -10;
         }
         c.validate()?;
         Ok(c)
@@ -265,6 +258,7 @@ impl Config {
             ("tap_threshold_ms", self.tap_threshold_ms, 50, 1000),
             ("tap_overlap_ms", self.tap_overlap_ms, 30, 80),
             ("mac.candidate_font_size", self.mac.candidate_font_size, 10, 28),
+            ("mac.newline_replay_ms", self.mac.newline_replay_ms, 20, 1000),
         ];
         for (name, value, lo, hi) in ranges {
             if !(lo..=hi).contains(&value) {
@@ -272,8 +266,8 @@ impl Config {
             }
         }
         let offset = self.mac.newline_delay_offset_ms;
-        if !(-50..=50).contains(&offset) {
-            return Err(format!("mac.newline_delay_offset_ms는 -50~50이어야 한다: {offset}"));
+        if !(-10..=50).contains(&offset) {
+            return Err(format!("mac.newline_delay_offset_ms는 -10~50이어야 한다: {offset}"));
         }
         let all = self.shortcuts.all();
         for (i, &(action, s)) in all.iter().enumerate() {
@@ -424,12 +418,20 @@ impl Config {
             mac.candidate_font_size == dmac.candidate_font_size,
         ));
         line(
-            "# 조합 중 Shift+Enter 줄바꿈 대기 조정(밀리초, -50~50). 기본값: Electron 앱 15, Codex류 앱 120(따로 쓰인다)",
+            "# 조합 중 Shift+Enter, Electron 앱: 확정하고 15ms에 이 조정값(밀리초, -10~50)을 더한 만큼 기다렸다 줄을 바꾼다",
         );
         line(&setting(
             "newline_delay_offset_ms",
             &mac.newline_delay_offset_ms.to_string(),
             mac.newline_delay_offset_ms == dmac.newline_delay_offset_ms,
+        ));
+        line(
+            "# Codex처럼 줄바꿈 입력을 전송으로 받는 앱: 확정하고 이만큼(밀리초, 20~1000) 기다렸다 Shift+Enter를 다시 보낸다(위와 따로)",
+        );
+        line(&setting(
+            "newline_replay_ms",
+            &mac.newline_replay_ms.to_string(),
+            mac.newline_replay_ms == dmac.newline_replay_ms,
         ));
         out
     }
@@ -510,7 +512,7 @@ mod tests {
         assert_eq!(c.tap_threshold_ms, 200);
         assert!(!c.tap_buffering && c.ja.yen_sign && c.ja.convert_with_space && c.ja.convert_with_tab);
         assert_eq!(
-            (c.mac.shift_enter_delay_ms(), c.mac.newline_replay_ms(), c.mac.candidate_font_size),
+            (c.mac.shift_enter_delay_ms(), c.mac.newline_replay_ms, c.mac.candidate_font_size),
             (15, 120, 14)
         );
     }
@@ -555,35 +557,33 @@ mod tests {
     }
 
     #[test]
-    fn newline_delay_is_one_adjustment_of_two_defaults() {
-        let mac = |offset| MacConfig { newline_delay_offset_ms: offset, ..MacConfig::default() };
-        assert_eq!((mac(0).shift_enter_delay_ms(), mac(0).newline_replay_ms()), (15, 120));
-        assert_eq!((mac(20).shift_enter_delay_ms(), mac(20).newline_replay_ms()), (35, 140));
-        assert_eq!(
-            (mac(-50).shift_enter_delay_ms(), mac(-50).newline_replay_ms()),
-            (5, 70),
-            "5ms 밑으로는 안 간다"
-        );
-        assert!(Config::from_toml("[mac]\nnewline_delay_offset_ms = 60").is_err());
+    fn newline_delays_are_separate() {
+        // Electron은 15ms ± 조정, Codex는 따로 적은 값(조정과 더하지 않는다).
+        let mac = |toml: &str| Config::from_toml(toml).unwrap().mac;
+        let m = mac("[mac]\nnewline_delay_offset_ms = 20");
+        assert_eq!((m.shift_enter_delay_ms(), m.newline_replay_ms), (35, 120));
+        let m = mac("[mac]\nnewline_delay_offset_ms = -10\nnewline_replay_ms = 60");
+        assert_eq!((m.shift_enter_delay_ms(), m.newline_replay_ms), (5, 60));
+        assert!(Config::from_toml("[mac]\nnewline_delay_offset_ms = 51").is_err());
         assert!(Config::from_toml("[mac]\nnewline_delay_offset_ms = -51").is_err());
-        // 0.5.0 파일의 절댓값은 차이로 옮긴다(Codex 값이 먼저, 범위는 ±50).
-        let offset = |toml: &str| Config::from_toml(toml).unwrap().mac.newline_delay_offset_ms;
-        assert_eq!(offset("[mac]\nnewline_replay_ms = 150"), 30);
+        assert!(Config::from_toml("[mac]\nnewline_replay_ms = 10").is_err());
+        assert!(Config::from_toml("[mac]\nnewline_replay_ms = 1001").is_err());
+        // 0.5.1 파일: 조정값이 -50까지 됐다 → -10(5ms)으로 본다.
+        assert_eq!(mac("[mac]\nnewline_delay_offset_ms = -30").newline_delay_offset_ms, -10);
+        // 0.5.0 파일: Electron 절댓값은 조정값으로 옮기고(±는 -10~50), Codex 값은 그대로 쓴다.
+        let offset = |toml: &str| mac(toml).newline_delay_offset_ms;
         assert_eq!(offset("[mac]\nshift_enter_delay_ms = 25"), 10);
-        assert_eq!(offset("[mac]\nshift_enter_delay_ms = 25\nnewline_replay_ms = 100"), -20);
-        assert_eq!(offset("[mac]\nnewline_replay_ms = 500"), 50);
+        assert_eq!(offset("[mac]\nshift_enter_delay_ms = 5"), -10);
+        assert_eq!(offset("[mac]\nshift_enter_delay_ms = 100"), 50);
         assert_eq!(
-            offset("[mac]\nnewline_replay_ms = 150\nnewline_delay_offset_ms = -5"),
-            -5,
+            offset("[mac]\nshift_enter_delay_ms = 25\nnewline_delay_offset_ms = 5"),
+            5,
             "새 값이 있으면 그것"
         );
-        let c = Config::from_toml("[mac]\nnewline_replay_ms = 150").unwrap();
-        assert_eq!(
-            (c.mac.shift_enter_delay_ms, c.mac.newline_replay_ms),
-            (None, None),
-            "옮긴 뒤에는 들고 있지 않는다"
-        );
-        assert!(!c.to_toml().contains("newline_replay_ms ="), "다시 쓰지 않는다");
+        let m = mac("[mac]\nshift_enter_delay_ms = 25\nnewline_replay_ms = 150");
+        assert_eq!((m.shift_enter_delay_ms(), m.newline_replay_ms, m.shift_enter_delay_ms), (25, 150, None));
+        let text = Config::from_toml("[mac]\nshift_enter_delay_ms = 25").unwrap().to_toml();
+        assert!(!text.contains("shift_enter_delay_ms ="), "옛 키는 다시 쓰지 않는다");
     }
 
     /// 설정 파일로 쓴 것을 다시 읽으면 같은 설정이다.
@@ -613,6 +613,7 @@ mod tests {
             "katakana_direct",
             "candidate_font_size",
             "newline_delay_offset_ms",
+            "newline_replay_ms",
         ] {
             assert!(text.contains(&format!("# {key} = ")), "{key}");
         }
@@ -642,7 +643,8 @@ mod tests {
                 hud: false,
                 hud_position: HudPosition::Mouse,
                 candidate_font_size: 18,
-                newline_delay_offset_ms: -20,
+                newline_delay_offset_ms: -5,
+                newline_replay_ms: 200,
                 ..MacConfig::default()
             },
             ..Config::default()
@@ -651,7 +653,9 @@ mod tests {
         let text = c.to_toml();
         assert!(text.contains("\nko_layout = \"chamshin-d-v19\"\n"));
         assert!(text.contains("\ntoggle_english = \"control_left+space\"\n"));
-        assert!(text.contains("\nnewline_delay_offset_ms = -20\n"));
+        assert!(
+            text.contains("\nnewline_delay_offset_ms = -5\n") && text.contains("\nnewline_replay_ms = 200\n")
+        );
         assert!(text.contains("\ntoggle_non_english = \"\"\n"), "없음은 빈 글자열");
         assert!(text.contains("\nhanja = \"tap:alt_right\"\n"));
         assert!(text.contains("\n# slash_nakaguro = true\n"), "바꾸지 않은 것은 주석 그대로");
