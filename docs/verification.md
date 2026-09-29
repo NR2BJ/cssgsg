@@ -25,7 +25,8 @@
 | 올라간 릴리스 | GitHub API, 로컬 pkg | 릴리스 직후 앱과 같은 코드로 최신 릴리스를 읽고, 파일을 받아 해시를 로컬 pkg와 맞춘다 | 릴리스마다 | `tools/mac/release.sh`가 돌린다 |
 | pkg 구성 | NRIME에서 겪은 문제 목록 | 풀어 보고 확인: 재배치 끔(`relocatable="false"`, `<relocate/>` 비어 있음), 로그아웃 요구 없음, 설치 뒤 스크립트, 안에 든 앱의 서명(인증서 기준 요구조건), `._` 파일 없음 | 통과(0.1.0) | `pkgutil --expand-full` |
 | 입력 소스 추가 여부 | 시스템 설정이 쓰는 저장 파일(`com.apple.inputsources`의 `AppleEnabledThirdPartyInputSources`) | 추가한 것(NRIME en)=true, 안 한 것(NRIME ja, cssgsg)=false로 대조. TIS의 켜짐 속성·켜진 목록은 기본 켜짐 모드와 호출 순서 때문에 틀려서 쓰지 않는다(아이누어로 확인) | 3/3 | `bash tools/mac/update-smoke/run.sh --input-status` |
-| 일본어 한자 변환(Mozc) | Mozc(구글 일본어 입력 공개판)와 OSS 사전 | C API 확인 도구와 cargo 테스트: 단어(にほんご→日本語), 후보창(ニホンゴ·にほんご 포함, 음역을 하위 목록으로 접지 않음), 문장 문절 나누기(私の名前は中野です)·이동·줄이기/늘이기, 취소, 新月 키 → 日本語 → 확정, 번호로 고르기. 학습은 끄고 한 번에 하나씩(Mozc 전역 상태) | 6/6 | `cargo test -p cssgsg-core --features mozc --test mozc` |
+| 일본어 한자 변환(Mozc) | Mozc(구글 일본어 입력 공개판)와 OSS 사전 | C API 확인 도구와 cargo 테스트: 첫 변환부터 후보 전체(all_candidate_words)와 1번 선택, 음역을 하위 목록으로 접지 않음, 전체 기준 번호 선택, 문장 문절 나누기(私の名前は中野です)·이동·줄이기/늘이기, 취소, 新月 키 → 日本語 → 확정, 번호 선택, Tab 격자. 학습은 끄고 한 번에 하나씩(Mozc 전역 상태) | 7/7 | `cargo test -p cssgsg-core --features mozc --test mozc` |
+| 후보창 조작 | NRIME 동작(목록 9개, Tab 격자 5×6, 단일 문절 ←→ 페이지) | 후보 40개짜리 가짜 변환기로 엔진 테스트: 첫 Space 후보창·1번 선택·조합 유지, 목록 페이지·끝에서 돌기, 격자 이동·경계, 격자 페이지, 목록 복귀, 지금 페이지 번호 선택과 페이지 밖 번호, Esc | 5/5 | `cargo test first_space list_mode tab_expands number_keys escape_leaves` |
 | 확인 목록 기대값 | 엔진 | `docs/mac-checklist.md`의 엔진 확인 칸을 모두 다시 쳐 본다 | 15/15 | `cargo test --test mac_checklist` |
 | 학습 페이지 | 엔진 | 페이지의 예시 101개를 모두 엔진으로 쳐 보고, 배열도는 배열 데이터로 그린다 | 101/101 | `node tools/learn/build.mjs --check` |
 

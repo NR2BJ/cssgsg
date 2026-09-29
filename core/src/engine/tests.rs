@@ -330,3 +330,136 @@ fn katakana_direct_keeps_what_was_typed_as_katakana() {
     s.type_keys("{ls}{caps}sf{caps}").unwrap();
     assert_eq!((s.text.as_str(), s.preedit.as_str()), ("カ", "と"));
 }
+
+/// 후보 n개(c0, c1, …)를 내는 변환기. 후보창 조작(페이지·격자·번호) 시험용.
+struct ManyConverter {
+    n: usize,
+    selected: Option<usize>,
+}
+
+impl ManyConverter {
+    fn view(&self) -> Option<crate::convert::ConvView> {
+        let selected = self.selected?;
+        Some(crate::convert::ConvView {
+            segments: vec![format!("c{selected}")],
+            focused: 0,
+            candidates: (0..self.n).map(|i| format!("c{i}")).collect(),
+            selected: Some(selected),
+        })
+    }
+}
+
+impl crate::convert::Converter for ManyConverter {
+    fn start(&mut self, _reading: &str) -> Option<crate::convert::ConvView> {
+        self.selected = Some(0);
+        self.view()
+    }
+    fn command(&mut self, cmd: crate::convert::ConvCmd) -> Option<crate::convert::ConvView> {
+        use crate::convert::ConvCmd;
+        let sel = self.selected?;
+        self.selected = Some(match cmd {
+            ConvCmd::Next => (sel + 1) % self.n,
+            ConvCmd::Prev => (sel + self.n - 1) % self.n,
+            ConvCmd::Select(i) if i < self.n => i,
+            ConvCmd::Select(_) => return None,
+            _ => sel,
+        });
+        self.view()
+    }
+    fn commit(&mut self) -> String {
+        self.selected.take().map(|i| format!("c{i}")).unwrap_or_default()
+    }
+    fn cancel(&mut self) {
+        self.selected = None;
+    }
+}
+
+fn many(n: usize) -> Sim {
+    let mut engine = Engine::new(Config::default());
+    engine.set_converter(Box::new(ManyConverter { n, selected: None }));
+    Sim::new(engine).with_mode(Mode::Ja)
+}
+
+/// (선택, 페이지, 격자)
+fn cand_state(s: &Sim) -> (Option<usize>, Option<(usize, usize)>, bool) {
+    let c = s.candidates.as_ref().expect("후보창");
+    (c.selected, c.page, c.grid)
+}
+
+#[test]
+fn first_space_shows_all_candidates_with_the_first_selected() {
+    let mut s = many(40);
+    s.type_keys("s{sp}").unwrap();
+    let c = s.candidates.clone().expect("첫 Space에 후보창");
+    assert_eq!(c.items.len(), 40);
+    assert_eq!((c.selected, c.page, c.grid), (Some(0), Some((1, 5)), false));
+    // 글자는 1번 후보로 바뀐 채 조합 중이다.
+    assert_eq!((s.text.as_str(), s.preedit.as_str()), ("", "c0"));
+}
+
+#[test]
+fn list_mode_paging_and_wrapping() {
+    let mut s = many(40);
+    s.type_keys("s{sp}").unwrap();
+    // 문절이 하나면 ←→는 페이지(9개)를 넘긴다(NRIME와 같다).
+    s.type_keys("{right}").unwrap();
+    assert_eq!(cand_state(&s), (Some(9), Some((2, 5)), false));
+    s.type_keys("{left}").unwrap();
+    assert_eq!(cand_state(&s).0, Some(0));
+    s.type_keys("{pgdn}{pgdn}").unwrap();
+    assert_eq!(cand_state(&s).0, Some(18));
+    s.type_keys("{pgup}").unwrap();
+    assert_eq!(cand_state(&s).0, Some(9));
+    // ↑↓, Space는 한 칸. 끝에서 처음으로 돈다.
+    s.type_keys("{up}").unwrap();
+    assert_eq!(cand_state(&s).0, Some(8));
+    let mut s = many(40);
+    s.type_keys("s{sp}{up}").unwrap();
+    assert_eq!(cand_state(&s).0, Some(39));
+    s.type_keys("{sp}").unwrap();
+    assert_eq!(cand_state(&s).0, Some(0));
+}
+
+#[test]
+fn tab_expands_into_a_grid() {
+    let mut s = many(40);
+    s.type_keys("s{sp}{tab}").unwrap();
+    // 격자: 5열 × 6행 = 30개가 한 페이지.
+    assert_eq!(cand_state(&s), (Some(0), Some((1, 2)), true));
+    s.type_keys("{right}{right}").unwrap();
+    assert_eq!(cand_state(&s).0, Some(2));
+    s.type_keys("{down}").unwrap();
+    assert_eq!(cand_state(&s).0, Some(7));
+    s.type_keys("{up}{left}").unwrap();
+    assert_eq!(cand_state(&s).0, Some(1));
+    // 맨 앞에서 ←, 맨 위에서 ↑은 움직이지 않는다.
+    s.type_keys("{left}{left}{up}").unwrap();
+    assert_eq!(cand_state(&s).0, Some(0));
+    s.type_keys("{pgdn}").unwrap();
+    assert_eq!(cand_state(&s), (Some(30), Some((2, 2)), true));
+    // Tab으로 목록으로 돌아간다(고른 후보는 그대로).
+    s.type_keys("{tab}").unwrap();
+    assert_eq!(cand_state(&s), (Some(30), Some((4, 5)), false));
+}
+
+#[test]
+fn number_keys_pick_on_the_current_page() {
+    // 목록 2페이지(9~17)에서 3 → 11번을 골라 확정한다.
+    let mut s = many(40);
+    s.type_keys("s{sp}{right}3").unwrap();
+    assert_eq!((s.text.as_str(), s.preedit.as_str(), s.candidates.is_none()), ("c11", "", true));
+    // 페이지 밖 번호는 확정하고 그 키를 새로 친다(숫자는 읽기에 들어간다).
+    let mut s = many(3);
+    s.type_keys("s{sp}5").unwrap();
+    assert_eq!((s.text.as_str(), s.preedit.as_str()), ("c0", "5"));
+}
+
+#[test]
+fn escape_leaves_the_grid_and_the_conversion() {
+    let mut s = many(40);
+    s.type_keys("s{sp}{tab}{esc}").unwrap();
+    assert_eq!((s.preedit.as_str(), s.candidates.is_none()), ("か", true));
+    // 다시 변환하면 목록으로 시작한다.
+    s.type_keys("{sp}").unwrap();
+    assert_eq!(cand_state(&s), (Some(0), Some((1, 5)), false));
+}

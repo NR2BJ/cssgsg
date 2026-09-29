@@ -63,14 +63,16 @@ pub struct CssgsgOutput {
     pub preedit_caret: u32,
     pub segments: *const CssgsgSegment,
     pub segment_count: u32,
-    /// 후보(candidates_changed이고 candidate_count > 0이면 보인다).
+    /// 후보: 포커스된 문절의 후보 전체(candidates_changed이고 candidate_count > 0이면 보인다). 페이지는 후보창이 나눈다.
     pub candidates: *const *const c_char,
     pub candidate_count: u32,
-    /// 선택된 후보, 없으면 -1.
+    /// 선택된 후보(전체 목록 기준), 없으면 -1.
     pub candidate_selected: i32,
-    /// 지금 페이지/전체 페이지(1부터), 모르면 0.
+    /// 지금 페이지/전체 페이지(1부터, 지금 목록/격자 모드 기준), 모르면 0.
     pub candidate_page: u32,
     pub candidate_pages: u32,
+    /// 격자(펼친) 모드면 1. 목록은 한 페이지 9개, 격자는 5열 × 6행.
+    pub candidate_grid: u8,
 }
 
 /// 맥 셸 설정(설정 파일의 `[mac]`). 엔진은 쓰지 않는다.
@@ -122,6 +124,7 @@ fn empty_output() -> CssgsgOutput {
         candidate_selected: -1,
         candidate_page: 0,
         candidate_pages: 0,
+        candidate_grid: 0,
     }
 }
 
@@ -169,6 +172,7 @@ impl CssgsgEngine {
                 o.candidate_page = page as u32;
                 o.candidate_pages = pages as u32;
             }
+            o.candidate_grid = c.grid as u8;
         }
 
         self.out = o;

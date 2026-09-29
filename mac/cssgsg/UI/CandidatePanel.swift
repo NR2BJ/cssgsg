@@ -67,7 +67,8 @@ final class CandidatePanel {
     // MARK: - Public API
 
     /// Show the candidate panel with the given candidates, positioned near the caret.
-    func show(candidates: [String], selectedIndex: Int = 0, client: (any IMKTextInput)? = nil) {
+    /// cssgsg: 목록/격자 모드는 엔진이 정한다(Tab은 엔진이 처리한다). candidates는 전체 후보, selectedIndex는 전체 기준.
+    func show(candidates: [String], selectedIndex: Int = 0, grid: Bool = false, client: (any IMKTextInput)? = nil) {
         self.candidates = candidates
         self.selectedIndex = max(0, min(selectedIndex, candidates.count - 1))
 
@@ -76,10 +77,7 @@ final class CandidatePanel {
             return
         }
 
-        // Reset grid mode when showing from hidden state
-        if !(panel?.isVisible ?? false) {
-            isGridMode = false
-        }
+        isGridMode = grid
 
         // Read font size ONCE per show() — avoids JSON decode on every navigation
         cachedFontSize = CandidatePanel.fontSize

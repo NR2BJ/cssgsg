@@ -4,8 +4,9 @@
  * 문절 이동·길이는 MSIME 키맵의 ←→ / Shift+←→, 후보 선택은 SELECT_CANDIDATE, 확정은 SUBMIT(이때 Mozc가 학습한다).
  *
  * 화면(변환 결과)은 JSON 한 줄로 돌려준다. 돌려준 문자열은 같은 인스턴스의 다음 호출 전까지 유효하다.
- *   {"segments":["日本語"],"focused":0,"candidates":["日本語",…],"selected":0,"page":[1,3]}
- *   후보창이 아직 없으면(첫 변환) "candidates":[],"selected":null,"page":null */
+ *   {"segments":["日本語"],"focused":0,"candidates":["日本語","ニホンゴ",…],"selected":0}
+ *   candidates는 포커스된 문절의 후보 전체(all_candidate_words)라 첫 변환부터 있다. selected도 전체 목록 기준.
+ *   페이지는 화면(후보창)이 나눈다. */
 #ifndef CSSGSG_MOZC_H_
 #define CSSGSG_MOZC_H_
 
@@ -26,7 +27,7 @@ enum {
   CSSGSG_MOZC_EXPAND = 5,
   CSSGSG_MOZC_NEXT_PAGE = 6,
   CSSGSG_MOZC_PREV_PAGE = 7,
-  CSSGSG_MOZC_SELECT_ON_PAGE = 8, /* arg: 지금 페이지 안 번호(0부터) */
+  CSSGSG_MOZC_SELECT = 8, /* arg: 후보 번호(0부터, 전체 목록 기준) */
 };
 
 /* data_path: mozc.data. profile_dir: 학습·사용자 사전 폴더(NULL이나 ""이면 Mozc 기본 폴더). 실패하면 NULL. */

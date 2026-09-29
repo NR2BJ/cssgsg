@@ -43,19 +43,22 @@ fn mozc() -> MozcConverter {
 fn converts_a_word_and_walks_candidates() {
     let _serial = serial();
     let mut m = mozc();
+    // 첫 변환부터 후보 전체가 오고, 1번이 골라져 있다.
     let v = m.start("にほんご").unwrap();
     assert_eq!(v.segments, vec!["日本語"]);
-    // 첫 변환은 후보창 없이, 다음 후보부터 후보창이 뜬다(MS-IME와 같다).
-    let v = m.command(ConvCmd::Next).unwrap();
+    assert_eq!(v.selected, Some(0));
     for c in ["日本語", "ニホンゴ", "にほんご"] {
         assert!(v.candidates.iter().any(|x| x == c), "{c} 없음: {:?}", v.candidates);
     }
     // 음역 후보는 하위 목록("そのほかの文字種")으로 접지 않고 본 목록에 펼친다.
     assert!(!v.candidates.iter().any(|x| x == "そのほかの文字種"), "{:?}", v.candidates);
-    assert!(v.page.is_some());
-    let selected = v.candidates[v.selected.unwrap()].clone();
-    assert_eq!(v.segments, vec![selected.clone()]);
-    assert_eq!(m.commit(), selected);
+    // 전체 목록 기준 번호로 고른다.
+    let v = m.command(ConvCmd::Select(1)).unwrap();
+    assert_eq!(v.selected, Some(1));
+    assert_eq!(v.segments, vec![v.candidates[1].clone()]);
+    let v2 = m.command(ConvCmd::Next).unwrap();
+    assert_eq!(v2.selected, Some(2));
+    assert_eq!(m.commit(), v2.candidates[2]);
 }
 
 #[test]
@@ -116,11 +119,26 @@ fn escape_returns_to_the_reading() {
 #[test]
 fn number_key_picks_from_the_candidate_window() {
     let _serial = serial();
-    // 두 번째 Space에 후보창이 뜬다. 번호로 고르면 바로 확정한다.
+    // 첫 Space에 후보창이 뜨고 1번이 골라져 있다. 번호로 고르면 바로 확정한다.
     let mut s = ja_sim();
-    s.type_keys("ckeuwl{sp}{sp}").unwrap();
-    let window = s.candidates.clone().expect("후보창");
+    s.type_keys("ckeuwl{sp}").unwrap();
+    let window = s.candidates.clone().expect("첫 Space에 후보창");
+    assert_eq!(window.selected, Some(0));
+    assert_eq!(s.preedit, window.items[0]);
     let second = window.items[1].clone();
     s.type_keys("2").unwrap();
     assert_eq!((s.text.as_str(), s.preedit.as_str()), (second.as_str(), ""));
+}
+
+#[test]
+fn tab_grid_works_with_mozc() {
+    let _serial = serial();
+    let mut s = ja_sim();
+    s.type_keys("ckeuwl{sp}{tab}{right}").unwrap();
+    let c = s.candidates.clone().expect("후보창");
+    assert!(c.grid);
+    assert_eq!(c.selected, Some(1));
+    assert_eq!(s.preedit, c.items[1]);
+    s.type_keys("{ent}").unwrap();
+    assert_eq!(s.text, c.items[1]);
 }

@@ -72,11 +72,12 @@ typedef struct CssgsgOutput {
     uint32_t preedit_caret;      /* UTF-16 단위, 항상 끝 */
     const CssgsgSegment *segments;
     uint32_t segment_count;
-    const char *const *candidates;
+    const char *const *candidates; /* 포커스된 문절의 후보 전체. 페이지는 후보창이 나눈다 */
     uint32_t candidate_count;    /* candidates_changed이고 0이면 후보창을 닫는다 */
-    int32_t candidate_selected;  /* 없으면 -1 */
-    uint32_t candidate_page;     /* 1부터, 모르면 0 */
+    int32_t candidate_selected;  /* 전체 목록 기준, 없으면 -1 */
+    uint32_t candidate_page;     /* 1부터(지금 목록/격자 기준), 모르면 0 */
     uint32_t candidate_pages;
+    uint8_t candidate_grid;      /* 격자(펼친) 모드면 1: 목록 9개/페이지, 격자 5열 × 6행 */
 } CssgsgOutput;
 
 /* config_toml이 NULL이면 기본 설정. 설정 오류면 NULL (cssgsg_last_error 참고). */

@@ -54,7 +54,7 @@ int main(int argc, char** argv) {
     else if (cmd == "expand") code = CSSGSG_MOZC_EXPAND;
     else if (cmd == "pgdn") code = CSSGSG_MOZC_NEXT_PAGE;
     else if (cmd == "pgup") code = CSSGSG_MOZC_PREV_PAGE;
-    else if (cmd.rfind("sel:", 0) == 0) { code = CSSGSG_MOZC_SELECT_ON_PAGE; arg = std::atoi(cmd.c_str() + 4); }
+    else if (cmd.rfind("sel:", 0) == 0) { code = CSSGSG_MOZC_SELECT; arg = std::atoi(cmd.c_str() + 4); }
     else if (cmd.rfind("start:", 0) == 0) { Print("start", cssgsg_mozc_start(m, cmd.c_str() + 6), Ms(t)); continue; }
     if (code < 0) {
       std::fprintf(stderr, "unknown command %s\n", cmd.c_str());

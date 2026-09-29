@@ -62,10 +62,20 @@ pub struct Segment {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Candidates {
+    /// 포커스된 문절의 후보 전체.
     pub items: Vec<String>,
+    /// 고른 후보(전체 목록 기준).
     pub selected: Option<usize>,
+    /// (지금 페이지, 전체 페이지), 1부터. 페이지 크기는 목록/격자에 따라 다르다.
     pub page: Option<(usize, usize)>,
+    /// 격자(펼친) 모드. Tab으로 바꾼다(NRIME와 같다).
+    pub grid: bool,
 }
+
+/// 후보창 한 페이지: 목록 9개, 격자 5열 × 6행. 맥 셸 CandidatePanel과 같아야 한다.
+pub const CAND_LIST_PAGE: usize = 9;
+pub const CAND_GRID_COLUMNS: usize = 5;
+pub const CAND_GRID_PAGE: usize = 30;
 
 /// 키 하나를 처리한 뒤 셸이 할 일.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -109,6 +119,8 @@ pub struct Engine {
     kana: KanaComposer,
     /// 변환 중이면 Some.
     conv: Option<ConvView>,
+    /// 후보창이 격자(펼친) 모드인지. 변환을 시작할 때 목록으로 돌아간다.
+    cand_grid: bool,
     converter: Box<dyn Converter>,
     latin: LatinLayout,
     taps: TapTracker,
@@ -129,6 +141,7 @@ impl Engine {
             kana_layout: KanaLayout::shingetsu(),
             kana: KanaComposer::new(),
             conv: None,
+            cand_grid: false,
             converter: Box::new(EchoConverter::default()),
             latin: LatinLayout::graphite(),
             taps: TapTracker::default(),
@@ -353,6 +366,7 @@ impl Engine {
                 let reading = self.ja_styled(self.kana.reading());
                 if let Some(view) = self.converter.start(&reading) {
                     self.conv = Some(view);
+                    self.cand_grid = false;
                 }
                 // 변환 엔진이 아직 없으면 읽기를 그대로 둔다(입력 스레드는 기다리지 않는다).
                 return Output::eat();
@@ -413,24 +427,58 @@ impl Engine {
         Output::eat()
     }
 
+    /// 변환 중 키. 후보창 조작은 NRIME와 같다.
+    /// - Space / ↓: 다음 후보, ↑: 이전 후보(끝에서 처음으로 돈다).
+    /// - Tab: 목록 ↔ 격자(펼치기). 격자에서는 ←→가 한 칸, ↑↓가 한 줄.
+    /// - 목록에서 ←→: 문절이 하나면 페이지를 넘기고, 여럿이면 문절을 옮긴다. Shift+←→는 문절 길이.
+    /// - PageUp/PageDown: 페이지. 1~9: 지금 페이지에서 골라 바로 확정. Enter: 확정. Esc/Backspace: 읽기로 돌아간다.
     fn ja_converting_key(&mut self, ev: &KeyEvent) -> Output {
         let (k, shift) = (ev.key, ev.mods.shift());
-        let cmd = match k {
-            Key::SPACE | Key::ARROW_DOWN => Some(ConvCmd::Next),
-            Key::TAB => Some(if shift { ConvCmd::Prev } else { ConvCmd::Next }),
-            Key::ARROW_UP => Some(ConvCmd::Prev),
-            Key::ARROW_LEFT => Some(if shift { ConvCmd::Shrink } else { ConvCmd::FocusLeft }),
-            Key::ARROW_RIGHT => Some(if shift { ConvCmd::Expand } else { ConvCmd::FocusRight }),
-            Key::PAGE_DOWN => Some(ConvCmd::NextPage),
-            Key::PAGE_UP => Some(ConvCmd::PrevPage),
-            _ => None,
+        let (n, sel, segments) = match &self.conv {
+            Some(v) => (v.candidates.len(), v.selected.unwrap_or(0), v.segments.len()),
+            None => (0, 0, 0),
         };
-        if let Some(cmd) = cmd {
-            if let Some(view) = self.converter.command(cmd) {
-                self.conv = Some(view);
+        let grid = self.cand_grid && n > 0;
+        let page = if grid { CAND_GRID_PAGE } else { CAND_LIST_PAGE };
+        let pick = |i: usize| (i < n).then_some(ConvCmd::Select(i));
+        let cmd = match k {
+            Key::TAB if n > 0 => {
+                self.cand_grid = !self.cand_grid;
+                return Output::eat();
             }
-            return Output::eat();
+            Key::SPACE | Key::ARROW_DOWN if n == 0 => Some(ConvCmd::Next),
+            Key::ARROW_UP if n == 0 => Some(ConvCmd::Prev),
+            Key::SPACE => pick((sel + 1) % n),
+            Key::ARROW_DOWN if grid => pick(sel + CAND_GRID_COLUMNS),
+            Key::ARROW_UP if grid => sel.checked_sub(CAND_GRID_COLUMNS).and_then(pick),
+            Key::ARROW_DOWN => pick((sel + 1) % n),
+            Key::ARROW_UP => pick((sel + n - 1) % n),
+            Key::ARROW_LEFT if shift => Some(ConvCmd::Shrink),
+            Key::ARROW_RIGHT if shift => Some(ConvCmd::Expand),
+            Key::ARROW_LEFT if grid => sel.checked_sub(1).and_then(pick),
+            Key::ARROW_RIGHT if grid => pick(sel + 1),
+            Key::ARROW_LEFT if segments <= 1 && n > 0 => pick(sel.saturating_sub(page)),
+            Key::ARROW_RIGHT if segments <= 1 && n > 0 => pick((sel + page).min(n - 1)),
+            Key::ARROW_LEFT => Some(ConvCmd::FocusLeft),
+            Key::ARROW_RIGHT => Some(ConvCmd::FocusRight),
+            Key::PAGE_DOWN if n > 0 => pick((sel + page).min(n - 1)),
+            Key::PAGE_UP if n > 0 => pick(sel.saturating_sub(page)),
+            Key::PAGE_DOWN | Key::PAGE_UP => None,
+            _ => {
+                return self.ja_converting_other(ev);
+            }
+        };
+        if let Some(cmd) = cmd
+            && let Some(view) = self.converter.command(cmd)
+        {
+            self.conv = Some(view);
         }
+        Output::eat()
+    }
+
+    /// 변환 중 후보 이동이 아닌 키: 확정, 취소, 번호 고르기, 그 밖의 키(확정하고 새로 처리).
+    fn ja_converting_other(&mut self, ev: &KeyEvent) -> Output {
+        let (k, shift) = (ev.key, ev.mods.shift());
         match k {
             Key::ENTER | Key::NUMPAD_ENTER => {
                 let commit = self.take_composition();
@@ -445,11 +493,13 @@ impl Engine {
             _ => {}
         }
         if k.is_digit() && !shift && k != Key::DIGIT0 {
-            let n = (k.0 - Key::DIGIT1.0) as usize;
-            let on_page = self.conv.as_ref().map_or(0, |v| v.candidates.len());
-            if n < on_page {
+            let (n, sel) =
+                self.conv.as_ref().map_or((0, 0), |v| (v.candidates.len(), v.selected.unwrap_or(0)));
+            let page = if self.cand_grid { CAND_GRID_PAGE } else { CAND_LIST_PAGE };
+            let target = sel / page * page + (k.0 - Key::DIGIT1.0) as usize;
+            if target < n {
                 // 번호로 고르면 바로 확정한다(NRIME와 같다).
-                if let Some(view) = self.converter.command(ConvCmd::SelectOnPage(n)) {
+                if let Some(view) = self.converter.command(ConvCmd::Select(target)) {
                     self.conv = Some(view);
                 }
                 return Output::commit_eat(self.take_composition());
@@ -514,7 +564,14 @@ impl Engine {
         if view.candidates.is_empty() {
             return None;
         }
-        Some(Candidates { items: view.candidates.clone(), selected: view.selected, page: view.page })
+        let size = if self.cand_grid { CAND_GRID_PAGE } else { CAND_LIST_PAGE };
+        let page = (view.selected.unwrap_or(0) / size + 1, view.candidates.len().div_ceil(size));
+        Some(Candidates {
+            items: view.candidates.clone(),
+            selected: view.selected,
+            page: Some(page),
+            grid: self.cand_grid,
+        })
     }
 
     fn finish(&mut self, mut out: Output, before: (Preedit, Option<Candidates>)) -> Output {

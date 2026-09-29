@@ -138,8 +138,8 @@ final class CssgsgInputController: IMKInputController {
             break
         case .hide:
             NSApp.candidatePanel?.hide()
-        case let .show(items, selected):
-            NSApp.candidatePanel?.show(candidates: items, selectedIndex: selected ?? 0, client: client)
+        case let .show(items, selected, grid):
+            NSApp.candidatePanel?.show(candidates: items, selectedIndex: selected ?? 0, grid: grid, client: client)
         }
         if let mode = out.mode {
             (NSApp.delegate as? AppDelegate)?.updateStatus(mode)

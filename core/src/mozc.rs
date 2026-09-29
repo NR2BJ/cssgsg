@@ -31,7 +31,6 @@ struct View {
     focused: usize,
     candidates: Vec<String>,
     selected: Option<usize>,
-    page: Option<(usize, usize)>,
 }
 
 pub struct MozcConverter {
@@ -67,7 +66,6 @@ impl MozcConverter {
             focused: v.focused,
             candidates: v.candidates,
             selected: v.selected,
-            page: v.page,
         })
     }
 }
@@ -87,9 +85,7 @@ impl Converter for MozcConverter {
             ConvCmd::FocusRight => (3, 0),
             ConvCmd::Shrink => (4, 0),
             ConvCmd::Expand => (5, 0),
-            ConvCmd::NextPage => (6, 0),
-            ConvCmd::PrevPage => (7, 0),
-            ConvCmd::SelectOnPage(n) => (8, i32::try_from(n).ok()?),
+            ConvCmd::Select(n) => (8, i32::try_from(n).ok()?),
         };
         // SAFETY: 살아 있는 인스턴스.
         Self::view(unsafe { cssgsg_mozc_command(self.raw, code, arg) })

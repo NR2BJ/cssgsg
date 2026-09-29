@@ -27,7 +27,7 @@ struct CssgsgMozc {
   uint64_t session_id = 0;
   // 마지막으로 돌려준 문자열(다음 호출 전까지 유효).
   std::string returned;
-  // 마지막 변환 화면(SELECT_ON_PAGE가 후보 id를 찾는 데 쓴다).
+  // 마지막 변환 화면(SELECT가 후보 id를 찾는 데 쓴다).
   mozc::commands::Output last;
   // 지금 설정(바꿀 때 다른 항목을 잃지 않게 사본을 든다).
   mozc::config::Config config;
@@ -42,8 +42,6 @@ using ::mozc::commands::KeyEvent;
 using ::mozc::commands::Output;
 using ::mozc::commands::SessionCommand;
 
-// Request.candidate_page_size 기본값.
-constexpr int kPageSize = 9;
 
 bool Eval(CssgsgMozc& m, Command& c) {
   c.mutable_input()->set_id(m.session_id);
@@ -103,6 +101,7 @@ void AppendJson(std::string& s, absl::string_view v) {
 }
 
 // 변환 화면 → JSON. 변환 중이 아니면(문절이 없으면) 빈 문자열.
+// 후보는 all_candidate_words(포커스된 문절의 후보 전체)에서 꺼낸다. 후보창(candidate_window)과 달리 첫 변환부터 채워진다.
 std::string ViewJson(const Output& o) {
   if (!o.has_preedit() || o.preedit().segment_size() == 0) return "";
   std::string s = "{\"segments\":[";
@@ -114,24 +113,18 @@ std::string ViewJson(const Output& o) {
     if (segment.annotation() == mozc::commands::Preedit::Segment::HIGHLIGHT) focused = i;
   }
   absl::StrAppend(&s, "],\"focused\":", focused, ",\"candidates\":[");
-  if (o.has_candidate_window() && o.candidate_window().candidate_size() > 0) {
-    const auto& w = o.candidate_window();
-    for (int i = 0; i < w.candidate_size(); ++i) {
-      if (i > 0) s += ",";
-      AppendJson(s, w.candidate(i).value());
-    }
-    const int first = static_cast<int>(w.candidate(0).index());
-    s += "],\"selected\":";
-    if (w.has_focused_index()) {
-      absl::StrAppend(&s, static_cast<int>(w.focused_index()) - first);
-    } else {
-      s += "null";
-    }
-    const int pages = (static_cast<int>(w.size()) + kPageSize - 1) / kPageSize;
-    absl::StrAppend(&s, ",\"page\":[", first / kPageSize + 1, ",", pages, "]}");
-  } else {
-    s += "],\"selected\":null,\"page\":null}";
+  const auto& all = o.all_candidate_words();
+  for (int i = 0; i < all.candidates_size(); ++i) {
+    if (i > 0) s += ",";
+    AppendJson(s, all.candidates(i).value());
   }
+  s += "],\"selected\":";
+  if (all.candidates_size() > 0 && all.has_focused_index()) {
+    absl::StrAppend(&s, all.focused_index());
+  } else {
+    s += "null";
+  }
+  s += "}";
   return s;
 }
 
@@ -233,11 +226,10 @@ const char* cssgsg_mozc_command(CssgsgMozc* m, int32_t command, int32_t arg) {
     case CSSGSG_MOZC_EXPAND: ok = Special(*m, KeyEvent::RIGHT, true, &o); break;
     case CSSGSG_MOZC_NEXT_PAGE: ok = Session(*m, SessionCommand::CONVERT_NEXT_PAGE, -1, &o); break;
     case CSSGSG_MOZC_PREV_PAGE: ok = Session(*m, SessionCommand::CONVERT_PREV_PAGE, -1, &o); break;
-    case CSSGSG_MOZC_SELECT_ON_PAGE: {
-      if (!m->last.has_candidate_window()) return nullptr;
-      const auto& w = m->last.candidate_window();
-      if (arg < 0 || arg >= w.candidate_size()) return nullptr;
-      ok = Session(*m, SessionCommand::SELECT_CANDIDATE, w.candidate(arg).id(), &o);
+    case CSSGSG_MOZC_SELECT: {
+      const auto& all = m->last.all_candidate_words();
+      if (arg < 0 || arg >= all.candidates_size()) return nullptr;
+      ok = Session(*m, SessionCommand::SELECT_CANDIDATE, all.candidates(arg).id(), &o);
       break;
     }
     default:

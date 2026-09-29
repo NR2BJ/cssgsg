@@ -30,7 +30,8 @@ struct PreeditUpdate {
 enum CandidateUpdate {
     case unchanged
     case hide
-    case show(items: [String], selected: Int?)
+    /// items: 포커스된 문절의 후보 전체, selected: 전체 목록 기준, grid: 격자(펼친) 모드.
+    case show(items: [String], selected: Int?, grid: Bool)
 }
 
 /// 엔진이 키 하나를 처리한 결과(Swift 쪽 사본). C 쪽 포인터는 다음 호출 때 무효가 되므로 바로 복사한다.
@@ -137,7 +138,11 @@ final class CoreEngine {
                 let items = (0..<Int(o.candidate_count)).compactMap { i in
                     o.candidates?[i].map { String(cString: $0) }
                 }
-                out.candidates = .show(items: items, selected: o.candidate_selected >= 0 ? Int(o.candidate_selected) : nil)
+                out.candidates = .show(
+                    items: items,
+                    selected: o.candidate_selected >= 0 ? Int(o.candidate_selected) : nil,
+                    grid: o.candidate_grid != 0
+                )
             }
         }
         return out

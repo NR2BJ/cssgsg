@@ -4,7 +4,7 @@
 //! 코어는 읽기를 넘기고 결과 화면(문절·후보)을 받아 표시만 한다. 셸이 이 트레이트를 구현해서 넣는다.
 //! 엔진이 아직 준비되지 않았으면 `start`가 `None`을 돌려주고, 입력 스레드는 기다리지 않는다.
 
-/// 변환 중 명령. Mozc 세션 명령과 1:1로 대응한다.
+/// 변환 중 명령. Mozc 세션 명령과 대응한다. 페이지 넘김·격자 이동은 엔진이 목표 번호를 계산해 `Select`로 보낸다.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConvCmd {
     Next,
@@ -13,10 +13,8 @@ pub enum ConvCmd {
     FocusRight,
     Shrink,
     Expand,
-    NextPage,
-    PrevPage,
-    /// 지금 보이는 후보 페이지에서 n번째(0부터) 후보를 고른다.
-    SelectOnPage(usize),
+    /// 포커스된 문절의 후보 중 n번째(0부터, 전체 목록 기준)를 고른다.
+    Select(usize),
 }
 
 /// 변환 결과 화면.
@@ -26,12 +24,10 @@ pub struct ConvView {
     pub segments: Vec<String>,
     /// 포커스된 문절.
     pub focused: usize,
-    /// 포커스된 문절의 후보 중 지금 페이지에 보이는 것.
+    /// 포커스된 문절의 후보 전체. 페이지는 화면(후보창)이 나눈다.
     pub candidates: Vec<String>,
-    /// 지금 페이지 안에서 선택된 후보.
+    /// 지금 고른 후보(전체 목록 기준).
     pub selected: Option<usize>,
-    /// (지금 페이지, 전체 페이지), 1부터.
-    pub page: Option<(usize, usize)>,
 }
 
 pub trait Converter {
@@ -59,7 +55,6 @@ impl EchoConverter {
             focused: 0,
             candidates: self.candidates.clone(),
             selected: Some(self.selected),
-            page: Some((1, 1)),
         }
     }
 }
@@ -83,8 +78,8 @@ impl Converter for EchoConverter {
         match cmd {
             ConvCmd::Next => self.selected = (self.selected + 1) % n,
             ConvCmd::Prev => self.selected = (self.selected + n - 1) % n,
-            ConvCmd::SelectOnPage(i) if i < n => self.selected = i,
-            ConvCmd::SelectOnPage(_) => return None,
+            ConvCmd::Select(i) if i < n => self.selected = i,
+            ConvCmd::Select(_) => return None,
             _ => {}
         }
         Some(self.view())
