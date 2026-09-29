@@ -5,7 +5,7 @@
 #
 # - 버전에 -가 붙으면(0.2.0-beta.1) prerelease로 올린다. 앱은 지금 정식 릴리스(/releases/latest)만 보므로 받지 않는다.
 # - 올라간 코드와 같은 코드로 만들도록, 커밋하지 않았거나 푸시하지 않은 변경이 있으면 멈춘다.
-# - 검사를 모두 통과해야 만든다: cargo test·clippy·fmt, FFI·셸·업데이트 스모크, 학습 페이지.
+# - 검사를 모두 통과해야 만든다: cargo test·clippy·fmt, FFI·셸·업데이트 스모크, 학습 페이지, Mozc 변환, 고지문.
 # - 파일 이름은 cssgsg.pkg로 고정한다. https://github.com/NR2BJ/cssgsg/releases/latest/download/cssgsg.pkg 가 늘 최신이다.
 # - 올린 뒤 앱과 같은 코드로 최신 릴리스를 읽고, 파일을 받아 해시를 맞춰 본다.
 # - CSSGSG_COMMIT_TRAILER가 있으면 버전 커밋 메시지 끝에 붙인다.
@@ -77,6 +77,9 @@ step "FFI 스모크" bash tools/ffi-smoke/run.sh
 step "셸 스모크" bash tools/mac/shell-smoke/run.sh
 step "업데이트 스모크" bash tools/mac/update-smoke/run.sh
 step "학습 페이지" node tools/learn/build.mjs --check
+step "Mozc 빌드" bash tools/mozc/build.sh
+step "Mozc 변환" cargo test -q -p cssgsg-core --features mozc --test mozc
+step "고지문" bash tools/make-notices.sh --check
 
 if [ "$ASSUME_YES" -ne 1 ]; then
   printf "%s를 공개 릴리스로 올린다. 계속할까? [y/N] " "$TAG"

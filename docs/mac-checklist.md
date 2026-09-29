@@ -18,7 +18,8 @@
 | 7 | ㅊ | `j f s` 후 Backspace 두 번 | 안 → 아 → ㅇ (한 타씩 지워짐) | `ko:jfs{bs}` → `아`, `ko:jfs{bs}{bs}` → `ㅇ` |
 | 8 | ㅊ | 왼쪽 Shift를 톡 | **月** (커서 근처에도 "月"이 잠깐 뜸) | `ko:{ls}ckeuwl` → `にほんご` |
 | 9 | 月 | `c k e u w l` 후 Enter | にほんご (밑줄이 있다가 Enter로 확정) | `ja:ckeuwl{ent}` → `にほんご` |
-| 10 | 月 | `c k e u w l` 후 Space, Space | 후보창 1.にほんご 2.ニホンゴ → 두 번째 Space에 ニホンゴ | `ja:ckeuwl{sp}{sp}` → `ニホンゴ` |
+| 10 | 月 | `c k e u w l` 후 Space, Space | 첫 Space에 日本語, 두 번째 Space에 후보창(日本語, ニホンゴ, にほんご …)이 뜨고 ニホンゴ | `ja:ckeuwl{sp}{sp}` → `ニホンゴ` |
+| 10-1 | 月 | `c k e u w l` 후 Space, Enter | 日本語 (Mozc 한자 변환) | — (`cargo test --features mozc --test mozc`) |
 | 11 | 月 | Caps Lock 켜고 `c k e u w l` | ニホンゴ. 치는 대로 확정되고 밑줄은 마지막 글자(ゴ)에만. 오른쪽 Shift를 톡 해서 G로 가면 Caps Lock 불이 저절로 꺼짐 | `ja:{caps}ckeuwl` → `ニホンゴ` |
 | 12 | 아무 모드 | 오른쪽 Shift를 1초 꾹 눌렀다 뗌 | 전환 안 됨 | — (탭 시간은 `tools/mac/shell-smoke`가 확인) |
 | 13 | ㅊ | `j f s` 후 ⌘A | "안"이 확정되고 전체 선택 | `ko:jfs{M-a}` → `안` |

@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         server = IMKServer(name: connection, bundleIdentifier: Bundle.main.bundleIdentifier)
         let engine = CoreEngine.shared
         KeyEventReposter.replayDelay = TimeInterval(engine.macSettings.newline_replay_ms) / 1000
+        startMozc(engine)
         setupStatusItem()
         updateStatus(engine.mode)
         InputSourceSetup.register()
@@ -28,6 +29,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             "connection": connection,
             "version": Updater.currentVersion,
             "configError": engine.configError ?? "none",
+        ])
+    }
+
+    /// Mozc(일본어 한자 변환)를 켠다. 준비는 10~20ms라 시작할 때 바로 한다.
+    /// 학습 기록은 cssgsg 폴더 안에 따로 둔다(NRIME의 ~/Library/Application Support/Mozc와 섞이지 않게).
+    private func startMozc(_ engine: CoreEngine) {
+        guard let data = Bundle.main.path(forResource: "mozc", ofType: "data") else {
+            DeveloperLogger.shared.log("Mozc", "no data in bundle")
+            return
+        }
+        let profile = CoreEngine.mozcProfileURL
+        try? FileManager.default.createDirectory(at: profile, withIntermediateDirectories: true)
+        let started = Date()
+        let ok = engine.useMozc(dataPath: data, profileDir: profile.path)
+        DeveloperLogger.shared.log("Mozc", ok ? "ready" : "failed", metadata: [
+            "ms": String(format: "%.0f", Date().timeIntervalSince(started) * 1000),
+            "error": ok ? "-" : String(cString: cssgsg_last_error()),
         ])
     }
 

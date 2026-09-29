@@ -12,6 +12,8 @@ pub mod hotkey;
 pub mod kana;
 pub mod key;
 pub mod latin;
+#[cfg(feature = "mozc")]
+pub mod mozc;
 pub mod sim;
 
 pub use config::Config;

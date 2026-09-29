@@ -84,6 +84,15 @@ final class CoreEngine {
 
     var mode: InputMode { InputMode(rawValue: cssgsg_engine_mode(engine)) ?? .en }
 
+    /// 일본어 한자 변환(Mozc)을 켠다. 실패하면 false(변환기는 히라가나·가타카나만 내는 임시 변환기 그대로).
+    func useMozc(dataPath: String, profileDir: String) -> Bool {
+        cssgsg_engine_use_mozc(engine, dataPath, profileDir) != 0
+    }
+
+    static var mozcProfileURL: URL {
+        configURL.deletingLastPathComponent().appendingPathComponent("mozc", isDirectory: true)
+    }
+
     func handle(_ event: CssgsgKeyEvent, secureField: Bool = false, gameMode: Bool = false, tapsDisabled: Bool = false) -> EngineOutput {
         var ev = event
         var ctx = CssgsgContext(

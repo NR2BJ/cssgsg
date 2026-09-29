@@ -95,6 +95,10 @@ const CssgsgOutput *cssgsg_engine_reset(CssgsgEngine *engine);
 const CssgsgOutput *cssgsg_engine_set_mode(CssgsgEngine *engine, int32_t mode);
 int32_t cssgsg_engine_mode(const CssgsgEngine *engine);
 
+/* Mozc(일본어 한자 변환)를 켠다. 성공하면 1. mozc 기능 없이 빌드했거나 데이터를 못 읽으면 0(변환기는 그대로).
+ * data_path: mozc.data, profile_dir: 학습·사용자 사전 폴더. */
+uint8_t cssgsg_engine_use_mozc(CssgsgEngine *engine, const char *data_path, const char *profile_dir);
+
 /* 맥 셸 설정(설정 파일의 [mac]). 엔진은 쓰지 않는다. engine이 NULL이면 기본값. */
 typedef struct CssgsgMacSettings {
     uint8_t hud;               /* 모드를 바꿀 때 A/한/あ를 잠깐 보인다 */

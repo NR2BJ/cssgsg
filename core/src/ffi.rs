@@ -309,6 +309,47 @@ pub unsafe extern "C" fn cssgsg_engine_mode(e: *const CssgsgEngine) -> i32 {
     unsafe { e.as_ref() }.map_or(-1, |e| e.engine.mode() as i32)
 }
 
+/// Mozc(일본어 한자 변환)를 켠다. 성공하면 1. `mozc` 기능 없이 빌드했거나 데이터를 못 읽으면 0(변환기는 그대로).
+///
+/// # Safety
+/// `e`는 `cssgsg_engine_new`가 돌려준 살아 있는 포인터, 두 문자열은 NUL로 끝나야 한다.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn cssgsg_engine_use_mozc(
+    e: *mut CssgsgEngine,
+    data_path: *const c_char,
+    profile_dir: *const c_char,
+) -> u8 {
+    // SAFETY: 위 약속대로 살아 있는 엔진이다.
+    let Some(e) = (unsafe { e.as_mut() }) else { return 0 };
+    if data_path.is_null() || profile_dir.is_null() {
+        set_error("mozc: 경로가 NULL");
+        return 0;
+    }
+    #[cfg(feature = "mozc")]
+    {
+        // SAFETY: NUL로 끝나는 문자열이다.
+        let (data, profile) = unsafe {
+            (CStr::from_ptr(data_path).to_string_lossy(), CStr::from_ptr(profile_dir).to_string_lossy())
+        };
+        match crate::mozc::MozcConverter::new(&data, &profile) {
+            Some(converter) => {
+                e.engine.set_converter(Box::new(converter));
+                1
+            }
+            None => {
+                set_error("mozc: 엔진을 만들지 못했다(데이터 경로 확인)");
+                0
+            }
+        }
+    }
+    #[cfg(not(feature = "mozc"))]
+    {
+        let _ = e;
+        set_error("mozc 기능 없이 빌드했다");
+        0
+    }
+}
+
 /// 맥 셸 설정을 읽는다. `e`가 NULL이면 기본값.
 ///
 /// # Safety

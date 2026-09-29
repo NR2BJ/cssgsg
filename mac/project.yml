@@ -29,6 +29,14 @@ targets:
       - path: ../learn/index.html
         buildPhase: resources
         type: file
+      # 다른 소프트웨어·데이터 고지문(tools/make-notices.sh)
+      - path: ../THIRD_PARTY_NOTICES.txt
+        buildPhase: resources
+        type: file
+      # Mozc 사전 데이터(tools/mozc/build.sh가 만든다)
+      - path: ../build/mozc-out/data/mozc.data
+        buildPhase: resources
+        type: file
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.cssgsg.inputmethod.app
@@ -37,7 +45,8 @@ targets:
         SWIFT_OBJC_BRIDGING_HEADER: cssgsg/cssgsg-Bridging-Header.h
         HEADER_SEARCH_PATHS: $(SRCROOT)/../core/include
         LIBRARY_SEARCH_PATHS: $(SRCROOT)/../build/cargo/release
-        OTHER_LDFLAGS: -lcssgsg_core
+        # 코어(libcssgsg_core.a)에 Mozc(C++)가 묶여 있다
+        OTHER_LDFLAGS: -lcssgsg_core -lc++
         COMBINE_HIDPI_IMAGES: true
         # 입력기는 서명 없이(ad-hoc) 쓴다
         CODE_SIGN_IDENTITY: "-"
@@ -54,3 +63,4 @@ targets:
       - sdk: InputMethodKit.framework
       - sdk: Carbon.framework
       - sdk: IOKit.framework
+      - sdk: Security.framework
