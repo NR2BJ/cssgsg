@@ -1,0 +1,48 @@
+# English lines. One line = one line to type. Lines starting with # are comments.
+# Allowed characters: letters, space, and . , ? ! ' " - (build.mjs checks them against Graphite).
+
+The sun is warm today.
+I like to read in the morning.
+She has a small red car.
+We went to the park after lunch.
+Can you help me with this?
+It's a good day to learn something new.
+The cat is sleeping on the chair.
+Please close the door when you leave.
+My brother plays the guitar at night.
+Where did you put the keys?
+Take your time, and don't rush.
+Slow and steady wins the race.
+The train leaves at seven.
+There are three apples on the table.
+He writes a short note every day.
+Let's meet at the station.
+The quick brown fox jumps over the lazy dog.
+Practice a little every day.
+My fingers are learning new places.
+What time is it now?
+The kids are playing in the yard.
+I'm going to the store for some milk.
+This book is easy to read.
+Thank you for your help!
+We need a new plan for next week.
+Turn left at the next corner.
+The river runs past the old mill.
+It was cold, so I wore a jacket.
+Do you want tea or coffee?
+Her garden is full of bright flowers.
+Keep your eyes on the text, not your hands.
+The meeting starts at nine.
+I can't find my phone.
+They built a house near the lake.
+Every mistake is a chance to learn.
+Open the window, please.
+The dog ran across the field.
+We had pizza for dinner.
+Is this seat taken?
+My favorite season is autumn.
+A well-known song played on the radio.
+He said, "See you tomorrow."
+Six boxes of fresh juice arrived.
+Just type slowly and carefully.
+Zebras and yaks live far away.

@@ -78,6 +78,7 @@ step "셸 스모크" bash tools/mac/shell-smoke/run.sh
 step "업데이트 스모크" bash tools/mac/update-smoke/run.sh
 step "설정 앱 스모크" bash tools/mac/settings-smoke/run.sh
 step "학습 페이지" node tools/learn/build.mjs --check
+step "타자 연습 페이지" node tools/practice/build.mjs --check
 step "Mozc 빌드" bash tools/mozc/build.sh
 step "Mozc 변환" cargo test -q -p cssgsg-core --features mozc --test mozc
 step "Mozc 엔진 스모크" bash tools/mac/mozc-smoke/run.sh

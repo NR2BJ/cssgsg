@@ -6,6 +6,9 @@
 //!   cssgsg-cli repl  [--mode en|ko|ja] [--config 파일]           한 줄씩 쳐 가며 상태를 본다
 //!   cssgsg-cli layout-json 배열ID                                  배열 데이터를 JSON으로 (교차 검증·학습 페이지용)
 //!       배열ID: chamshin-v18, chamshin-d-v19, graphite, shingetsu
+//!   cssgsg-cli encode [--ko-layout 배열ID]                          표준입력의 한글 음절마다 치는 방법을 JSON 한 줄로
+//!       {"s":"각","ways":[{"keys":"kfe","rank":0,"screens":["ㄱ","가","각"]},…]} (권장부터, 화면은 엔진이 한 타씩 친 것.
+//!       타자 연습 페이지용, 끝 화면이 그 음절이 아니면 실패)
 //!
 //! 공통 옵션 --ko-layout 배열ID 는 한국어 배열만 바꾼다(설정 파일 없이).
 //!
@@ -15,7 +18,7 @@
 use std::io::{self, BufRead, Write};
 use std::process::ExitCode;
 
-use cssgsg_core::hangul::{Action, KoLayout};
+use cssgsg_core::hangul::{Action, KoLayout, decompose, encode};
 use cssgsg_core::kana::KanaLayout;
 use cssgsg_core::latin::LatinLayout;
 use cssgsg_core::sim::Sim;
@@ -87,6 +90,42 @@ fn printable_keys() -> Vec<Key> {
     keys.sort();
     keys.dedup();
     keys
+}
+
+/// 표준입력의 한글 음절마다(나온 순서, 겹치면 한 번) 치는 방법과 한 타씩의 화면. 권장 입력부터.
+fn encode_syllables(opts: &Opts) -> io::Result<()> {
+    let layout = KoLayout::builtin(&opts.config.ko_layout).ok_or_else(|| io::Error::other("한국어 배열"))?;
+    let ko = Opts { mode: Mode::Ko, config: opts.config.clone(), rest: Vec::new() };
+    let mut seen = std::collections::HashSet::new();
+    let mut out = io::BufWriter::new(io::stdout());
+    for line in io::stdin().lock().lines() {
+        for s in line?.chars() {
+            let Some((cho, jung, jong)) = decompose(s) else { continue };
+            if !seen.insert(s) {
+                continue;
+            }
+            let mut ways = Vec::new();
+            for way in encode::encodings(&layout, cho, jung, jong) {
+                let keys = way.sim_keys();
+                let mut screens = Vec::new();
+                for end in keys.char_indices().map(|(i, c)| i + c.len_utf8()) {
+                    screens.push(run_keys(&ko, &keys[..end]).map_err(io::Error::other)?);
+                }
+                if screens.last().map(String::as_str) != Some(s.to_string().as_str()) {
+                    return Err(io::Error::other(format!("{s}: {keys:?}를 치면 {screens:?}")));
+                }
+                let screens: Vec<String> = screens.iter().map(|x| json(x)).collect();
+                ways.push(format!(
+                    "{{\"keys\":{},\"rank\":{},\"screens\":[{}]}}",
+                    json(&keys),
+                    way.rank,
+                    screens.join(",")
+                ));
+            }
+            writeln!(out, "{{\"s\":{},\"ways\":[{}]}}", json(&s.to_string()), ways.join(","))?;
+        }
+    }
+    out.flush()
 }
 
 fn layout_json(id: &str) -> Result<String, String> {
@@ -274,6 +313,7 @@ fn main() -> ExitCode {
             out.flush()
         })(),
         "repl" => repl(&opts),
+        "encode" => encode_syllables(&opts),
         "layout-json" => match opts.rest.first().map(|id| layout_json(id)) {
             Some(Ok(j)) => {
                 println!("{j}");

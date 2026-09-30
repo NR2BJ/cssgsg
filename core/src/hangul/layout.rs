@@ -39,6 +39,20 @@ impl fmt::Display for LayoutError {
 
 impl std::error::Error for LayoutError {}
 
+/// 조합표의 한 조합이 어떤 것인지. 조합기는 가리지 않고 모두 받는다. 권장 입력을 알려 줄 때 쓴다(`hangul::encode`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ComboKind {
+    /// 원작자가 권하는 조합(ㅇ+ㄱ=ㄲ, 받침 ㄱ+ㅁ=ㅋ 등, 날개셋 .ist 속 사용법).
+    Recommended,
+    /// 표준 조합(같은 키 연타, 받침 ㄹ+ㄱ=ㄺ 등).
+    Standard,
+    /// 역순 편의 조합(오이).
+    Reverse,
+}
+
+/// 조합표: (앞 낱자, 뒤 낱자) → (합친 낱자, 어떤 조합인지).
+type ComboMap = HashMap<(char, char), (char, ComboKind)>;
+
 /// 한국어 배열: 키별 역할과 조합표.
 #[derive(Debug, Clone)]
 pub struct KoLayout {
@@ -46,9 +60,9 @@ pub struct KoLayout {
     pub name: String,
     base: HashMap<Key, Roles>,
     shift: HashMap<Key, Roles>,
-    cho: HashMap<(char, char), char>,
-    jung: HashMap<(char, char), char>,
-    jong: HashMap<(char, char), char>,
+    cho: ComboMap,
+    jung: ComboMap,
+    jong: ComboMap,
 }
 
 impl KoLayout {
@@ -72,9 +86,14 @@ impl KoLayout {
             name: raw.meta.name,
             base: parse_keys(&raw.base)?,
             shift: parse_keys(&raw.shift)?,
-            cho: parse_combos(&raw.combine.cho, is_cho)?,
-            jung: parse_combos(&raw.combine.jung, is_jung)?,
-            jong: parse_combos(&raw.combine.jong, is_jong)?,
+            cho: parse_kinds(&raw.combine.cho, &raw.combine.cho_recommended, &[], is_cho)?,
+            jung: parse_kinds(&raw.combine.jung, &[], &[], is_jung)?,
+            jong: parse_kinds(
+                &raw.combine.jong,
+                &raw.combine.jong_recommended,
+                &raw.combine.jong_reverse,
+                is_jong,
+            )?,
         })
     }
 
@@ -90,23 +109,32 @@ impl KoLayout {
 
     /// 조합표: (앞, 뒤, 결과).
     pub fn cho_combos(&self) -> impl Iterator<Item = (char, char, char)> + '_ {
-        self.cho.iter().map(|(&(a, b), &c)| (a, b, c))
+        self.cho.iter().map(|(&(a, b), &(c, _))| (a, b, c))
     }
     pub fn jung_combos(&self) -> impl Iterator<Item = (char, char, char)> + '_ {
-        self.jung.iter().map(|(&(a, b), &c)| (a, b, c))
+        self.jung.iter().map(|(&(a, b), &(c, _))| (a, b, c))
     }
     pub fn jong_combos(&self) -> impl Iterator<Item = (char, char, char)> + '_ {
-        self.jong.iter().map(|(&(a, b), &c)| (a, b, c))
+        self.jong.iter().map(|(&(a, b), &(c, _))| (a, b, c))
     }
 
     pub fn combine_cho(&self, a: char, b: char) -> Option<char> {
-        self.cho.get(&(a, b)).copied()
+        self.cho.get(&(a, b)).map(|&(c, _)| c)
     }
     pub fn combine_jung(&self, a: char, b: char) -> Option<char> {
-        self.jung.get(&(a, b)).copied()
+        self.jung.get(&(a, b)).map(|&(c, _)| c)
     }
     pub fn combine_jong(&self, a: char, b: char) -> Option<char> {
-        self.jong.get(&(a, b)).copied()
+        self.jong.get(&(a, b)).map(|&(c, _)| c)
+    }
+
+    /// 초성 조합의 종류(표준·권장). 조합이 아니면 `None`.
+    pub fn cho_combo_kind(&self, a: char, b: char) -> Option<ComboKind> {
+        self.cho.get(&(a, b)).map(|&(_, k)| k)
+    }
+    /// 받침 조합의 종류(표준·권장·역순). 조합이 아니면 `None`.
+    pub fn jong_combo_kind(&self, a: char, b: char) -> Option<ComboKind> {
+        self.jong.get(&(a, b)).map(|&(_, k)| k)
     }
 }
 
@@ -143,9 +171,15 @@ struct RawCombine {
     #[serde(default)]
     cho: Vec<String>,
     #[serde(default)]
+    cho_recommended: Vec<String>,
+    #[serde(default)]
     jung: Vec<String>,
     #[serde(default)]
     jong: Vec<String>,
+    #[serde(default)]
+    jong_recommended: Vec<String>,
+    #[serde(default)]
+    jong_reverse: Vec<String>,
 }
 
 fn parse_keys(raw: &HashMap<String, RawRoles>) -> Result<HashMap<Key, Roles>, LayoutError> {
@@ -188,6 +222,28 @@ fn jamo(
         (Some(c), None) if valid(c) => Ok(Some(c)),
         _ => Err(LayoutError(format!("{key}.{field}: {s:?}는 이 자리에 올 수 없는 낱자다"))),
     }
+}
+
+/// 표준·권장·역순 세 목록을 한 조합표로 합친다. 같은 조합이 두 목록에 있으면 오류다.
+fn parse_kinds(
+    standard: &[String],
+    recommended: &[String],
+    reverse: &[String],
+    valid: fn(char) -> bool,
+) -> Result<ComboMap, LayoutError> {
+    let mut out = HashMap::new();
+    for (list, kind) in [
+        (standard, ComboKind::Standard),
+        (recommended, ComboKind::Recommended),
+        (reverse, ComboKind::Reverse),
+    ] {
+        for ((a, b), c) in parse_combos(list, valid)? {
+            if out.insert((a, b), (c, kind)).is_some() {
+                return Err(LayoutError(format!("조합 {a}{b}가 두 목록에 있다")));
+            }
+        }
+    }
+    Ok(out)
 }
 
 fn parse_combos(
@@ -249,6 +305,26 @@ mod tests {
         assert_eq!(l.roles(Key::B, true).unwrap().jong, None);
         assert_eq!(l.combine_jong('ㄱ', 'ㅁ'), None);
         assert_eq!(l.combine_jong('ㅍ', 'ㄹ'), Some('ㄿ'));
+    }
+
+    #[test]
+    fn combos_keep_their_kind() {
+        // 세 목록을 합친 조합표는 나누기 전(0.6.5까지)과 같다: 초성 10, 중성 8, 받침 v18 35 · D 33.
+        let v18 = KoLayout::builtin("chamshin-v18").unwrap();
+        assert_eq!(
+            (v18.cho_combos().count(), v18.jung_combos().count(), v18.jong_combos().count()),
+            (10, 8, 35)
+        );
+        let d = KoLayout::builtin("chamshin-d-v19").unwrap();
+        assert_eq!((d.cho_combos().count(), d.jung_combos().count(), d.jong_combos().count()), (10, 8, 33));
+        assert_eq!(v18.cho_combo_kind('ㅇ', 'ㄱ'), Some(ComboKind::Recommended));
+        assert_eq!(v18.cho_combo_kind('ㄱ', 'ㄱ'), Some(ComboKind::Standard));
+        assert_eq!(v18.jong_combo_kind('ㄱ', 'ㅁ'), Some(ComboKind::Recommended));
+        assert_eq!(v18.jong_combo_kind('ㄹ', 'ㄱ'), Some(ComboKind::Standard));
+        assert_eq!(v18.jong_combo_kind('ㅍ', 'ㄹ'), Some(ComboKind::Reverse));
+        assert_eq!(d.jong_combo_kind('ㅍ', 'ㄹ'), Some(ComboKind::Recommended), "D는 ㄿ = ㅍ+ㄹ을 권한다");
+        let twice = "[meta]\nid='x'\nname='x'\n[base]\nq = { cho = \"ㄱ\" }\n[combine]\ncho=[\"ㄱㄱ=ㄲ\"]\ncho_recommended=[\"ㄱㄱ=ㄲ\"]\n";
+        assert!(KoLayout::from_toml(twice).is_err(), "한 조합이 두 목록에");
     }
 
     #[test]

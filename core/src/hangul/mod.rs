@@ -1,10 +1,11 @@
 //! 한국어: 한글 낱자 표, 참신세벌식 배열 데이터, 갈마들이 조합기.
 
 mod composer;
+pub mod encode;
 mod layout;
 
 pub use composer::{KoComposer, KoResult};
-pub use layout::{Action, KoLayout, Roles};
+pub use layout::{Action, ComboKind, KoLayout, Roles};
 
 /// 초성 19자 (호환 자모, 유니코드 음절 조합 순서).
 pub const CHO: [char; 19] = [
@@ -45,6 +46,13 @@ pub fn syllable(cho: char, jung: char, jong: Option<char>) -> Option<char> {
     char::from_u32(0xAC00 + (l * 21 + v) * 28 + t)
 }
 
+/// 완성형 음절을 초성·중성·종성으로 나눈다. 완성형 음절이 아니면 `None`.
+pub fn decompose(s: char) -> Option<(char, char, Option<char>)> {
+    let i = (s as u32).checked_sub(0xAC00).filter(|&i| i < 11172)?;
+    let (l, v, t) = (i / (21 * 28), (i % (21 * 28)) / 28, i % 28);
+    Some((CHO[l as usize], JUNG[v as usize], (t > 0).then(|| JONG[t as usize - 1])))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -56,5 +64,9 @@ mod tests {
         assert_eq!(syllable('ㄱ', 'ㅏ', Some('ㄺ')), Some('갉'));
         assert_eq!(syllable('ㅎ', 'ㅣ', Some('ㅎ')), Some('힣'));
         assert_eq!(syllable('ㄸ', 'ㅏ', Some('ㄸ')), None);
+        assert_eq!(decompose('한'), Some(('ㅎ', 'ㅏ', Some('ㄴ'))));
+        assert_eq!(decompose('가'), Some(('ㄱ', 'ㅏ', None)));
+        assert_eq!(decompose('힣'), Some(('ㅎ', 'ㅣ', Some('ㅎ'))));
+        assert_eq!((decompose('ㄱ'), decompose('a')), (None, None));
     }
 }

@@ -31,6 +31,9 @@
   0.6.0부터 엔진은 실행 중에 읽는 dylib이고, 입력기와 따로 업데이트된다(아래 "Mozc 엔진 업데이트")
 - [x] 한국어 한자 변환(0.3.1, 왼쪽 Option+Return(설정에서 바꾼다), [CONCEPT.md](CONCEPT.md) §5.4): 조합 중인 글자 하나를 libhangul 사전으로 바꾼다.
   후보창에 뜻(國 나라 국)을 같이 보이고, 자음 하나 + Option+Return은 기호표(ㅁ → ※☆★…). 고른 후보를 기억한다
+- [x] 타자 연습 페이지(`practice/index.html`, HTML 파일 하나라서 브라우저로 열면 된다): 세 배열을 단계별로 익힌다.
+  참신은 받침 없이 홈열 → 윗열 → 아랫열 → 겹모음·된소리, 받침도 같은 순서, 그다음 규칙(ㅗ·ㅜ, 문장부호, ❖).
+  단계마다 자리 익히기 → 낱말 치기 → 줄 치기. 틀리면 넘어가지 않고, 모르는 키는 멈추면 보여 준다
 - [ ] Windows TSF (나중)
 
 ## 구조
@@ -47,9 +50,10 @@ mozc/       Mozc C API 래퍼(cssgsg용, libcssgsg_mozc.dylib). 소스·빌드�
 .github/    Mozc 엔진 워크플로(mozc-component.yml): upstream Mozc가 바뀌면 GitHub에서 엔진을 빌드해 낸다
 tools/      ffi-smoke(C 헤더 확인), ohi-oracle(오이 차분 비교), crosscheck(배열 데이터 교차 검증),
             mac(pkg·릴리스·서명 스크립트, 셸·업데이트·설정 앱·Mozc 엔진 스모크 테스트), mozc(엔진 빌드·묶기),
-            learn(학습 페이지 빌드)
+            learn(학습 페이지 빌드), practice(타자 연습 페이지 빌드·연습 글)
 docs/       verification.md(검증 현황), mac-checklist.md(설치 뒤 확인 목록), releases/(릴리스 노트)
 learn/      배열 학습 페이지(설정 앱 학습 탭). template.html → tools/learn/build.mjs → index.html
+practice/   타자 연습 페이지(세 언어, 단일 HTML). template.html + tools/practice/*.txt → tools/practice/build.mjs → index.html
 ```
 
 ## 개발
@@ -138,6 +142,7 @@ cargo test                                         # 전수·공식 파일 대�
 node tools/crosscheck/chamshin.mjs                 # 참신 키 배치 ↔ 타닥 배열도·오이 배열표
 cd tools/ohi-oracle && npm install && node diff.mjs --count 20000   # 참신 조합 ↔ 오이 (무작위 키열)
 node tools/learn/build.mjs --check                # 학습 페이지 예시를 엔진으로 확인, index.html이 최신인지
+node tools/practice/build.mjs --check             # 타자 연습 페이지: 낱말·줄·예시를 모두 엔진으로 쳐 보고, index.html이 최신인지
 bash tools/mac/shell-smoke/run.sh                  # 맥 셸 Swift 계층(진짜 NSEvent) ↔ 러스트 시뮬레이터
 bash tools/mac/update-smoke/run.sh                 # 업데이트 코드: 버전 순서, 채널(정식·베타), GitHub 응답, 해시, 설치 스크립트
 bash tools/mac/settings-smoke/run.sh               # 설정 앱: 단축키 녹화(가짜 키 이벤트, 좌우), 화면 글자, 사전 읽기 정리 (--shots: 화면 스냅숏)
@@ -146,6 +151,7 @@ bash tools/mac/mozc-smoke/run.sh                   # Mozc 엔진: 고르기·지
 ```
 
 학습 페이지를 고쳤으면 `node tools/learn/build.mjs`로 `learn/index.html`을 다시 만든다.
+타자 연습 페이지나 연습 글(`tools/practice/*.txt`)을 고쳤으면 `node tools/practice/build.mjs`로 `practice/index.html`을 다시 만든다.
 
 빌드 산출물은 `build/` 아래에 둔다(`~/Documents`가 Syncthing 동기화 폴더라서 `.stignore`가 막는 이름을 썼다).
 

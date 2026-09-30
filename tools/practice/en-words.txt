@@ -1,0 +1,74 @@
+# English words. Several per line, separated by spaces; # starts a comment. Lowercase letters only.
+# build.mjs picks, for each lesson, the words made only of the letters learned so far. Duplicates are dropped.
+
+# short and frequent
+a an as at is it in on to of if or so no up us we he be by do go me my hi oh ok
+the and that this then than them they there their these those this with what when where which while who why how
+has had have was were are its his her him she you your our out off one two all any ask end not now new old
+see set sat sit saw say said sea tea eat ate ear era art are air aid and hat hit hot its
+
+# home row words
+ash sash hash stash that hats tat aha
+tin ten net nest rest rent rain train tree three here hear near nine tent test east seat heat neat heart earth
+star start stare share shine shirt sister rise risen tire tired train stain rate hate irate
+eight night right sight tight thing sing ring string sting green grain great gate age sage tiger yet yes stay gray yeast shy
+
+# people
+man men woman women child boy girl baby mother father sister brother friend family teacher student doctor driver
+farmer king queen person people parent uncle aunt cousin neighbor guest owner hero artist singer player writer
+
+# body
+hand head face eye ear nose mouth lip arm leg foot feet heart hair back skin neck knee toe finger thumb chin
+
+# nature
+sun moon star sky rain snow wind cloud tree leaf grass flower river lake sea ocean hill stone rock fire earth land
+field forest island beach wave sand mud storm light shade frost ice dawn dusk mountain valley desert
+
+# animals
+cat dog bird fish horse cow pig sheep duck hen fox bear wolf deer lion tiger mouse rabbit frog snake bee ant fly
+owl whale shark goat camel zebra yak koala panda monkey donkey turtle spider eagle parrot
+
+# food
+bread milk water tea coffee juice rice meat egg apple orange banana grape lemon cake pie soup salt sugar butter
+cheese honey pizza salad bean corn nut pear plum peach cookie jam toast pasta noodle tomato potato onion carrot
+
+# home and town
+house home room door window wall floor table chair bed desk lamp clock cup plate bowl spoon fork knife box bag
+book pen paper key phone car bus train ship boat bike road street city town park school shop store bank farm
+bridge church garden kitchen market office station hotel museum library yard fence roof stairs
+
+# time
+day night week month year today morning evening noon hour minute second spring summer fall autumn winter
+early late soon now then later never always often sometimes monday friday sunday weekend holiday birthday
+
+# doing
+go get make know think take see come want look use find give tell work call try ask need feel become leave put
+mean keep let begin seem help talk turn start show hear play run move like live believe hold bring happen write
+sit stand lose pay meet learn change lead understand watch follow stop create speak read allow add spend grow open
+walk win offer remember love consider appear buy wait serve send expect build stay fall cut reach remain suggest
+raise pass sell decide pull eat drink sleep sing dance swim jump climb throw catch cook clean wash draw paint fix
+carry drive ride fly smile laugh cry shout listen answer teach study finish close hide seek wish hope plan share
+type press touch count guess visit vote join enjoy explain agree arrive borrow check choose collect cover
+
+# describing
+good new first last long great little own other old right big high different small large next early young
+important few bad same able hot cold warm cool dark light bright happy sad easy hard soft quick slow fast full
+empty clean dirty rich poor strong weak short tall wide deep heavy safe quiet loud fresh sweet sour kind nice fine
+red blue green yellow white black brown pink gray gold silver purple clear busy calm brave funny lazy crazy
+
+# small words
+very often always never again also just still even here there away back only really almost quite rather maybe
+together about above across after against along among around before behind below beside between beyond during
+into near over since through under until upon within without because though although however
+
+# numbers
+one two three four five six seven eight nine ten eleven twelve twenty thirty forty fifty hundred thousand zero
+
+# rarer letters
+quiz queen quick quiet quite quote question square equal liquid
+zoo zone size prize jazz fizz buzz freeze frozen dozen amaze
+fox box six mix fix tax wax next text taxi exit extra exam relax
+jam jar jet job join joke joy judge juice june july just jungle jacket enjoy object project major
+kid kind king kite knee knock kick kiss kitchen keep key thank drink park walk look took work week
+van vase very visit voice vote view village valley violin seven over ever give have live move love wave
+yes yet yell yard yawn young youth yellow year yesterday

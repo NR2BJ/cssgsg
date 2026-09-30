@@ -1,0 +1,875 @@
+<!doctype html>
+<!--generated-->
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>cssgsg 타자 연습</title>
+<style>
+/* 배열 학습 페이지(learn/template.html)와 같은 색·글꼴. 판정 데이터는 tools/practice/build.mjs가 엔진으로 만들어 아래 DATA에 넣는다. */
+:root {
+  --bg: #f3f5f8; --panel: #ffffff; --ink: #15191e; --muted: #56606c; --faint: #87909b; --line: #d8dee5;
+  --accent: #2553c9; --accent-bg: #e6edfc;
+  --cho: #2553c9; --jung: #c2410c; --jong: #15803d; --sym: #3d4652; --latin: #15191e;
+  --star: #b45309; --black: #4f46e5; --daku: #be185d;
+  --key: #ffffff; --key-edge: #c7cfd8; --key-mod: #e8ecf1; --fresh: #fff1c9; --fresh-edge: #d9a31a;
+  --bad: #c62828; --bad-bg: #fde2e2; --good: #15803d;
+  --font-ui: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Hiragino Sans", "Segoe UI", "Malgun Gothic", "Yu Gothic UI", sans-serif;
+  --font-key: "SF Pro Rounded", ui-rounded, -apple-system, "Apple SD Gothic Neo", "Hiragino Maru Gothic ProN", "Hiragino Sans", "Malgun Gothic", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #101317; --panel: #171b20; --ink: #e7ebf0; --muted: #a3adb9; --faint: #707a86; --line: #2a3038;
+    --accent: #88a9ff; --accent-bg: #1c2742;
+    --cho: #88a9ff; --jung: #fb923c; --jong: #4ade80; --sym: #cbd2da; --latin: #e7ebf0;
+    --star: #fbbf24; --black: #a5b4fc; --daku: #f472b6;
+    --key: #1e2329; --key-edge: #353c45; --key-mod: #14181c; --fresh: #3b3016; --fresh-edge: #fbbf24;
+    --bad: #ff8a80; --bad-bg: #4a1e1e; --good: #4ade80;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #101317; --panel: #171b20; --ink: #e7ebf0; --muted: #a3adb9; --faint: #707a86; --line: #2a3038;
+  --accent: #88a9ff; --accent-bg: #1c2742;
+  --cho: #88a9ff; --jung: #fb923c; --jong: #4ade80; --sym: #cbd2da; --latin: #e7ebf0;
+  --star: #fbbf24; --black: #a5b4fc; --daku: #f472b6;
+  --key: #1e2329; --key-edge: #353c45; --key-mod: #14181c; --fresh: #3b3016; --fresh-edge: #fbbf24;
+  --bad: #ff8a80; --bad-bg: #4a1e1e; --good: #4ade80;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.6 var(--font-ui); }
+[hidden] { display: none !important; }
+button, select { font: inherit; color: inherit; }
+.page { max-width: 1200px; margin: 0 auto; padding-inline: max(16px, 3vw); padding-block: 22px 48px; }
+
+.masthead { display: grid; gap: 4px; }
+.eyebrow { margin: 0; color: var(--muted); font-size: 0.85rem; letter-spacing: 0.04em; }
+h1 { margin: 0; font-size: 1.8rem; line-height: 1.2; letter-spacing: -0.02em; font-weight: 800; text-wrap: balance; }
+.lede { margin: 2px 0 0; max-width: 70ch; color: var(--muted); }
+.tabbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 3; background: var(--bg); padding-block: 14px 10px; }
+.tabs { display: flex; gap: 4px; padding: 4px; background: var(--key-mod); border-radius: 12px; overflow-x: auto; }
+.tabs button { flex: 0 0 auto; border: 0; background: transparent; color: var(--muted); padding: 8px 14px; border-radius: 9px; font-weight: 600; cursor: pointer; }
+.tabs button small { color: var(--faint); font-weight: 500; margin-left: 5px; }
+.tabs button[aria-selected="true"] { background: var(--panel); color: var(--ink); box-shadow: 0 1px 2px rgb(0 0 0 / 0.1); }
+
+.layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 22px; align-items: start; margin-top: 6px; }
+@media (max-width: 860px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+
+/* 단계 목록 */
+.lessons { display: grid; gap: 14px; position: sticky; top: calc(env(safe-area-inset-top, 0px) + 70px); max-height: calc(100vh - 90px); overflow-y: auto; padding-right: 4px; }
+.lang-intro { margin: 0; color: var(--muted); font-size: 0.86rem; }
+@media (max-width: 860px) {
+  .lessons { position: static; max-height: none; display: flex; overflow-x: auto; gap: 18px; padding-bottom: 6px; }
+  .lang-intro { display: none; }
+}
+.lesson-group h2 { margin: 0 0 4px; font-size: 0.76rem; letter-spacing: 0.06em; color: var(--muted); font-weight: 700; }
+.lesson-group ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+
+.lesson-btn { width: 100%; display: grid; grid-template-columns: 1.7em minmax(0, 1fr) auto; align-items: center; gap: 6px; text-align: left; border: 0; background: transparent; padding: 5px 8px; border-radius: 8px; cursor: pointer; font-size: 0.9rem; }
+.lesson-btn:hover { background: var(--key-mod); }
+.lesson-btn[aria-current="true"] { background: var(--panel); box-shadow: 0 1px 2px rgb(0 0 0 / 0.08); font-weight: 700; }
+.lesson-btn .num { color: var(--faint); font: 600 0.78rem var(--font-mono); }
+.lesson-btn .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 860px) {
+  .lesson-group { flex: 0 0 auto; }
+  .lesson-group ol { display: flex; gap: 4px; }
+  .lesson-group li { flex: 0 0 auto; }
+  .lesson-btn { width: auto; grid-template-columns: auto auto auto; }
+  .lesson-btn .name { overflow: visible; }
+}
+.dots { display: inline-flex; gap: 3px; }
+.dots i { width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid var(--key-edge); }
+.dots i.on { background: var(--good); border-color: var(--good); }
+
+/* 연습 */
+.stage { display: grid; gap: 14px; min-width: 0; }
+.stage-head { display: grid; gap: 8px; }
+.stage-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.stage-title h2 { margin: 0; font-size: 1.35rem; letter-spacing: -0.01em; text-wrap: balance; }
+.stage-title .part { color: var(--muted); font-size: 0.9rem; }
+.blurb { margin: 0; max-width: 74ch; color: var(--muted); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0; padding: 0; list-style: none; }
+.chips li { display: inline-flex; align-items: center; gap: 5px; }
+.chips .t { font: 600 1.1rem var(--font-key); }
+.chips .role { font-size: 0.74rem; color: var(--muted); }
+.exs { display: flex; flex-wrap: wrap; gap: 8px 18px; }
+.ex { display: inline-flex; align-items: center; gap: 8px; }
+.ex-out { font: 600 1.15rem var(--font-key); }
+.steps { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.step { display: inline-flex; flex-direction: column; align-items: center; gap: 1px; }
+.step .st { font: 500 0.78rem/1.3 var(--font-key); color: var(--muted); min-height: 1.3em; white-space: pre; }
+kbd { display: inline-block; min-width: 1.75em; padding: 0 6px; text-align: center; font: 600 0.78rem/1.6 var(--font-mono); color: var(--ink); background: var(--key); border: 1px solid var(--key-edge); border-bottom-width: 2px; border-radius: 6px; white-space: nowrap; }
+
+.controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.seg { display: inline-flex; gap: 3px; padding: 3px; background: var(--key-mod); border-radius: 10px; }
+.seg button { border: 0; background: transparent; padding: 6px 13px; border-radius: 8px; font-weight: 600; font-size: 0.88rem; color: var(--muted); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.seg button[aria-pressed="true"] { background: var(--panel); color: var(--ink); box-shadow: 0 1px 2px rgb(0 0 0 / 0.1); }
+.seg button i { width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid var(--key-edge); }
+.seg button i.on { background: var(--good); border-color: var(--good); }
+.opts { display: flex; flex-wrap: wrap; gap: 8px 16px; color: var(--muted); font-size: 0.88rem; align-items: center; }
+.opts label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.opts select { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 3px 6px; }
+.how { margin: 0; color: var(--muted); font-size: 0.86rem; }
+
+.typing { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px 20px 14px; display: grid; gap: 8px; }
+.typing.shake { animation: shake 0.22s; }
+@keyframes shake { 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+.typing-top { display: flex; justify-content: space-between; gap: 12px; color: var(--faint); font-size: 0.8rem; min-height: 1.2em; }
+.typing-top .review { color: var(--jung); font-weight: 600; }
+.gloss { font: 500 1rem/1.4 var(--font-key); color: var(--muted); min-height: 1.4em; }
+.line { font: 500 2rem/1.55 var(--font-key); letter-spacing: 0.02em; min-height: 1.55em; overflow-wrap: anywhere; }
+.line span { white-space: pre; }
+.line .done { color: var(--ink); }
+.line .todo { color: var(--faint); }
+.line .gap { display: inline-block; width: 0.6em; }
+.line .cur { color: var(--accent); background: var(--accent-bg); border-radius: 5px; box-shadow: inset 0 -3px 0 var(--accent); }
+.line .cur.bad { color: var(--bad); background: var(--bad-bg); box-shadow: inset 0 -3px 0 var(--bad); }
+.next-line { font: 500 1.05rem/1.5 var(--font-key); color: var(--faint); min-height: 1.5em; overflow-wrap: anywhere; }
+.hint { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; min-height: 3.4rem; border-top: 1px solid var(--line); padding-top: 10px; }
+.hint .target { font: 700 1.9rem/1 var(--font-key); min-width: 1.2em; }
+.hint .wait { color: var(--faint); font-size: 0.86rem; }
+.hint .step.done kbd { opacity: 0.4; }
+.hint .step.next kbd { border-color: var(--accent); background: var(--accent-bg); color: var(--accent); }
+.hint .finger { color: var(--muted); font-size: 0.86rem; }
+.hint .alt { color: var(--faint); font-size: 0.8rem; flex-basis: 100%; }
+.focus-note { position: absolute; inset: 0; display: grid; place-items: center; background: color-mix(in srgb, var(--panel) 82%, transparent); border-radius: 14px; font-weight: 600; color: var(--muted); cursor: pointer; }
+
+.result { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; display: grid; gap: 10px; }
+.result h3 { margin: 0; font-size: 1.15rem; }
+.result p { margin: 0; color: var(--muted); max-width: 70ch; }
+.result .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.result button { border: 1px solid var(--key-edge); background: var(--key); border-radius: 9px; padding: 7px 14px; font-weight: 600; cursor: pointer; }
+.result button.primary { background: var(--accent); border-color: var(--accent); color: var(--panel); }
+
+.board { margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 12px; display: grid; gap: 8px; }
+.board-scroll { overflow-x: auto; }
+.board svg { display: block; width: 100%; min-width: 520px; height: auto; }
+.k rect { fill: var(--key); stroke: var(--key-edge); stroke-width: 1; }
+.k.mod rect { fill: var(--key-mod); }
+.k.off { opacity: 0.3; }
+.k.fresh rect { fill: var(--fresh); stroke: var(--fresh-edge); stroke-width: 1.5; }
+.k.next rect { fill: var(--accent-bg); stroke: var(--accent); stroke-width: 3; }
+.k.next { opacity: 1; }
+.k.bad rect { fill: var(--bad-bg); stroke: var(--bad); stroke-width: 3; }
+.k.held rect { fill: var(--key-edge); }
+.k text { pointer-events: none; }
+.k .main { font: 600 22px var(--font-key); fill: var(--ink); }
+.k .sub, .k .corner { font: 700 15px var(--font-key); }
+.k .shift { font: 500 13px var(--font-key); }
+.k .cap { font: 500 10px var(--font-mono); fill: var(--faint); }
+.k .modlabel { font: 500 11px var(--font-ui); fill: var(--faint); }
+.k .dim { opacity: 0.28; }
+.c-cho { fill: var(--cho); } .c-jung { fill: var(--jung); } .c-jong { fill: var(--jong); } .c-sym { fill: var(--sym); }
+.c-plain { fill: var(--faint); } .c-latin { fill: var(--latin); } .c-kana { fill: var(--ink); }
+.c-star { fill: var(--star); } .c-black { fill: var(--black); } .c-daku { fill: var(--daku); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; list-style: none; margin: 0; padding: 0; font-size: 0.82rem; color: var(--muted); }
+.legend li { display: inline-flex; align-items: center; gap: 6px; }
+.legend li::before { content: ""; width: 10px; height: 10px; border-radius: 3px; background: var(--swatch); }
+
+.foot { margin-top: 26px; color: var(--faint); font-size: 0.82rem; max-width: 84ch; display: grid; gap: 4px; }
+.foot p { margin: 0; }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="masthead">
+    <p class="eyebrow">cssgsg</p>
+    <h1>타자 연습</h1>
+    <p class="lede">자리 익히기 → 낱말 치기 → 줄 치기 순서로 한 단계씩 넓혀 갑니다. 누른 키의 자리로 판단하므로 입력 소스는 무엇이든 괜찮습니다.</p>
+  </header>
+  <div class="tabbar"><div class="tabs" id="langs" role="tablist" aria-label="언어"></div></div>
+
+  <div class="layout">
+    <nav class="lessons" id="lessons" aria-label="단계"></nav>
+
+    <main class="stage">
+      <div class="stage-head">
+        <div class="stage-title"><h2 id="title"></h2><span class="part" id="part"></span></div>
+        <p class="blurb" id="blurb"></p>
+        <ul class="chips" id="chips" aria-label="새로 익히는 자리"></ul>
+        <div class="exs" id="exs" aria-label="예시"></div>
+      </div>
+
+      <div class="controls">
+        <div class="seg" id="modes" role="group" aria-label="연습 방식"></div>
+        <div class="opts">
+          <label>다음 키 <select id="opt-hint">
+            <option value="pause">1초 멈추면 보기</option>
+            <option value="always">늘 보기</option>
+            <option value="miss">틀렸을 때만 보기</option>
+          </select></label>
+          <label><input type="checkbox" id="opt-board" checked> 배열도</label>
+        </div>
+      </div>
+      <p class="how" id="how"></p>
+
+      <section class="typing" id="typing" aria-label="칠 글">
+        <div class="typing-top"><span id="progress"></span><span id="review" class="review"></span></div>
+        <div class="gloss" id="gloss"></div>
+        <div class="line" id="line"></div>
+        <div class="next-line" id="next-line"></div>
+        <div class="hint" id="hint"></div>
+        <div class="focus-note" id="focus-note" hidden>여기를 누르면 이어서 칩니다</div>
+      </section>
+
+      <section class="result" id="result" hidden aria-live="polite">
+        <h3 id="result-title"></h3>
+        <p id="result-note"></p>
+        <div class="actions">
+          <button type="button" class="primary" id="primary"></button>
+          <button type="button" id="secondary"></button>
+        </div>
+      </section>
+
+      <figure class="board" id="board">
+        <div class="board-scroll" id="board-svg"></div>
+        <ul class="legend" id="legend"></ul>
+      </figure>
+    </main>
+  </div>
+
+  <footer class="foot">
+    <p>치는 방법과 한 타씩의 화면은 cssgsg 입력기 엔진으로 만들고, 연습 글은 모두 엔진으로 쳐서 확인했습니다. 권장 입력을 보여 주고, 원작자가 허용하는 다른 입력도 받습니다.</p>
+    <p>기록(끝낸 단계, 자주 틀린 키)은 이 브라우저에만 남습니다.</p>
+  </footer>
+</div>
+
+<script>
+const DATA = /*DATA*/null;
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const rand = (n) => Math.floor(Math.random() * n);
+
+  // ---------------------------------------------------------------- 키
+  // 키 이름은 쿼티 자리 글자(소문자, 기호는 Shift 없는 쪽). 데이터의 키열은 대문자·Shift 기호로 Shift를 적는다.
+  const CODE = { Backquote: "`", Minus: "-", Equal: "=", BracketLeft: "[", BracketRight: "]", Backslash: "\\",
+    Semicolon: ";", Quote: "'", Comma: ",", Period: ".", Slash: "/", Space: " " };
+  for (let i = 0; i < 10; i++) CODE[`Digit${i}`] = String(i);
+  for (const c of "abcdefghijklmnopqrstuvwxyz") CODE[`Key${c.toUpperCase()}`] = c;
+  const SHIFTED = { "`": "~", 1: "!", 2: "@", 3: "#", 4: "$", 5: "%", 6: "^", 7: "&", 8: "*", 9: "(", 0: ")", "-": "_",
+    "=": "+", "[": "{", "]": "}", "\\": "|", ";": ":", "'": '"', ",": "<", ".": ">", "/": "?" };
+  const BASE_OF = Object.fromEntries(Object.entries(SHIFTED).map(([b, s]) => [s, b]));
+  const toStroke = (c) => (c === " " ? { key: " ", shift: false } : /[A-Z]/.test(c) ? { key: c.toLowerCase(), shift: true }
+    : BASE_OF[c] ? { key: BASE_OF[c], shift: true } : { key: c, shift: false });
+  const same = (a, b) => a.key === b.key && a.shift === b.shift;
+  const capOf = (k) => (k === " " ? "Space" : /[a-z]/.test(k) ? k.toUpperCase() : k);
+  const strokeLabel = (s) => (s.shift ? "⇧" : "") + capOf(s.key);
+  const LEFT = new Set([..."`12345qwertasdfgzxcvb"]);
+  const FINGER = {};
+  [["왼손 새끼", "`1qaz"], ["왼손 약지", "2wsx"], ["왼손 중지", "3edc"], ["왼손 검지", "45rtfgvb"], ["오른손 검지", "67yuhjnm"],
+    ["오른손 중지", "8ik,"], ["오른손 약지", "9ol."], ["오른손 새끼", "0-=p[]\\;'/"], ["엄지", " "]].forEach(([f, ks]) => { for (const k of ks) FINGER[k] = f; });
+  const ROW = {};
+  [["숫자열", "`1234567890-="], ["윗열", "qwertyuiop[]\\"], ["홈열", "asdfghjkl;'"], ["아랫열", "zxcvbnm,./"]].forEach(([r, ks]) => { for (const k of ks) ROW[k] = r; });
+  const where = (s) => [FINGER[s.key], ROW[s.key], s.shift ? `${LEFT.has(s.key) ? "오른쪽" : "왼쪽"} Shift와 함께` : ""].filter(Boolean).join(" · ");
+
+  // ---------------------------------------------------------------- 저장(이 브라우저만)
+  const STORE = "cssgsg-practice-v2";
+  const saved = { lang: "ko", lesson: {}, mode: {}, done: {}, hint: "pause", board: true, miss: {} };
+  try { Object.assign(saved, JSON.parse(localStorage.getItem(STORE) || "{}")); } catch (e) {}
+  const save = () => { try { localStorage.setItem(STORE, JSON.stringify(saved)); } catch (e) {} };
+
+  // ---------------------------------------------------------------- 언어·단계
+  const MODE_NAME = { drill: "자리 익히기", words: "낱말 치기", lines: "줄 치기" };
+  let lang, L, mode, round = null, allowed = new Set();
+  const wayCache = new Map();
+  const waysOf = (u) => {
+    const k = `${lang.id}|${u}`;
+    if (!wayCache.has(k)) {
+      const raw = lang.units[u];
+      wayCache.set(k, raw ? raw.map(([keys, screens]) => ({ strokes: [...keys].map(toStroke), screens })) : null);
+    }
+    return wayCache.get(k);
+  };
+  const SPACE = [{ strokes: [{ key: " ", shift: false }], screens: [" "] }];
+
+  // 글 → 칠 단위. 한국어는 음절(자음 연습 ㅋㅋ 등은 한 덩어리), 영어는 글자, 일본어는 가나(줄임을 익혔으면 じゃ 등은 한 덩어리).
+  // 공백은 한국어·영어에서는 스페이스, 일본어에서는 치지 않는 틈.
+  function tokenize(text) {
+    const out = [];
+    for (let i = 0; i < text.length; ) {
+      if (text[i] === " ") {
+        out.push(lang.space ? { ch: " ", ways: SPACE } : { ch: " ", gap: true });
+        i++;
+        continue;
+      }
+      let u = text[i];
+      for (const n of [3, 2]) {
+        const t = text.slice(i, i + n);
+        if (t.length !== n || !lang.units[t]) continue;
+        if (lang.id === "ja" ? L.sc : !(t[0] >= "가" && t[0] <= "힣")) { u = t; break; }
+      }
+      const ways = waysOf(u);
+      if (!ways) throw new Error(`칠 수 없는 글자: ${u} (${text})`);
+      out.push({ ch: u, ways });
+      i += u.length;
+    }
+    return out;
+  }
+
+  // ---------------------------------------------------------------- 자주 틀리는 키(무게)
+  const missTable = () => (saved.miss[lang.id] ??= {});
+  const missOfStroke = (s) => missTable()[strokeLabel(s)] || 0;
+  const weightOf = (text) => {
+    let w = 1;
+    try {
+      for (const t of tokenize(text)) if (t.ways) for (const s of t.ways[0].strokes) w += Math.min(2, missOfStroke(s)) * 0.5;
+    } catch (e) {}
+    return w;
+  };
+  function pickFrom(pool, n, freshPool) {
+    const out = [];
+    const weights = new Map();
+    const wOf = (x) => (weights.has(x) ? weights.get(x) : (weights.set(x, weightOf(x)), weights.get(x)));
+    for (let i = 0; i < n; i++) {
+      const src = freshPool && freshPool.length && Math.random() < 0.65 ? freshPool : pool;
+      let total = 0;
+      for (const x of src) if (x !== out.at(-1) || src.length === 1) total += wOf(x);
+      let r = Math.random() * total, chosen = src[0];
+      for (const x of src) {
+        if (x === out.at(-1) && src.length > 1) continue;
+        r -= wOf(x);
+        if (r <= 0) { chosen = x; break; }
+      }
+      out.push(chosen);
+    }
+    return out;
+  }
+
+  // 익힌 글자 잇기 빈도로 연습 낱말을 만든다(영어·일본어).
+  function genWord(g) {
+    if (!g.units.length) return "";
+    const fresh = new Set(g.fresh);
+    const len = g.min + rand(g.max - g.min + 1);
+    const out = [];
+    let prev = "^";
+    for (let i = 0; i < len; i++) {
+      const row = lang.bigrams[prev] || {};
+      const cands = g.units.filter((u) => !(out.length >= 2 && out.at(-1) === u && out.at(-2) === u));
+      let total = 0;
+      const ws = cands.map((u) => {
+        const w = ((row[u] || 0) + 0.15) * (fresh.has(u) ? 3 : 1);
+        total += w;
+        return w;
+      });
+      let r = Math.random() * total, u = cands[0];
+      for (let j = 0; j < cands.length; j++) { r -= ws[j]; if (r <= 0) { u = cands[j]; break; } }
+      out.push(u);
+      prev = u;
+    }
+    if (fresh.size && !out.some((u) => fresh.has(u)) && Math.random() < 0.7) out[rand(out.length)] = [...fresh][rand(fresh.size)];
+    let w = out.join("");
+    if (g.caps) w = w[0].toUpperCase() + w.slice(1);
+    if (g.punct && g.punct.length && Math.random() < 0.3) w += g.punct[rand(g.punct.length)];
+    return w;
+  }
+
+  // ---------------------------------------------------------------- 판 만들기
+  const WIDTH = { ko: 18, en: 34, ja: 15 };
+  const plainOf = (text, strip, lower) => {
+    const t = [...text].filter((c) => !strip.includes(c)).join("").replace(/ +/g, " ").trim();
+    return lower ? t.toLowerCase() : t;
+  };
+  const kanaPunct = () => allowed.has("kana:、") && allowed.has("kana:。");
+
+  function drillItems() {
+    const d = L.drill;
+    const n = lang.id === "ko" ? 24 : 14;
+    const picks = d.items ? pickFrom(d.items, n, d.fresh) : [];
+    const out = picks.map((p) => (!d.gen || Math.random() < (d.mix ?? 0.5) ? p : genWord(d.gen)));
+    while (out.length < n) out.push(genWord(d.gen));
+    return out.map((text) => ({ text }));
+  }
+  function wordItems(n = 12) {
+    const all = L.words.map((i) => lang.words[i]);
+    const fresh = L.wordsFresh.map((i) => lang.words[i]);
+    const toItem = (w) => {
+      if (Array.isArray(w)) return { text: w[1], gloss: w[0] !== w[1] ? w[0] : "" };
+      return { text: L.capWords ? w[0].toUpperCase() + w.slice(1) : w };
+    };
+    let items = [];
+    if (all.length >= 6) {
+      const key = (w) => (Array.isArray(w) ? w[1] : w);
+      const byKey = new Map(all.map((w) => [key(w), w]));
+      items = pickFrom(all.map(key), n, fresh.map(key)).map((k) => toItem(byKey.get(k)));
+    }
+    // 낱말이 적으면 연습 글자를 이어 붙인 연습 낱말로 채운다.
+    while (items.length < n) {
+      const d = L.drill;
+      const text = d.gen ? genWord(d.gen) : pickFrom(d.items, 2, d.fresh).join("");
+      items.push({ text, made: true });
+    }
+    return items;
+  }
+  function lineItems() {
+    const pool = [
+      ...L.lines.map((i) => lang.lines[i]),
+      ...(L.linesPlain || []).map((i) => {
+        const l = lang.lines[i];
+        return Array.isArray(l) ? [plainOf(l[0], L.strip, false), plainOf(l[1], L.strip, false)] : plainOf(l, L.strip, L.lower);
+      }),
+    ];
+    if (pool.length >= 3) {
+      const seen = new Set(), out = [];
+      let guard = 0;
+      while (out.length < Math.min(4, pool.length) && guard++ < 200) {
+        const l = pool[rand(pool.length)];
+        const k = Array.isArray(l) ? l[1] : l;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        out.push(Array.isArray(l) ? { text: l[1], gloss: l[0] } : { text: l });
+      }
+      return out.map((it) => ({ ...it, line: true }));
+    }
+    // 문장을 칠 수 없는 단계: 낱말을 이어 줄을 만든다.
+    const lines = [];
+    const stock = wordItems(48);
+    for (let i = 0; i < 4; i++) {
+      const words = [];
+      let len = 0;
+      while (len < WIDTH[lang.id] && stock.length) {
+        const w = stock.shift();
+        words.push(w);
+        len += w.text.length + 1;
+      }
+      if (lang.id === "ja" && kanaPunct()) {
+        lines.push({ text: words.map((w) => w.text).join("、") + "。", gloss: words.map((w) => w.gloss || w.text).join("、") + "。", line: true });
+      } else {
+        lines.push({ text: words.map((w) => w.text).join(" "), gloss: lang.id === "ja" ? words.map((w) => w.gloss || w.text).join("　") : "", line: true });
+      }
+    }
+    return lines;
+  }
+
+  // 항목을 줄로 나눈다. 줄의 칠 단위(token)마다 어느 항목인지 적어 둔다(틀린 항목을 다시 내려고).
+  function layoutLines(items) {
+    if (items.length && items[0].line) {
+      return items.map((it, n) => ({ tokens: tokenize(it.text).map((t) => ({ ...t, item: n })), gloss: it.gloss || "", items: [it] }));
+    }
+    const lines = [];
+    let cur = null;
+    items.forEach((it, n) => {
+      const len = [...it.text].length;
+      if (!cur || (cur.len && cur.len + 1 + len > WIDTH[lang.id])) {
+        cur = { tokens: [], glosses: [], items: [], len: 0 };
+        lines.push(cur);
+      } else {
+        cur.tokens.push(lang.space ? { ch: " ", ways: SPACE, item: -1 } : { ch: " ", gap: true, item: -1 });
+        cur.len += 1;
+      }
+      cur.tokens.push(...tokenize(it.text).map((t) => ({ ...t, item: n })));
+      cur.glosses.push(it.gloss || (lang.id === "ja" ? it.text : ""));
+      cur.items.push(it);
+      cur.len += len;
+    });
+    return lines.map((l) => ({ tokens: l.tokens, gloss: lang.id === "ja" && l.glosses.some((g, i) => g !== l.items[i].text) ? l.glosses.join("　") : "", items: l.items }));
+  }
+
+  function startRound() {
+    const items = mode === "drill" ? drillItems() : mode === "words" ? wordItems() : lineItems();
+    round = { items, base: items.length, lines: layoutLines(items), li: 0, ti: 0, typed: [], cand: [], errors: 0, missKeys: {}, missed: new Set(), reviewFrom: -1, finished: false };
+    enterToken();
+    $("result").hidden = true;
+    $("typing").hidden = false;
+    render();
+  }
+
+  const curLine = () => round.lines[round.li];
+  const curToken = () => curLine().tokens[round.ti];
+  function enterToken() {
+    while (round.li < round.lines.length && curToken() && curToken().gap) round.ti++;
+    if (round.li < round.lines.length && round.ti >= curLine().tokens.length) {
+      round.li++;
+      round.ti = 0;
+      return enterToken();
+    }
+    if (round.li >= round.lines.length) return;
+    round.typed = [];
+    round.cand = curToken().ways.map((_, i) => i);
+    armHint();
+  }
+
+  // ---------------------------------------------------------------- 치기
+  let hintOn = false, hintTimer = null, badUnit = false;
+  function armHint() {
+    clearTimeout(hintTimer);
+    hintOn = saved.hint === "always";
+    badUnit = false;
+    if (saved.hint === "pause") hintTimer = setTimeout(() => { hintOn = true; renderHint(); highlight(); }, 1000);
+  }
+  function expected() {
+    const t = curToken();
+    return t.ways[round.cand[0]].strokes[round.typed.length];
+  }
+
+  function onStroke(s) {
+    const t = curToken();
+    const n = round.typed.length;
+    const next = round.cand.filter((i) => t.ways[i].strokes[n] && same(t.ways[i].strokes[n], s));
+    if (!next.length) {
+      const want = expected();
+      const label = strokeLabel(want);
+      round.errors++;
+      round.missKeys[label] = (round.missKeys[label] || 0) + 1;
+      if (t.item >= 0 && t.item < round.base) round.missed.add(t.item);
+      const tbl = missTable();
+      tbl[label] = Math.min(10, (tbl[label] || 0) + 1);
+      save();
+      flash(s.key);
+      shake();
+      clearTimeout(hintTimer);
+      hintOn = true;
+      badUnit = true;
+      renderLine();
+      renderHint();
+      highlight();
+      return;
+    }
+    const tbl = missTable();
+    if (tbl[strokeLabel(s)]) tbl[strokeLabel(s)] = Math.max(0, tbl[strokeLabel(s)] - 0.25);
+    round.typed.push(s);
+    round.cand = next;
+    const done = next.find((i) => t.ways[i].strokes.length === round.typed.length);
+    if (done !== undefined) {
+      round.ti++;
+      enterToken();
+      if (round.li >= round.lines.length) return endOfLines();
+    } else if (saved.hint === "pause" && !hintOn) {
+      armHint();
+    }
+    render();
+  }
+
+  // 판 끝: 틀린 항목이 있으면(줄 치기 말고) 한 번 더 치고, 그다음 끝낸다.
+  function endOfLines() {
+    if (mode !== "lines" && round.reviewFrom < 0 && round.missed.size) {
+      const items = [...round.missed].sort((a, b) => a - b).map((k) => round.items[k]);
+      const unique = [...new Map(items.map((it) => [it.text, it])).values()];
+      if (unique.length) {
+        const base = round.items.length;
+        round.items.push(...unique);
+        const extra = layoutLines(unique).map((l) => ({ ...l, tokens: l.tokens.map((t) => ({ ...t, item: t.item >= 0 ? t.item + base : -1 })) }));
+        round.reviewFrom = round.lines.length;
+        round.lines.push(...extra);
+        round.ti = 0;
+        enterToken();
+        render();
+        return;
+      }
+    }
+    finish();
+  }
+
+  function finish() {
+    clearTimeout(hintTimer);
+    round.finished = true;
+    const clean = round.errors === 0;
+    const key = `${lang.id}:${L.id}:${mode}`;
+    if (clean) saved.done[key] = true;
+    save();
+    const worst = Object.entries(round.missKeys).sort((a, b) => b[1] - a[1]).slice(0, 4);
+    $("result-title").textContent = clean ? "오타 없이 끝냈습니다" : "한 판 끝났습니다";
+    $("result-note").innerHTML = clean
+      ? (nextStep() ? `손이 자리를 잡아 가고 있습니다. 다음은 ${esc(nextStep().label)}입니다. 같은 판을 몇 번 더 오타 없이 쳐도 좋습니다.` : "모든 단계를 오타 없이 끝냈습니다.")
+      : `틀린 키: ${worst.map(([k, n]) => `<kbd>${esc(k)}</kbd> ${n}번`).join(", ")}. 이 키가 든 글자가 다음 판에 더 자주 나옵니다. 오타 없이 끝날 때까지 천천히 다시 쳐 보세요.`;
+    const ns = nextStep();
+    const primary = clean && ns ? ns : { label: "다시 하기", go: () => startRound() };
+    const secondary = clean && ns ? { label: "다시 하기", go: () => startRound() } : ns;
+    setButton($("primary"), primary, true);
+    setButton($("secondary"), secondary, false);
+    $("typing").hidden = true;
+    $("result").hidden = false;
+    renderLessons();
+    renderModes();
+    highlight(null);
+  }
+  function setButton(b, act, enter) {
+    b.hidden = !act;
+    if (!act) return;
+    b.textContent = act.label + (enter ? " (Enter)" : "");
+    b.onclick = () => { b.blur(); act.go(); };
+  }
+  function nextStep() {
+    const i = L.modes.indexOf(mode);
+    if (i + 1 < L.modes.length) {
+      const m = L.modes[i + 1];
+      return { label: MODE_NAME[m], go: () => setMode(m) };
+    }
+    const li = lang.lessons.indexOf(L);
+    if (li + 1 < lang.lessons.length) {
+      const N = lang.lessons[li + 1];
+      return { label: `${li + 2}단계 ${N.title}`, go: () => selectLesson(li + 1) };
+    }
+    return null;
+  }
+
+  // ---------------------------------------------------------------- 그리기
+  function render() {
+    renderLine();
+    renderHint();
+    highlight();
+  }
+  function renderLine() {
+    if (!round || round.li >= round.lines.length) return;
+    const line = curLine();
+    const html = line.tokens.map((t, i) => {
+      if (t.gap) return `<span class="gap"></span>`;
+      if (i < round.ti) return `<span class="done">${esc(t.ch)}</span>`;
+      if (i === round.ti) {
+        const shown = round.typed.length ? t.ways[round.cand[0]].screens[round.typed.length - 1] : t.ch === " " ? "␣" : t.ch;
+        return `<span class="cur${badUnit ? " bad" : ""}">${esc(shown)}</span>`;
+      }
+      return `<span class="todo">${esc(t.ch)}</span>`;
+    }).join("");
+    $("line").innerHTML = html;
+    $("line").lang = lang.htmlLang;
+    $("gloss").textContent = line.gloss;
+    $("gloss").hidden = lang.id !== "ja";
+    const next = round.lines[round.li + 1];
+    $("next-line").textContent = next ? next.tokens.map((t) => (t.gap ? "　" : t.ch)).join("") : "";
+    $("next-line").lang = lang.htmlLang;
+    $("progress").textContent = `${Math.min(round.li + 1, round.lines.length)} / ${round.lines.length} 줄`;
+    $("review").textContent = round.reviewFrom >= 0 && round.li >= round.reviewFrom ? "틀린 것 한 번 더" : "";
+  }
+  function stepsHtml(way, typedCount, prefix = "") {
+    return `<span class="steps">${way.strokes.map((s, i) => {
+      const cls = typedCount == null ? "" : i < typedCount ? " done" : i === typedCount ? " next" : "";
+      const st = way.screens[i] === " " ? "" : prefix + way.screens[i];
+      return `<span class="step${cls}"><kbd>${esc(strokeLabel(s))}</kbd><span class="st" lang="${lang.htmlLang}">${esc(st)}</span></span>`;
+    }).join("")}</span>`;
+  }
+  function renderHint() {
+    if (!round || round.finished || round.li >= round.lines.length) return;
+    const t = curToken();
+    const way = t.ways[round.cand[0]];
+    const n = round.typed.length;
+    const target = `<span class="target" lang="${lang.htmlLang}">${t.ch === " " ? "␣" : esc(t.ch)}</span>`;
+    if (!hintOn) {
+      $("hint").innerHTML = target + `<span class="wait">${saved.hint === "miss" ? "틀리면 자리를 보여 줍니다" : "…"}</span>`;
+      return;
+    }
+    const others = t.ways.length > 1 && n === 0
+      ? `<span class="alt">다른 입력도 받습니다: ${t.ways.slice(1).map((w) => w.strokes.map(strokeLabel).join(" ")).map(esc).join(" / ")}</span>` : "";
+    $("hint").innerHTML = target + stepsHtml(way, n) + `<span class="finger">${esc(where(way.strokes[n]))}</span>` + others;
+  }
+
+  // ---------------------------------------------------------------- 배열도
+  const P = 60;
+  const ROWS = [
+    [..."`1234567890-="].map((c) => ["k", 1, c]).concat([["m", 2, "delete"]]),
+    [["m", 1.5, "tab"], ...[..."qwertyuiop[]"].map((c) => ["k", 1, c]), ["k", 1.5, "\\"]],
+    [["m", 1.75, "caps"], ...[..."asdfghjkl;'"].map((c) => ["k", 1, c]), ["m", 2.25, "return"]],
+    [["m", 2.25, "shift", "lshift"], ...[..."zxcvbnm,./"].map((c) => ["k", 1, c]), ["m", 2.75, "shift", "rshift"]],
+    [["m", 3.75, "", "blank"], ["k", 6.25, " "], ["m", 5, "", "blank"]],
+  ];
+  let keyEls = new Map();
+  function drawBoard() {
+    const parts = [];
+    let y = 0;
+    const fresh = new Set(L.freshKeys);
+    for (const row of ROWS) {
+      let x = 0;
+      for (const [kind, w, name, tag] of row) {
+        const W = w * P, cx = x + W / 2;
+        if (tag === "blank") { x += W; continue; }
+        const rect = `<rect x="${x + 2}" y="${y + 2}" width="${W - 4}" height="${P - 4}" rx="8"/>`;
+        if (kind === "m") {
+          const id = tag ?? name;
+          parts.push(`<g class="k mod${fresh.has(id) ? " fresh" : ""}" data-k="${id}">${rect}<text class="modlabel" x="${x + 9}" y="${y + P - 11}">${esc(name)}</text></g>`);
+          x += W;
+          continue;
+        }
+        if (name === " ") {
+          parts.push(`<g class="k${lang.space ? "" : " off"}" data-k=" ">${rect}<text class="modlabel" x="${x + 12}" y="${y + P - 11}">space</text></g>`);
+          x += W;
+          continue;
+        }
+        const spec = lang.board[name] || {};
+        let on = false;
+        const text = (lb, cls, attrs) => {
+          if (!lb || !lb.t) return "";
+          const ok = lb.id && allowed.has(lb.id);
+          if (ok) on = true;
+          return `<text class="${cls} c-${lb.c}${ok ? "" : " dim"}" ${attrs}>${esc(lb.t)}</text>`;
+        };
+        const labels = [
+          text(spec.main, "main", `x="${cx}" y="${y + 41}" text-anchor="middle"`),
+          text(spec.sub, "sub", `x="${x + W - 8}" y="${y + P - 10}" text-anchor="end"`),
+          text(spec.corner, "corner", `x="${x + W - 8}" y="${y + 20}" text-anchor="end"`),
+          text(spec.shift, "shift", `x="${x + 9}" y="${y + 19}"`),
+          `<text class="cap" x="${x + 8}" y="${y + P - 10}">${esc(capOf(name))}</text>`,
+        ].join("");
+        parts.push(`<g class="k${on ? "" : " off"}${fresh.has(name) ? " fresh" : ""}" data-k="${esc(name)}">${rect}${labels}</g>`);
+        x += W;
+      }
+      y += P;
+    }
+    $("board-svg").innerHTML = `<svg viewBox="-2 -2 904 304" role="img" aria-label="${esc(lang.layout)} 배열도(이번 단계)">${parts.join("")}</svg>`;
+    keyEls = new Map([...$("board-svg").querySelectorAll(".k")].map((g) => [g.dataset.k, g]));
+    const LEGEND = {
+      ko: [["var(--cho)", "초성"], ["var(--jung)", "모음"], ["var(--jong)", "받침"]],
+      en: [["var(--latin)", "글자"], ["var(--sym)", "기호(왼쪽 위: Shift)"]],
+      ja: [["var(--ink)", "한 번"], ["var(--star)", "☆(K) 다음 왼손"], ["var(--black)", "★(D) 다음 오른손"], ["var(--daku)", "゛(L) 뒤치기"]],
+    }[lang.id];
+    $("legend").innerHTML = [...LEGEND, ["var(--fresh-edge)", "이번 단계에서 새로 익히는 자리"], ["var(--accent)", "다음에 누를 키"]]
+      .map(([c, t]) => `<li style="--swatch: ${c}">${esc(t)}</li>`).join("");
+  }
+  function highlight() {
+    keyEls.forEach((g) => g.classList.remove("next"));
+    if (!round || round.finished || round.li >= round.lines.length || !hintOn) return;
+    const s = expected();
+    if (!s) return;
+    keyEls.get(s.key)?.classList.add("next");
+    if (s.shift) keyEls.get(LEFT.has(s.key) ? "rshift" : "lshift")?.classList.add("next");
+  }
+  function flash(key) {
+    const g = keyEls.get(key);
+    if (!g) return;
+    g.classList.add("bad");
+    setTimeout(() => g.classList.remove("bad"), 280);
+  }
+  function shake() {
+    const t = $("typing");
+    t.classList.remove("shake");
+    void t.offsetWidth;
+    t.classList.add("shake");
+  }
+
+  // ---------------------------------------------------------------- 머리·목록
+  function renderLangs() {
+    $("langs").innerHTML = DATA.langs.map((l) =>
+      `<button type="button" role="tab" data-l="${l.id}" aria-selected="${l === lang}"><span lang="${l.htmlLang}">${esc(l.name)}</span><small>${esc(l.layout)}</small></button>`).join("");
+    $("langs").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => { b.blur(); selectLang(b.dataset.l); }));
+  }
+  function dotsOf(X) {
+    return `<span class="dots">${X.modes.map((m) => `<i class="${saved.done[`${lang.id}:${X.id}:${m}`] ? "on" : ""}" title="${MODE_NAME[m]}"></i>`).join("")}</span>`;
+  }
+  function renderLessons() {
+    const groups = [];
+    lang.lessons.forEach((X, i) => {
+      if (!groups.length || groups.at(-1).name !== X.part) groups.push({ name: X.part, items: [] });
+      groups.at(-1).items.push([X, i]);
+    });
+    $("lessons").innerHTML = `<p class="lang-intro">${esc(lang.intro)}</p>` + groups.map((g) => `<div class="lesson-group"><h2>${esc(g.name)}</h2><ol>${g.items.map(([X, i]) =>
+      `<li><button type="button" class="lesson-btn" data-i="${i}" aria-current="${X === L}"><span class="num">${i + 1}</span><span class="name">${esc(X.title)}</span>${dotsOf(X)}</button></li>`).join("")}</ol></div>`).join("");
+    $("lessons").querySelectorAll(".lesson-btn").forEach((b) => b.addEventListener("click", () => { b.blur(); selectLesson(Number(b.dataset.i)); }));
+  }
+  function renderModes() {
+    $("modes").innerHTML = L.modes.map((m) => `<button type="button" data-m="${m}" aria-pressed="${m === mode}"><i class="${saved.done[`${lang.id}:${L.id}:${m}`] ? "on" : ""}"></i>${MODE_NAME[m]}</button>`).join("");
+    $("modes").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => { b.blur(); setMode(b.dataset.m); }));
+  }
+  function renderHead() {
+    const i = lang.lessons.indexOf(L);
+    $("title").textContent = `${i + 1}. ${L.title}`;
+    $("part").textContent = L.part;
+    $("blurb").textContent = L.blurb;
+    $("chips").innerHTML = L.chips.map((c) => {
+      const keys = c.keys ? [...c.keys].map((k) => `<kbd>${esc(strokeLabel(toStroke(k)))}</kbd>`).join("") : "<kbd>⇧</kbd>+<kbd>글자</kbd>";
+      return `<li><span class="t" lang="${lang.htmlLang}">${esc(c.t)}</span>${c.role ? `<span class="role">${esc(c.role)}</span>` : ""}${keys}</li>`;
+    }).join("");
+    $("exs").innerHTML = L.ex.map((e) => {
+      let prefix = "";
+      const steps = tokenize(e).map((t) => {
+        const h = t.gap ? "" : stepsHtml(t.ways[0], null, prefix);
+        prefix += t.ch;
+        return h;
+      }).join("");
+      return `<span class="ex"><span class="ex-out" lang="${lang.htmlLang}">${esc(e)}</span>${steps}</span>`;
+    }).join("");
+  }
+
+  function selectLang(id) {
+    lang = DATA.langs.find((l) => l.id === id) || DATA.langs[0];
+    saved.lang = lang.id;
+    save();
+    renderLangs();
+    const i = Math.max(0, lang.lessons.findIndex((X) => X.id === saved.lesson[lang.id]));
+    selectLesson(i);
+  }
+  function selectLesson(i) {
+    L = lang.lessons[i];
+    allowed = new Set(L.labels);
+    saved.lesson[lang.id] = L.id;
+    const m = saved.mode[`${lang.id}:${L.id}`];
+    mode = L.modes.includes(m) ? m : L.modes[0];
+    save();
+    renderLessons();
+    renderHead();
+    renderModes();
+    drawBoard();
+    startRound();
+  }
+  function setMode(m) {
+    mode = m;
+    saved.mode[`${lang.id}:${L.id}`] = m;
+    save();
+    renderModes();
+    startRound();
+  }
+
+  function renderHow() {
+    const first = {
+      pause: "모르는 키는 누르지 말고 1초 기다리면 자리가 보입니다.",
+      always: "다음 키를 늘 보여 줍니다. 손에 익으면 1초 멈추면 보기로 바꿔 보세요.",
+      miss: "틀렸을 때만 자리를 보여 줍니다.",
+    }[saved.hint];
+    $("how").textContent = `${first} 틀리면 넘어가지 않고, 틀린 것은 판 끝에 한 번 더 나옵니다. Esc: 이 판 처음부터`;
+  }
+
+  // ---------------------------------------------------------------- 키보드
+  window.addEventListener("keydown", (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.code === "ShiftLeft" || e.code === "ShiftRight") {
+      keyEls.get(e.code === "ShiftLeft" ? "lshift" : "rshift")?.classList.add("held");
+      return;
+    }
+    const name = CODE[e.code];
+    if (name !== undefined && document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+    if (!round) return;
+    if (round.finished) {
+      if (e.key === "Enter") { e.preventDefault(); $("primary").click(); }
+      if (name !== undefined) e.preventDefault();
+      return;
+    }
+    if (e.key === "Escape") { e.preventDefault(); startRound(); return; }
+    if (name === undefined) return;
+    e.preventDefault();
+    if (e.repeat) return;
+    onStroke({ key: name, shift: e.shiftKey });
+  });
+  window.addEventListener("keyup", (e) => {
+    if (e.code === "ShiftLeft" || e.code === "ShiftRight") keyEls.get(e.code === "ShiftLeft" ? "lshift" : "rshift")?.classList.remove("held");
+  });
+  window.addEventListener("blur", () => { $("focus-note").hidden = false; });
+  window.addEventListener("focus", () => { $("focus-note").hidden = true; });
+  $("focus-note").addEventListener("click", () => { $("focus-note").hidden = true; window.focus(); });
+
+  const optHint = $("opt-hint"), optBoard = $("opt-board");
+  optHint.value = ["pause", "always", "miss"].includes(saved.hint) ? saved.hint : "pause";
+  optBoard.checked = saved.board !== false;
+  $("board").hidden = !optBoard.checked;
+  optHint.addEventListener("change", () => {
+    saved.hint = optHint.value;
+    save();
+    optHint.blur();
+    renderHow();
+    if (round && !round.finished) { armHint(); render(); }
+  });
+  optBoard.addEventListener("change", () => {
+    saved.board = optBoard.checked;
+    save();
+    optBoard.blur();
+    $("board").hidden = !optBoard.checked;
+  });
+
+  renderHow();
+  if (!document.hasFocus()) $("focus-note").hidden = false;
+  selectLang(saved.lang);
+})();
+</script>
+</body>
+</html>
