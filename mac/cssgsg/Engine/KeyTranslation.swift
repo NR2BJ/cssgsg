@@ -42,6 +42,17 @@ struct ModifierState {
     private(set) var held: Set<UInt16> = []
     private var capsOn: Bool?
 
+    /// 수식키 플래그 → 엔진 비트. 좌우를 알 수 없어서 무리의 양쪽 비트를 켠다.
+    static func familyMods(_ flags: NSEvent.ModifierFlags) -> UInt32 {
+        families.reduce(0) { bits, f in flags.contains(f.flag) ? bits | f.leftBit | f.rightBit : bits }
+    }
+
+    /// 지금 실제로 누르고 있는 수식키(빠른 탭 전환 보정의 타이머가 엔진에 준다). 이벤트가 아니라 지금 상태라서,
+    /// 앱을 거쳐 늦게 오는 뗌 이벤트보다 먼저 안다(NRIME physicalModifierFlags).
+    static func physicalMods() -> UInt32 {
+        familyMods(NSEvent.modifierFlags)
+    }
+
     /// keyDown → 엔진 이벤트. 수식키 비트는 기억한 상태로 채운다.
     mutating func keyDown(_ event: NSEvent) -> CssgsgKeyEvent {
         resync(event.modifierFlags)

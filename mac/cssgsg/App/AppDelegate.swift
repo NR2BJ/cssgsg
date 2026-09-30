@@ -178,6 +178,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// 설정 파일의 [mac] 표 중 셸이 쓰는 값.
     private static func applyMacSettings(_ settings: CssgsgMacSettings) {
         CandidatePanel.fontSize = CGFloat(settings.candidate_font_size)
+        KeyEventReposter.insertWait = TimeInterval(settings.newline_insert_wait_ms) / 1000
+        KeyEventReposter.keyPressWait = TimeInterval(settings.newline_key_press_wait_ms) / 1000
     }
 
 }

@@ -8,8 +8,8 @@ struct CssgsgConfig: Codable, Equatable {
     var koLayout: String
     var tapThresholdMs: Int
     /// 빠른 탭 전환 보정(실험적): 탭 수식키를 떼기 직전에 친 글자를 잠깐 잡아 두었다가 전환 뒤에 친다.
+    /// 판정 시간은 엔진이 정해 둔 값이다(Shift가 글자를 바꾸는지에 따라 30ms·80ms).
     var tapBuffering: Bool
-    var tapOverlapMs: Int
     var capsShiftInverts: Bool
     var shortcuts: Shortcuts
     var ja: Ja
@@ -37,6 +37,10 @@ struct CssgsgConfig: Codable, Equatable {
         var hud: Bool
         var hudPosition: String
         var candidateFontSize: Int
+        /// Shift+Enter 줄바꿈 대기(밀리초): Electron·Chromium 앱의 줄바꿈 넣기와 ⌘ 다시 보내기(0~100, 기본 20).
+        var newlineInsertWaitMs: Int
+        /// Shift+Enter 줄바꿈 대기(밀리초): Shift+Enter 키를 다시 보내는 앱, 지금은 Codex(0~200, 기본 50).
+        var newlineKeyPressWaitMs: Int
     }
 }
 

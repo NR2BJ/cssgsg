@@ -178,7 +178,7 @@ if let i = args.firstIndex(of: "--shots"), i + 1 < args.count {
         for lang in UILanguage.allCases {
             UILanguage.active = lang
             let l = lang.rawValue
-            render(GeneralTab(model: model), width: 740, height: 1000, name: "general-\(l)", to: out)
+            render(GeneralTab(model: model), width: 740, height: 1100, name: "general-\(l)", to: out)
             render(KoreanTab(model: model), width: 740, height: 420, name: "korean-\(l)", to: out)
             render(JapaneseTab(model: model, dictionary: dictionary), width: 740, height: 1960, name: "japanese-\(l)", to: out)
             render(AboutTab(model: model, updater: updater, language: .constant(lang)), width: 740, height: 1000,

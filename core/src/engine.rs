@@ -143,15 +143,32 @@ pub struct Engine {
 }
 
 /// 빠른 탭 전환 보정: 탭할 수식키를 누른 채 친 글자를 잠깐 잡아 둔다(NRIME와 같다).
-/// 수식키를 곧(`tap_overlap_ms` 안에) 떼면 탭으로 보고 전환한 뒤 그 글자를 수식키 없이 친다.
+/// 수식키를 곧(판정 시간 안에) 떼면 탭으로 보고 전환한 뒤 그 글자를 수식키 없이 친다.
 /// 늦게 떼거나, 다른 키를 치거나, 시간이 다 되면 누른 그대로(Shift 글자) 친다.
 #[derive(Clone, Copy, Debug)]
 struct Buffered {
     ev: KeyEvent,
     modifier: Key,
+    /// 글자를 누르고 이 시간 안에 수식키를 떼면 탭이다(Shift가 이 글자를 바꾸는지에 따라, 아래 상수).
+    window: f64,
     /// 이 시각이 지나면 누른 그대로 친다(셸이 타이머로 [`Engine::timer`]를 부른다).
     deadline: f64,
+    /// 시간이 다 됐을 때 수식키가 이미 떼어져 있어서, 뗌 이벤트를 기다리기 시작한 때.
+    waiting_since: Option<f64>,
 }
+
+/// 빠른 탭 전환 보정의 판정 시간(NRIME 1.0.12-beta.7, 사용자 타자를 재서 정한 고정값). 글자를 누르고 이 안에 수식키를 떼면 탭.
+/// Shift가 글자를 바꾸는 키(영어 대문자, 참신세벌식 Shift 기호, 숫자·기호 자리): 30ms. NRIME 사용자의 빠른 쌍자음은
+/// 글자를 누르고 47ms 만에 Shift를 떼기도 해서(5%가 54ms 안), 0.6.1까지의 한 가지 50ms로는 50번에 1번꼴로 전환됐다.
+const SHIFTED_LETTER_TAP_WINDOW: f64 = 0.030;
+/// Shift가 아무것도 바꾸지 않는 키(新月의 글자 키는 Shift를 무시하고 같은 가나): Shift는 탭 말고는 뜻이 없어서 80ms.
+/// 그래도 끝은 있다. 글자를 한참 넘게 누른 Shift는 탭이 아니다.
+const SHIFTLESS_LETTER_TAP_WINDOW: f64 = 0.080;
+/// 시간이 다 됐는데 수식키가 실제로는 이미 떼어져 있으면, 뗌 이벤트가 앱을 거쳐 오는 중이다(시스템이 바쁘면 키보드보다
+/// 늦다). 그 이벤트의 시각으로 판정하도록 10ms마다, 0.5초까지 기다린다(NRIME 1.0.12-beta.7). 0.6.1까지는 20ms를 한 번
+/// 더 기다리고 말아서, 느릴 때 탭이 쌍자음·대문자로 나갔다. 끝내 안 오면(포커스가 옮겨 갔다) 누른 그대로 친다.
+const RELEASE_POLL: f64 = 0.010;
+const RELEASE_WAIT_LIMIT: f64 = 0.5;
 
 impl Engine {
     pub fn new(config: Config) -> Self {
@@ -225,12 +242,23 @@ impl Engine {
         self.finish(out, before)
     }
 
-    /// 셸이 `timer_ms`만큼 기다렸다 부른다(`now`는 키 이벤트와 같은 시계, 초).
-    /// 빠른 탭 전환 보정이 잡아 둔 글자를 시간이 다 됐으면 누른 그대로 친다.
-    pub fn timer(&mut self, now: f64) -> Output {
+    /// 셸이 `timer_ms`만큼 기다렸다 부른다(`now`는 키 이벤트와 같은 시계, 초). `held`는 지금 실제로 누르고 있는
+    /// 수식키다(셸이 좌우를 모르면 양쪽 비트를 켠다).
+    /// 빠른 탭 전환 보정이 잡아 둔 글자를 시간이 다 됐으면 누른 그대로 친다. 그 수식키가 이미 떼어졌으면 오는 중인
+    /// 뗌 이벤트를 기다린다(RELEASE_WAIT_LIMIT).
+    pub fn timer(&mut self, now: f64, held: Mods) -> Output {
         let before = self.snapshot();
         let out = match self.buffered {
-            Some(b) if now + 0.001 >= b.deadline => self.flush_buffered(&Context::default()),
+            Some(b) if now + 0.001 >= b.deadline => {
+                let released = held.0 & b.modifier.modifier_family_bits() == 0;
+                let since = b.waiting_since.unwrap_or(now);
+                if released && now - since < RELEASE_WAIT_LIMIT {
+                    self.buffered = Some(Buffered { waiting_since: Some(since), ..b });
+                    Output { consumed: true, timer_ms: Some(millis(RELEASE_POLL)), ..Output::default() }
+                } else {
+                    self.flush_buffered(&Context::default())
+                }
+            }
             Some(b) => {
                 Output { consumed: true, timer_ms: Some(millis(b.deadline - now)), ..Output::default() }
             }
@@ -276,7 +304,7 @@ impl Engine {
             if !ev.down && ev.key == b.modifier {
                 self.buffered = None;
                 let tapped = self.taps.observe(ev, threshold) == Some(b.modifier);
-                let quick = ev.time - b.ev.time < self.config.tap_overlap_ms as f64 / 1000.0;
+                let quick = ev.time - b.ev.time < b.window;
                 let action = self.config.shortcuts.for_tap(b.modifier);
                 if let (true, true, Some(action), false) = (tapped, quick, action, ctx.taps_disabled) {
                     let switched = self.shortcut_action(action, ctx);
@@ -365,7 +393,8 @@ impl Engine {
     }
 
     /// 빠른 탭 전환 보정을 시작할지: 켜져 있고, 탭 단축키 수식키 하나만 누른 채 탭 시간 안에 글자를 쳤고,
-    /// 그 수식키를 쓰는 조합 단축키가 없을 때(NRIME와 같다). 잡으면 키를 먹고 타이머를 청한다.
+    /// 그 수식키를 쓰는 조합 단축키가 없을 때(NRIME와 같다). 한글 조합 중에 Shift가 바꾸는 키는 잡지 않는다.
+    /// 잡으면 키를 먹고 타이머를 청한다.
     fn try_buffer(&mut self, ev: &KeyEvent, ctx: &Context, threshold: f64) -> Option<Output> {
         if !self.config.tap_buffering || ctx.taps_disabled || ctx.secure_field {
             return None;
@@ -382,11 +411,40 @@ impl Engine {
         {
             return None;
         }
-        let overlap = self.config.tap_overlap_ms as f64 / 1000.0;
-        // 수식키 뗌이 조금 늦게 도착해도 되게 20ms를 더 기다린다(NRIME와 같다).
-        let deadline = (ev.time + overlap).min(pressed + threshold) + 0.02;
-        self.buffered = Some(Buffered { ev: *ev, modifier, deadline });
+        let shift_matters = self.shift_matters(ev.key);
+        // 낱말 가운데서 언어를 바꾸는 사람은 없다. 한글을 조합하는 중에 Shift가 바꾸는 키(참신세벌식의 닫는 따옴표·말줄임표
+        // 같은 Shift 기호, 받침 ㅋ)는 잡지 않고 바로 친다(NRIME: 쌍자음의 68%가 낱말 가운데였고 가장 빠른 다섯이 모두 그랬다).
+        if self.mode == Mode::Ko && shift_matters && (self.hanja.is_some() || !self.ko.preedit().is_empty()) {
+            return None;
+        }
+        let window = if shift_matters { SHIFTED_LETTER_TAP_WINDOW } else { SHIFTLESS_LETTER_TAP_WINDOW };
+        let deadline = (ev.time + window).min(pressed + threshold);
+        self.buffered = Some(Buffered { ev: *ev, modifier, window, deadline, waiting_since: None });
         Some(Output { consumed: true, timer_ms: Some(millis(deadline - ev.time)), ..Output::default() })
+    }
+
+    /// Shift가 이 키의 글자를 바꾸는지(지금 모드에서). 바꾸지 않는 키에서 Shift는 탭 말고는 뜻이 없다.
+    /// - 영어(Graphite): 글자는 대문자, 기호 자리는 Shift 기호.
+    /// - 한국어(참신세벌식): Shift 층이 따로 있어서(「」『』…· 같은 기호, 받침 ㅋ, ❖) 사실상 모든 글자 키를 바꾼다.
+    /// - 일본어(新月): 글자 키(A~Z 자리)는 Shift를 무시하고 같은 가나를 낸다. 숫자·기호 자리는 Shift 기호.
+    fn shift_matters(&self, key: Key) -> bool {
+        let qwerty = key.qwerty_char(false) != key.qwerty_char(true);
+        match self.mode {
+            Mode::En => {
+                self.latin.char_for(key, false, false, false) != self.latin.char_for(key, true, false, false)
+            }
+            Mode::Ko => match (self.ko_layout.roles(key, false), self.ko_layout.roles(key, true)) {
+                (None, None) => qwerty,
+                (base, shifted) => base != shifted,
+            },
+            Mode::Ja => !key.is_letter() && qwerty,
+        }
+    }
+
+    /// 셸이 엔진에 넘기지 않은 키가 눌렸다(Shift+Enter를 다시 보내기 전에 잡아 둔 키). 진행 중인 수식키 탭을 무효로 한다:
+    /// 그 키를 Shift와 같이 눌렀다면 Shift는 탭이 아니다.
+    pub fn cancel_tap(&mut self) {
+        self.taps.cancel();
     }
 
     /// 잡아 둔 글자를 누른 그대로 친다. 그 수식키는 이제 탭이 아니다.
@@ -792,7 +850,9 @@ fn merge(first: Output, second: Output) -> Output {
 }
 
 fn millis(secs: f64) -> u32 {
-    (secs * 1000.0).ceil().max(1.0) as u32
+    // 30.05 - 30.02 = 0.030000000000001 같은 부동소수 오차로 1ms를 더 청하지 않게 조금 깎고 올린다.
+    // 타이머가 조금 일러도 엔진이 받아 준다(timer의 1ms 여유).
+    (secs * 1000.0 - 1e-6).ceil().max(1.0) as u32
 }
 
 /// 일본어 모드의 가나 배열 밖 기호(Shift 기호 등). NRIME의 전각/반각 규칙과 같다.

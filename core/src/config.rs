@@ -90,10 +90,18 @@ pub struct MacConfig {
     pub hud_position: HudPosition,
     /// 후보창 글자 크기(포인트).
     pub candidate_font_size: u32,
+    /// Shift+Enter 줄바꿈 대기(밀리초, 0~100, 기본 20): 조합을 확정한 뒤 줄바꿈 글자를 넣기까지. Electron·Chromium 앱
+    /// (웹 기술로 만든 앱 전부, 앱 자체를 보고 판별한다)에 쓰고, 조합 중에 누른 ⌘ 단축키를 다시 보낼 때도 이만큼 기다린다.
+    /// 0.6.0·0.6.1은 기다리지 않았는데, 느린 맥에서 조합 중이던 글자가 사라졌다(NRIME 1.0.12-beta.8: M2 맥북의 Claude는
+    /// 매번, Codex는 가끔). 줄바꿈이나 다시 보낸 키가 편집기가 확정을 다 받기 전에 닿았다. 알맞은 값은 맥마다 달라서
+    /// 사용자가 정한다(NRIME beta.9와 같다).
+    pub newline_insert_wait_ms: u32,
+    /// 줄바꿈 글자를 넣으면 메시지를 보내 버리는 앱(지금은 Codex)에는 확정한 뒤 Shift+Enter 키를 다시 보낸다.
+    /// 그 전에 기다리는 시간(밀리초, 0~200, 기본 50). 키를 보내려면 권한(기기 제어 및 데이터 접근)이 있어야 한다.
+    pub newline_key_press_wait_ms: u32,
     /// 0.5.x의 줄바꿈 대기(Electron `shift_enter_delay_ms`, Codex `newline_replay_ms`, 0.5.1~0.5.3 `newline_delay_offset_ms`).
-    /// 0.6.0부터 쓰지 않는다: 기다리지 않고 다음 런루프 차례에 줄을 바꾼다. 그 값들은 macOS가 권한 없이 보낸 키를
-    /// 소리 없이 버리던 때 정한 것이고, 권한이 있으면 기다림 없이 늘 됐다(NRIME 1.0.12, Discord 9/9, Codex 11/11).
-    /// 옛 설정 파일이 오류 나지 않게 읽기만 하고 버린다.
+    /// 0.6.0에서 대기를 없애며 버렸고, 0.6.2에서 대기를 새 이름(위의 둘)으로 되살렸다. 옛 값은 macOS가 권한 없이 보낸
+    /// 키를 버리던 때 정한 것이라 옮기지 않는다. 옛 설정 파일이 오류 나지 않게 읽기만 하고 버린다.
     #[serde(skip_serializing)]
     pub shift_enter_delay_ms: Option<i64>,
     #[serde(skip_serializing)]
@@ -108,6 +116,8 @@ impl Default for MacConfig {
             hud: true,
             hud_position: HudPosition::Caret,
             candidate_font_size: 14,
+            newline_insert_wait_ms: 20,
+            newline_key_press_wait_ms: 50,
             shift_enter_delay_ms: None,
             newline_replay_ms: None,
             newline_delay_offset_ms: None,
@@ -182,9 +192,11 @@ pub struct Config {
     /// 수식키 탭 인식 시간(밀리초). NRIME 기본값과 같은 200.
     pub tap_threshold_ms: u32,
     /// 빠른 탭 전환 보정(실험적, NRIME와 같다): 탭할 수식키를 떼기 전에 다음 글자를 눌러도, 곧 떼면 전환한 뒤의 글자로 친다.
+    /// 얼마나 곧이어야 하는지는 Shift가 그 글자를 바꾸는지에 따라 정해 둔 값이다(엔진의 판정 시간, NRIME 1.0.12-beta.7).
     pub tap_buffering: bool,
-    /// 빠른 탭 전환 보정에서 글자를 누르고 수식키를 떼기까지 이 시간(밀리초, 30~80) 안이면 탭으로 본다.
-    pub tap_overlap_ms: u32,
+    /// 0.6.1까지의 겹침 허용 시간(30~80ms). 판정 시간이 둘로 나뉘어 고정값이 되면서 쓰지 않는다. 읽기만 하고 버린다.
+    #[serde(skip_serializing)]
+    pub tap_overlap_ms: Option<i64>,
     /// Caps Lock과 Shift가 서로 뒤집는지(윈도우 방식). 맥은 false.
     pub caps_shift_inverts: bool,
     pub shortcuts: Shortcuts,
@@ -201,7 +213,7 @@ impl Default for Config {
             ko_layout: "chamshin-v18".into(),
             tap_threshold_ms: 200,
             tap_buffering: false,
-            tap_overlap_ms: 50,
+            tap_overlap_ms: None,
             caps_shift_inverts: false,
             shortcuts: Shortcuts::default(),
             taps: None,
@@ -222,7 +234,8 @@ impl Config {
         {
             c.shortcuts = shortcuts_from_legacy_taps(&taps)?;
         }
-        // 0.5.x의 줄바꿈 대기는 버린다(MacConfig 설명).
+        // 0.5.x의 줄바꿈 대기와 0.6.1까지의 겹침 허용 시간은 버린다(각 필드 설명).
+        c.tap_overlap_ms = None;
         c.mac.shift_enter_delay_ms = None;
         c.mac.newline_replay_ms = None;
         c.mac.newline_delay_offset_ms = None;
@@ -237,8 +250,9 @@ impl Config {
         }
         let ranges = [
             ("tap_threshold_ms", self.tap_threshold_ms, 50, 1000),
-            ("tap_overlap_ms", self.tap_overlap_ms, 30, 80),
             ("mac.candidate_font_size", self.mac.candidate_font_size, 10, 28),
+            ("mac.newline_insert_wait_ms", self.mac.newline_insert_wait_ms, 0, 100),
+            ("mac.newline_key_press_wait_ms", self.mac.newline_key_press_wait_ms, 0, 200),
         ];
         for (name, value, lo, hi) in ranges {
             if !(lo..=hi).contains(&value) {
@@ -286,18 +300,15 @@ impl Config {
             self.tap_threshold_ms == d.tap_threshold_ms,
         ));
         line(
-            "# 빠른 탭 전환 보정(실험적, 보류 중이라 설정 앱에는 없음): 탭할 수식키를 떼기 전에 다음 글자를 눌러도 전환한 뒤의 글자로 칩니다",
+            "# 빠른 탭 전환 보정(실험적): Shift를 탭하고 곧바로 글자를 쳐서 글자가 Shift보다 먼저 눌려도 언어를 바꿉니다.",
+        );
+        line(
+            "# Shift가 글자를 바꾸지 않는 키(新月의 글자 키)는 80ms, 바꾸는 키(대문자, 참신세벌식 Shift 기호)는 30ms 안에 떼야 하고, 한글 조합 중에는 보정하지 않습니다",
         );
         line(&setting(
             "tap_buffering",
             &self.tap_buffering.to_string(),
             self.tap_buffering == d.tap_buffering,
-        ));
-        line("# 빠른 탭 전환 보정의 겹침 허용 시간(밀리초, 30~80)");
-        line(&setting(
-            "tap_overlap_ms",
-            &self.tap_overlap_ms.to_string(),
-            self.tap_overlap_ms == d.tap_overlap_ms,
         ));
         line("");
         line("# Caps Lock과 Shift가 서로 뒤집히는지 여부(윈도우 방식, 맥은 false)");
@@ -399,6 +410,23 @@ impl Config {
             &mac.candidate_font_size.to_string(),
             mac.candidate_font_size == dmac.candidate_font_size,
         ));
+        line(
+            "# Shift+Enter 줄바꿈 대기(밀리초, 0~100): Electron·Chromium 앱에서 조합을 확정한 뒤 줄바꿈을 넣기까지 기다립니다.",
+        );
+        line("# 조합 중에 누른 ⌘ 단축키를 다시 보낼 때도 같습니다. 조합 중이던 글자가 사라지면 늘려 보세요");
+        line(&setting(
+            "newline_insert_wait_ms",
+            &mac.newline_insert_wait_ms.to_string(),
+            mac.newline_insert_wait_ms == dmac.newline_insert_wait_ms,
+        ));
+        line(
+            "# Shift+Enter를 다시 보내는 앱(줄바꿈 글자를 넣으면 메시지를 보내는 앱, 지금은 Codex)에서 확정한 뒤 키를 다시 보내기까지(밀리초, 0~200). 권한이 필요합니다",
+        );
+        line(&setting(
+            "newline_key_press_wait_ms",
+            &mac.newline_key_press_wait_ms.to_string(),
+            mac.newline_key_press_wait_ms == dmac.newline_key_press_wait_ms,
+        ));
         out
     }
 }
@@ -478,6 +506,7 @@ mod tests {
         assert_eq!(c.tap_threshold_ms, 200);
         assert!(!c.tap_buffering && c.ja.yen_sign && c.ja.convert_with_space && c.ja.convert_with_tab);
         assert_eq!(c.mac.candidate_font_size, 14);
+        assert_eq!((c.mac.newline_insert_wait_ms, c.mac.newline_key_press_wait_ms), (20, 50));
     }
 
     #[test]
@@ -520,6 +549,29 @@ mod tests {
     }
 
     #[test]
+    fn newline_waits_start_at_zero() {
+        // 0.6.2: 대기는 0(대기 없음)부터. 범위 밖은 거부한다.
+        let c =
+            Config::from_toml("[mac]\nnewline_insert_wait_ms = 0\nnewline_key_press_wait_ms = 200").unwrap();
+        assert_eq!((c.mac.newline_insert_wait_ms, c.mac.newline_key_press_wait_ms), (0, 200));
+        round_trip(&c);
+        let err = Config::from_toml("[mac]\nnewline_insert_wait_ms = 101").unwrap_err();
+        assert!(err.contains("mac.newline_insert_wait_ms") && err.contains("0~100"), "{err}");
+        assert!(Config::from_toml("[mac]\nnewline_key_press_wait_ms = 201").is_err());
+    }
+
+    #[test]
+    fn old_overlap_window_is_read_and_dropped() {
+        // 0.6.1까지의 겹침 허용 시간: 범위 밖이어도 오류 없이 읽고 버린다. 다시 쓰지 않는다.
+        for toml in ["tap_overlap_ms = 60", "tap_overlap_ms = 5", "tap_buffering = true\ntap_overlap_ms = 80"]
+        {
+            let c = Config::from_toml(toml).unwrap_or_else(|e| panic!("{toml}: {e}"));
+            assert_eq!(c.tap_overlap_ms, None, "{toml}");
+            assert!(!c.to_toml().contains("tap_overlap_ms"), "{toml}");
+        }
+    }
+
+    #[test]
     fn old_newline_waits_are_read_and_dropped() {
         // 0.5.x 파일의 줄바꿈 대기는 오류 없이 읽고 버린다. 다시 쓰지도 않는다.
         for toml in [
@@ -529,7 +581,8 @@ mod tests {
         ] {
             let c = Config::from_toml(toml).unwrap_or_else(|e| panic!("{toml}: {e}"));
             assert_eq!(c, Config::default(), "{toml}");
-            assert!(!c.to_toml().contains("delay"), "{toml}");
+            let text = c.to_toml();
+            assert!(!text.contains("delay") && !text.contains("newline_replay_ms"), "{toml}");
         }
     }
 
@@ -559,6 +612,8 @@ mod tests {
             "convert_with_tab",
             "katakana_direct",
             "candidate_font_size",
+            "newline_insert_wait_ms",
+            "newline_key_press_wait_ms",
         ] {
             assert!(text.contains(&format!("# {key} = ")), "{key}");
         }
@@ -571,7 +626,6 @@ mod tests {
             ko_layout: "chamshin-d-v19".into(),
             tap_threshold_ms: 250,
             tap_buffering: true,
-            tap_overlap_ms: 60,
             shortcuts: Shortcuts {
                 toggle_english: Shortcut::parse("control_left+space").unwrap(),
                 toggle_non_english: Shortcut::None,
@@ -588,6 +642,8 @@ mod tests {
                 hud: false,
                 hud_position: HudPosition::Mouse,
                 candidate_font_size: 18,
+                newline_insert_wait_ms: 35,
+                newline_key_press_wait_ms: 0,
                 ..MacConfig::default()
             },
             ..Config::default()
@@ -597,6 +653,10 @@ mod tests {
         assert!(text.contains("\nko_layout = \"chamshin-d-v19\"\n"));
         assert!(text.contains("\ntoggle_english = \"control_left+space\"\n"));
         assert!(text.contains("\ncandidate_font_size = 18\n"));
+        assert!(
+            text.contains("\nnewline_insert_wait_ms = 35\n")
+                && text.contains("\nnewline_key_press_wait_ms = 0\n")
+        );
         assert!(text.contains("\ntoggle_non_english = \"\"\n"), "없음은 빈 글자열");
         assert!(text.contains("\nhanja = \"tap:alt_right\"\n"));
         assert!(text.contains("\n# slash_nakaguro = true\n"), "바꾸지 않은 것은 주석 그대로");

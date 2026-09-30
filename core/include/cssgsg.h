@@ -92,8 +92,11 @@ const CssgsgOutput *cssgsg_engine_handle_key(CssgsgEngine *engine, const CssgsgK
                                              const CssgsgContext *ctx);
 /* 조합 중인 것을 확정 (포커스 해제 등) */
 const CssgsgOutput *cssgsg_engine_commit(CssgsgEngine *engine);
-/* timer_ms만큼 기다린 뒤 부른다. now는 키 이벤트와 같은 시계(초). */
-const CssgsgOutput *cssgsg_engine_timer(CssgsgEngine *engine, double now);
+/* timer_ms만큼 기다린 뒤 부른다. now는 키 이벤트와 같은 시계(초).
+ * held는 지금 실제로 누르고 있는 수식키(CSSGSG_MOD_*). 좌우를 모르면 양쪽 비트를 켠다. */
+const CssgsgOutput *cssgsg_engine_timer(CssgsgEngine *engine, double now, uint32_t held);
+/* 셸이 엔진에 넘기지 않은 키가 눌렸다(Shift+Enter를 다시 보내기 전에 잡아 둔 키): 진행 중인 수식키 탭 무효 */
+void cssgsg_engine_cancel_tap(CssgsgEngine *engine);
 /* 변환기(Mozc)의 사용자 사전을 다시 읽는다(설정 앱이 고친 뒤). */
 uint8_t cssgsg_engine_reload_dictionary(CssgsgEngine *engine);
 /* 마우스 클릭: 확정 + 진행 중인 수식키 탭 무효 */
@@ -127,6 +130,8 @@ typedef struct CssgsgMacSettings {
     uint8_t hud;               /* 모드를 바꿀 때 G/ㅊ/月를 잠깐 보인다 */
     uint8_t hud_at_mouse;      /* 1이면 마우스 옆, 0이면 커서 위 */
     uint32_t candidate_font_size; /* 후보창 글자 크기(포인트) */
+    uint32_t newline_insert_wait_ms;    /* Shift+Enter 줄바꿈 대기: Electron·Chromium 앱의 줄바꿈 넣기, ⌘ 단축키 다시 보내기 */
+    uint32_t newline_key_press_wait_ms; /* Shift+Enter 줄바꿈 대기: Shift+Enter 키를 다시 보내는 앱(Codex) */
 } CssgsgMacSettings;
 CssgsgMacSettings cssgsg_engine_mac_settings(const CssgsgEngine *engine);
 

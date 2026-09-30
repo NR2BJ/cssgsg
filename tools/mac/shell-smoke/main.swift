@@ -128,20 +128,30 @@ func selfTest() -> Bool {
     // 빠른 탭 전환 보정(tap_buffering): 탭 수식키를 누른 채 친 글자는 잡아 두고 타이머를 청한다.
     do {
         let config = "tap_buffering = true"
-        let t = Typist(layout: layout, mode: .en, config: config)
+        // 新月 글자 키는 Shift를 무시해서(같은 가나) 판정 시간이 80ms다.
+        let t = Typist(layout: layout, mode: .ja, config: config)
         t.press(.rightShift)
         t.key(UInt16(kVK_ANSI_J))
-        check(t.screen.isEmpty && t.lastTimerMs > 0 && t.lastTimerMs <= 100, "탭 보정: 오른쪽 Shift+j를 잡아 두고 타이머(\(t.lastTimerMs)ms)")
+        check(t.screen.isEmpty && t.lastTimerMs == 80, "탭 보정: 일본어에서 오른쪽 Shift+j를 잡아 두고 타이머(新月 글자 키라 80ms, \(t.lastTimerMs)ms)")
         t.release(.rightShift, after: 0.01)
-        check(t.mode == .ko && t.screen.count == 1 && t.doc.markedRange().length == 1,
-              "탭 보정: 곧 떼면 탭 → 한국어로 바꾸고 j를 Shift 없이(조합 \(t.screen))")
+        check(t.mode == .en && t.screen == "h", "탭 보정: 곧 떼면 탭 → 영어로 바꾸고 j를 Shift 없이(\(t.screen))")
+        // 영어 대문자는 Shift가 글자를 바꿔서 30ms.
         let u = Typist(layout: layout, mode: .en, config: config)
         u.press(.rightShift)
         u.key(UInt16(kVK_ANSI_J))
+        check(u.screen.isEmpty && u.lastTimerMs == 30, "탭 보정: 영어에서 Shift+j를 잡아 두고 타이머(대문자라 30ms, \(u.lastTimerMs)ms)")
         u.fireTimer(after: 0.2)
         check(u.screen == "H" && u.lastTimerMs == 0, "탭 보정: 떼지 않고 시간이 지나면 누른 그대로 H")
         u.release(.rightShift, after: 0.3)
         check(u.mode == .en && u.screen == "H", "탭 보정: 그 뒤에 떼도 전환 안 함")
+        // 시간이 다 됐을 때 Shift를 실제로는 이미 뗐다(NSEvent.modifierFlags): 뗌 이벤트가 오는 중이라 기다린다.
+        let w = Typist(layout: layout, mode: .en, config: config)
+        w.press(.rightShift)
+        w.key(UInt16(kVK_ANSI_J))
+        w.fireTimer(after: 0.04, releasedEarly: true)
+        check(w.screen.isEmpty && w.lastTimerMs == 10, "탭 보정: Shift를 이미 뗐으면 뗌 이벤트를 10ms마다 기다린다")
+        w.fireTimer(after: 0.5, releasedEarly: true)
+        check(w.screen == "H" && w.lastTimerMs == 0, "탭 보정: 0.5초 안에 안 오면 누른 그대로 H")
     }
 
     // 반복 키

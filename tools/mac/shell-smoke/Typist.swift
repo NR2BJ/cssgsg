@@ -295,10 +295,12 @@ final class Typist {
         apply(engine.mouseDown())
     }
 
-    /// 컨트롤러처럼 청한 타이머를 `after`초 뒤에 부른다.
-    func fireTimer(after: Double) {
+    /// 컨트롤러처럼 청한 타이머를 `after`초 뒤에 부른다. 수식키는 지금 누르고 있는 그대로 준다.
+    /// `releasedEarly`면 수식키를 실제로는 이미 뗐는데 뗌 이벤트가 아직 안 온 것으로 친다(바쁜 앱).
+    func fireTimer(after: Double, releasedEarly: Bool = false) {
         clock += after
-        apply(engine.timer(now: clock))
+        let physical = releasedEarly ? 0 : ModifierState.familyMods(NSEvent.ModifierFlags(rawValue: UInt(held)))
+        apply(engine.timer(now: clock, held: physical))
     }
 
     private func apply(_ out: EngineOutput) {

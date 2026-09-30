@@ -91,6 +91,10 @@ pub struct CssgsgMacSettings {
     pub hud_at_mouse: u8,
     /// 후보창 글자 크기(포인트).
     pub candidate_font_size: u32,
+    /// Shift+Enter 줄바꿈 대기(밀리초): Electron·Chromium 앱의 줄바꿈 넣기와 ⌘ 단축키 다시 보내기.
+    pub newline_insert_wait_ms: u32,
+    /// Shift+Enter 줄바꿈 대기(밀리초): Shift+Enter 키를 다시 보내는 앱(Codex).
+    pub newline_key_press_wait_ms: u32,
 }
 
 pub struct CssgsgEngine {
@@ -306,11 +310,27 @@ pub unsafe extern "C" fn cssgsg_engine_commit(e: *mut CssgsgEngine) -> *const Cs
 }
 
 /// `timer_ms`만큼 기다린 뒤 부른다. `now`는 키 이벤트와 같은 시계(초, NSEvent.timestamp)다.
+/// `held`는 지금 실제로 누르고 있는 수식키(CSSGSG_MOD_*, 좌우를 모르면 양쪽 비트).
 /// # Safety
 /// `e`는 NULL이거나 `cssgsg_engine_new`가 돌려준, 아직 해제하지 않은 포인터여야 한다.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn cssgsg_engine_timer(e: *mut CssgsgEngine, now: f64) -> *const CssgsgOutput {
-    unsafe { run(e, |engine| engine.timer(now)) }
+pub unsafe extern "C" fn cssgsg_engine_timer(
+    e: *mut CssgsgEngine,
+    now: f64,
+    held: u32,
+) -> *const CssgsgOutput {
+    unsafe { run(e, |engine| engine.timer(now, Mods(held))) }
+}
+
+/// 셸이 엔진에 넘기지 않은 키가 눌렸다(Shift+Enter를 다시 보내기 전에 잡아 둔 키): 진행 중인 수식키 탭을 무효로 한다.
+/// # Safety
+/// `e`는 NULL이거나 `cssgsg_engine_new`가 돌려준, 아직 해제하지 않은 포인터여야 한다.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn cssgsg_engine_cancel_tap(e: *mut CssgsgEngine) {
+    // SAFETY: 위 약속대로.
+    if let Some(e) = unsafe { e.as_mut() } {
+        e.engine.cancel_tap();
+    }
 }
 
 /// 변환기(Mozc)의 사용자 사전을 다시 읽는다(설정 앱이 고친 뒤).
@@ -497,6 +517,8 @@ pub unsafe extern "C" fn cssgsg_engine_mac_settings(e: *const CssgsgEngine) -> C
         hud: mac.hud as u8,
         hud_at_mouse: (mac.hud_position == crate::config::HudPosition::Mouse) as u8,
         candidate_font_size: mac.candidate_font_size,
+        newline_insert_wait_ms: mac.newline_insert_wait_ms,
+        newline_key_press_wait_ms: mac.newline_key_press_wait_ms,
     }
 }
 

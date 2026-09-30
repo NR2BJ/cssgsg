@@ -144,7 +144,11 @@ final class CoreEngine {
     func setMode(_ mode: InputMode) -> EngineOutput { Self.copy(cssgsg_engine_set_mode(engine, mode.rawValue)) }
 
     /// 결과의 timerMs만큼 기다린 뒤 부른다. now는 키 이벤트(NSEvent.timestamp)와 같은 시계, 부팅 뒤 초다.
-    func timer(now: TimeInterval) -> EngineOutput { Self.copy(cssgsg_engine_timer(engine, now)) }
+    /// held는 지금 실제로 누르고 있는 수식키(ModifierState.physicalMods).
+    func timer(now: TimeInterval, held: UInt32) -> EngineOutput { Self.copy(cssgsg_engine_timer(engine, now, held)) }
+
+    /// 엔진에 넘기지 않은 키가 눌렸다(Shift+Enter를 다시 보내기 전에 잡아 둔 키): 진행 중인 수식키 탭을 무효로 한다.
+    func cancelTap() { cssgsg_engine_cancel_tap(engine) }
 
     private static func copy(_ pointer: UnsafePointer<CssgsgOutput>?) -> EngineOutput {
         guard let o = pointer?.pointee else { return EngineOutput() }

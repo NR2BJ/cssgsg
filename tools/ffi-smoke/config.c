@@ -23,7 +23,10 @@ int main(void) {
     /* 파일 → JSON: 적은 값과 기본값 */
     json = cssgsg_config_json("[mac]\nhud = false\n");
     CHECK(json != NULL && strstr(json, "\"hud\":false") != NULL && strstr(json, "\"candidate_font_size\":14") != NULL
-          && strstr(json, "delay") == NULL);
+          && strstr(json, "delay") == NULL && strstr(json, "tap_overlap_ms") == NULL
+          && strstr(json, "\"newline_insert_wait_ms\":20") != NULL && strstr(json, "\"newline_key_press_wait_ms\":50") != NULL);
+    CHECK(cssgsg_config_toml("{\"mac\":{\"newline_key_press_wait_ms\":201}}") == NULL);
+    CHECK(strstr(cssgsg_config_error(), "newline_key_press_wait_ms") != NULL);
     /* 오류 */
     CHECK(cssgsg_config_json("tap_threshold_ms = 1") == NULL);
     CHECK(strstr(cssgsg_config_error(), "tap_threshold_ms") != NULL);

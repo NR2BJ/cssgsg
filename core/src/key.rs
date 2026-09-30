@@ -131,6 +131,18 @@ impl Key {
         }
     }
 
+    /// 이 수식키 무리(좌우 둘)의 비트. 수식키가 아니면 0. 셸이 좌우를 모를 때(지금 누르고 있는 수식키) 무리로 본다.
+    pub fn modifier_family_bits(self) -> u32 {
+        match self {
+            Self::SHIFT_LEFT | Self::SHIFT_RIGHT => Mods::SHIFT_L | Mods::SHIFT_R,
+            Self::CONTROL_LEFT | Self::CONTROL_RIGHT => Mods::CTRL_L | Mods::CTRL_R,
+            Self::ALT_LEFT | Self::ALT_RIGHT => Mods::ALT_L | Mods::ALT_R,
+            Self::META_LEFT | Self::META_RIGHT => Mods::META_L | Mods::META_R,
+            Self::FN => Mods::FN,
+            _ => 0,
+        }
+    }
+
     /// 쿼티 자리 글자로 키를 찾는다. 배열 데이터 파일에서 쓴다.
     pub fn from_qwerty(c: char) -> Option<Key> {
         if c.is_ascii_lowercase() {

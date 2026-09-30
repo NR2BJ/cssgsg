@@ -790,7 +790,7 @@ fn quick_tap_buffering_switches_before_the_rolled_letter() {
 fn quick_tap_buffering_keeps_shifted_letters_when_not_a_tap() {
     let mut shifted_j = ko_with("");
     shifted_j.type_keys("J").unwrap();
-    // 늦게 뗐다(글자를 누르고 50ms 넘게): 탭이 아니라 Shift 글자.
+    // 늦게 뗐다(글자를 누르고 30ms 넘게, 참신은 Shift가 글자를 바꾼다): 탭이 아니라 Shift 글자.
     let late = rolled_tap(BUFFERING, 0.03, 0.12);
     assert_eq!((late.engine.mode(), late.screen()), (Mode::Ko, shifted_j.screen()));
     // 타이머가 먼저 울렸다: 누른 그대로 치고, 그 Shift는 이제 탭이 아니다.
@@ -804,6 +804,105 @@ fn quick_tap_buffering_keeps_shifted_letters_when_not_a_tap() {
     s.fire_timer(s.pending_timer.unwrap());
     assert_eq!(s.screen(), shifted_j.screen());
     s.event(KeyEvent::up(Key::SHIFT_RIGHT, Mods(0), 10.08));
+    assert_eq!(s.engine.mode(), Mode::Ko);
+}
+
+/// 한국어에서 Shift+j(참신 Shift 층의 ·)를 친 화면.
+fn shifted_j() -> String {
+    let mut s = ko_with("");
+    s.type_keys("J").unwrap();
+    s.screen()
+}
+
+#[test]
+fn quick_tap_buffering_window_depends_on_what_shift_does() {
+    // 新月 글자 키는 Shift를 무시한다(같은 가나): Shift는 탭 말고 뜻이 없어서 글자를 누르고 80ms 안에 떼면 탭이다.
+    // 일본어에서 왼쪽 Shift(한↔일)를 누른 채 k를 치고 60ms 뒤에 뗐다: 한국어로 바꾼 뒤 k(참신 초성 ㄱ).
+    let mut s = sim_with(BUFFERING);
+    s.type_keys("{ls}").unwrap();
+    assert_eq!(s.engine.mode(), Mode::Ja);
+    s.event(KeyEvent::down(Key::SHIFT_LEFT, Mods(Mods::SHIFT_L), 10.0));
+    let out = s.event(KeyEvent::down(Key::K, Mods(Mods::SHIFT_L), 10.03));
+    assert!(out.consumed && out.timer_ms.is_some(), "잡아 둔다");
+    s.event(KeyEvent::up(Key::SHIFT_LEFT, Mods(0), 10.09));
+    assert_eq!((s.engine.mode(), s.preedit.as_str()), (Mode::Ko, "ㄱ"));
+    // 참신세벌식은 Shift 층이 따로 있어서(Shift+j = ·) 30ms 안이어야 탭이다. 같은 60ms는 Shift 글자.
+    let late = rolled_tap(BUFFERING, 0.03, 0.09);
+    assert_eq!((late.engine.mode(), late.screen()), (Mode::Ko, shifted_j()));
+    let quick = rolled_tap(BUFFERING, 0.03, 0.055);
+    assert_eq!((quick.engine.mode(), quick.screen().as_str()), (Mode::En, "h"));
+    // 영어 대문자도 30ms: 오른쪽 Shift를 누른 채 j(Graphite h)를 치고 40ms 뒤에 떼면 대문자 H.
+    let mut s = sim_with(BUFFERING);
+    s.event(KeyEvent::down(Key::SHIFT_RIGHT, Mods(Mods::SHIFT_R), 10.0));
+    s.event(KeyEvent::down(Key::J, Mods(Mods::SHIFT_R), 10.02));
+    if let Some(t) = s.pending_timer {
+        s.fire_timer(t);
+    }
+    s.event(KeyEvent::up(Key::SHIFT_RIGHT, Mods(0), 10.06));
+    assert_eq!((s.engine.mode(), s.screen().as_str()), (Mode::En, "H"));
+}
+
+#[test]
+fn quick_tap_buffering_leaves_shifted_keys_alone_while_composing_korean() {
+    // 낱말 가운데(한글 조합 중)의 Shift 글자는 잡지 않는다: 참신 닫는 따옴표(Shift+f ”)가 곧바로 나간다.
+    let mut s = ko_with(BUFFERING);
+    s.type_keys("jfs").unwrap();
+    assert_eq!(s.preedit, "안");
+    s.event(KeyEvent::down(Key::SHIFT_RIGHT, Mods(Mods::SHIFT_R), 10.0));
+    let out = s.event(KeyEvent::down(Key::F, Mods(Mods::SHIFT_R), 10.01));
+    assert!(out.timer_ms.is_none(), "잡지 않는다");
+    s.event(KeyEvent::up(Key::SHIFT_RIGHT, Mods(0), 10.02));
+    assert_eq!((s.engine.mode(), s.screen().as_str()), (Mode::Ko, "안”"));
+    // 조합이 끝난 뒤(공백 다음)에는 같은 키도 잡는다(30ms).
+    let mut s = ko_with(BUFFERING);
+    s.type_keys("jfs ").unwrap();
+    s.event(KeyEvent::down(Key::SHIFT_RIGHT, Mods(Mods::SHIFT_R), 10.0));
+    let out = s.event(KeyEvent::down(Key::F, Mods(Mods::SHIFT_R), 10.01));
+    assert_eq!(out.timer_ms, Some(30), "잡아 두고 30ms 뒤에 다시 본다");
+}
+
+#[test]
+fn quick_tap_buffering_waits_for_a_release_on_its_way() {
+    // 판정 시간이 지났는데 Shift는 실제로 이미 떼어져 있다: 뗌 이벤트가 앱을 거쳐 늦게 오는 중이다(바쁜 시스템).
+    // 누른 그대로 치지 않고 기다렸다가, 도착한 뗌의 시각으로 정한다(NRIME 1.0.12-beta.7).
+    let mut s = ko_with(BUFFERING);
+    s.event(KeyEvent::down(Key::SHIFT_RIGHT, Mods(Mods::SHIFT_R), 10.0));
+    s.event(KeyEvent::down(Key::J, Mods(Mods::SHIFT_R), 10.03));
+    let deadline = s.pending_timer.unwrap();
+    let out = s.fire_timer_held(deadline, Mods(0));
+    assert!(out.commit.is_empty() && matches!(out.timer_ms, Some(ms) if ms <= 11), "10ms 뒤에 다시 본다");
+    s.fire_timer_held(deadline + 0.2, Mods(0));
+    assert_eq!(s.screen(), "", "0.5초까지는 기다린다");
+    // 이제 도착했다. 뗀 시각은 글자를 누르고 20ms 뒤였다: 탭.
+    s.event(KeyEvent::up(Key::SHIFT_RIGHT, Mods(0), 10.05));
+    assert_eq!((s.engine.mode(), s.screen().as_str()), (Mode::En, "h"));
+
+    // 끝내 안 오면(포커스가 옮겨 갔다) 0.5초 뒤에 누른 그대로 친다.
+    let mut s = ko_with(BUFFERING);
+    s.event(KeyEvent::down(Key::SHIFT_RIGHT, Mods(Mods::SHIFT_R), 10.0));
+    s.event(KeyEvent::down(Key::J, Mods(Mods::SHIFT_R), 10.03));
+    let deadline = s.pending_timer.unwrap();
+    s.fire_timer_held(deadline, Mods(0));
+    let out = s.fire_timer_held(deadline + 0.5, Mods(0));
+    assert!(out.timer_ms.is_none());
+    assert_eq!((s.engine.mode(), s.screen()), (Mode::Ko, shifted_j()));
+    // 셸이 좌우를 몰라 양쪽 비트를 켜 주면 누르고 있는 것으로 본다: 기다리지 않고 누른 그대로.
+    let mut s = ko_with(BUFFERING);
+    s.event(KeyEvent::down(Key::SHIFT_RIGHT, Mods(Mods::SHIFT_R), 10.0));
+    s.event(KeyEvent::down(Key::J, Mods(Mods::SHIFT_R), 10.03));
+    let deadline = s.pending_timer.unwrap();
+    let out = s.fire_timer_held(deadline, Mods(Mods::SHIFT_L | Mods::SHIFT_R));
+    assert!(out.timer_ms.is_none() && s.screen() == shifted_j());
+}
+
+#[test]
+fn a_key_the_shell_held_back_cancels_the_tap() {
+    // Codex에서 Shift+Enter를 다시 보내기 전에 셸이 잡아 둔 키는 엔진을 거치지 않는다. 그래도 Shift를 누른 채 친 것이면
+    // 탭이 아니다(셸이 cancel_tap으로 알린다). 알리지 않으면 대문자 하나가 언어 전환이 된다.
+    let mut s = ko_with("");
+    s.event(KeyEvent::down(Key::SHIFT_RIGHT, Mods(Mods::SHIFT_R), 10.0));
+    s.engine.cancel_tap();
+    s.event(KeyEvent::up(Key::SHIFT_RIGHT, Mods(0), 10.05));
     assert_eq!(s.engine.mode(), Mode::Ko);
 }
 

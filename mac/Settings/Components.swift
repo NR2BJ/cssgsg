@@ -23,6 +23,8 @@ struct ValueSlider: View {
     var unit = "ms"
     /// 0을 가운데 둔 조정값이면 +/-를 붙인다.
     var signed = false
+    /// 0일 때 숫자 대신 보일 글자(예: "대기 없음").
+    var zeroLabel: String?
     let commit: (Int) -> Void
     @State private var draft: Double?
 
@@ -37,12 +39,13 @@ struct ValueSlider: View {
             .frame(minWidth: 160)
             Text(label(Int((draft ?? Double(value)).rounded())))
                 .monospacedDigit()
-                .frame(minWidth: 52, alignment: .trailing)
+                .frame(minWidth: zeroLabel == nil ? 52 : 72, alignment: .trailing)
         }
     }
 
     private func label(_ v: Int) -> String {
-        signed && v > 0 ? "+\(v)\(unit)" : "\(v)\(unit)"
+        if v == 0, let zeroLabel { return zeroLabel }
+        return signed && v > 0 ? "+\(v)\(unit)" : "\(v)\(unit)"
     }
 }
 

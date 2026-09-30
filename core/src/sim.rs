@@ -26,6 +26,8 @@ pub struct Sim {
     pub caps: bool,
     /// 엔진이 청한 타이머 시각(빠른 탭 전환 보정). `event`로 넣었을 때만 채운다.
     pub pending_timer: Option<f64>,
+    /// 마지막으로 넣은 이벤트 뒤에 누르고 있는 수식키(타이머에 준다).
+    held: Mods,
     time: f64,
 }
 
@@ -39,6 +41,7 @@ impl Sim {
             candidates: None,
             caps: false,
             pending_timer: None,
+            held: Mods(0),
             time: 1.0,
         }
     }
@@ -146,9 +149,14 @@ impl Sim {
         out
     }
 
-    /// 셸처럼 타이머 시각에 엔진을 부른다.
+    /// 셸처럼 타이머 시각에 엔진을 부른다. 수식키는 마지막으로 넣은 이벤트 그대로 누르고 있다고 본다.
     pub fn fire_timer(&mut self, now: f64) -> Output {
-        let out = self.engine.timer(now);
+        self.fire_timer_held(now, self.held)
+    }
+
+    /// 타이머를 부르며, 그때 실제로 누르고 있는 수식키를 따로 준다(뗌 이벤트가 늦게 오는 경우).
+    pub fn fire_timer_held(&mut self, now: f64, held: Mods) -> Output {
+        let out = self.engine.timer(now, held);
         self.apply(None, &out);
         self.pending_timer = out.timer_ms.map(|ms| now + ms as f64 / 1000.0);
         out
@@ -194,6 +202,7 @@ impl Sim {
             self.caps = false;
         }
         let Some(ev) = ev else { return };
+        self.held = Mods(ev.mods.0 & !Mods::CAPS);
         if out.consumed || !ev.down || ev.key.is_modifier() || ev.mods.command_like() {
             return;
         }
