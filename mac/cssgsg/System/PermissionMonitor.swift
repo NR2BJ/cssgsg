@@ -7,9 +7,17 @@ import Cocoa
 enum PermissionMonitor {
     private static var lastCheck: Date = .distantPast
 
-    /// 입력기가 뜰 때.
+    /// 입력기가 뜰 때. 그다음은 시스템 설정에서 손쉬운 사용(기기 제어 및 데이터 접근) 목록이 바뀔 때마다 다시 본다:
+    /// macOS가 그때 com.apple.accessibility.api 분산 알림을 보낸다. 권한 기록에 반영되기까지 조금 걸려서 잠깐 뒤에 본다.
+    /// 그래서 시스템 설정에서 켜고 끄면 설정 앱의 상태가 따라 바뀐다(설정 앱으로 돌아올 때도 다시 묻는다).
     static func start() {
         refresh(force: true)
+        DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("com.apple.accessibility.api"), object: nil, queue: .main
+        ) { _ in
+            DeveloperLogger.shared.log("Permissions", "system list changed")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { refresh(force: true) }
+        }
     }
 
     /// 입력기가 활성화될 때마다 부른다. 싸지만 1분에 한 번으로 줄인다. 뜬 뒤에 준 권한도 이렇게 보인다.
@@ -21,8 +29,8 @@ enum PermissionMonitor {
         let now = Date()
         guard force || now.timeIntervalSince(lastCheck) > 60 else { return }
         lastCheck = now
-        // CGPreflightPostEventAccess 하나만 보지 않는다: 그 답은 프로세스에서 처음 물었을 때로 굳는다
-        // (KeyEventReposter.canPostEvents).
+        // CGPreflightPostEventAccess를 그대로 쓰지 않는다: 그 답은 프로세스에서 처음 물었을 때로 굳는다
+        // (KeyEventReposter.canPostEvents). 기록에는 무엇이 굳어 있는지 보이게 따로 남긴다.
         let status = PermissionStatus(postEvents: KeyEventReposter.canPostEvents, accessibility: AXIsProcessTrusted(),
                                       checkedAt: now)
         let previous: PermissionStatus? = Cssgsg.imeStatus(PermissionStatus.self, key: PermissionStatus.defaultsKey)
@@ -30,6 +38,7 @@ enum PermissionMonitor {
         if previous?.postEvents != status.postEvents || previous?.accessibility != status.accessibility {
             DeveloperLogger.shared.log("Permissions", "status", metadata: [
                 "postEvents": "\(status.postEvents)", "accessibility": "\(status.accessibility)",
+                "preflight": "\(CGPreflightPostEventAccess())",
             ])
         }
     }

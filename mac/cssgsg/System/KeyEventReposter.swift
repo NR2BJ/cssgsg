@@ -18,12 +18,15 @@ enum KeyEventReposter {
 
     /// 키 이벤트를 보낼 수 있는지. 없으면 macOS가 보낸 키를 소리 없이 버린다(확정만 되고 키는 안 간다).
     ///
-    /// CGPreflightPostEventAccess만 보면 안 된다: CoreGraphics는 프로세스에서 처음 물었을 때의 답을 계속 돌려줘서,
-    /// 입력기가 뜬 뒤 준 권한은 다시 시작할 때까지 "없음"으로 보였다(NRIME: 허락하고 한 시간 뒤에도 거부).
-    /// AXIsProcessTrusted는 바뀐 것을 따라가고, 키를 보내게 해 주는 것도 그 권한이다(macOS 27은 "기기 제어 및
-    /// 데이터 접근" 하나뿐이다).
+    /// AXIsProcessTrusted로 본다. 켜고 끄는 것을 바로 따라가고(개발자 기록으로 확인), 손쉬운 사용 권한이 있으면 키도
+    /// 보낼 수 있다. macOS 27은 그 권한("기기 제어 및 데이터 접근") 하나뿐이라 그것만 본다.
+    /// CGPreflightPostEventAccess는 프로세스에서 처음 물었을 때의 답으로 굳는다. 권한 없이 뜨면 나중에 켜도 "없음"
+    /// (NRIME: 허락하고 한 시간 뒤에도 거부), 권한을 켠 채 뜨면 나중에 꺼도 "있음"이다(0.6.0: 끄고도 "허용됨"으로 보였다,
+    /// 확인 목록 43). 그래서 손쉬운 사용 없이 키 보내기만 따로 허락할 수 있는 macOS 26 이하에서만 더해 본다.
     static var canPostEvents: Bool {
-        CGPreflightPostEventAccess() || AXIsProcessTrusted()
+        if AXIsProcessTrusted() { return true }
+        if ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27 { return false }
+        return CGPreflightPostEventAccess()
     }
 
     /// ⌘/Ctrl/Option+키를 그대로 다시 보낸다. 부르는 쪽이 먼저 canPostEvents를 본다:

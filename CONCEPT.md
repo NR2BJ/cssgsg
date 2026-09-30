@@ -626,7 +626,10 @@ k     = { cho = "ㄱ" }
 - **입력 소스 켜기(macOS 27 실측):** 서드파티 입력기는 프로그램이 켤 수 없다. `TISEnableInputSource`는 noErr를 돌려주지만 아무것도 저장하지 않는다(입력기 안에서도 밖에서도). 켜진 목록은 `com.apple.inputsources`의 `AppleEnabledThirdPartyInputSources`이고, 시스템 설정의 추가가 여기에 쓴다. TIS의 켜짐 속성은 `tsInputModeDefaultStateKey` 때문에 추가하지 않은 모드도 켜짐으로 보인다. 목록 이름은 `InfoPlist.strings`에서 모드 ID로 찾는다.
 - **업데이트 뒤 다시 띄우기(macOS 27 실측):** root에서 여는 `open`(postinstall 안, 또는 installer 뒤 `launchctl asuser … sudo -u … open`)은 "launch 0 items" / procNotFound(-600)로 실패했다. 사용자 세션의 `open`은 앱을 끈 직후에도 뜬다. 그래서 앱이 osascript와 함께 사용자 세션의 작은 셸을 띄워, 설치가 끝나면 연다. 입력 소스로 쓰는 중이면 타자를 치는 순간 imklaunchagent도 띄운다.
 - **키 보내기 권한(NRIME 1.0.12, macOS 27):** `CGPreflightPostEventAccess()`의 답은 프로세스가 처음 물었을 때로 굳는다. 떠 있는 동안
-  사용자가 켜도 계속 거짓이라, `CGPreflightPostEventAccess() || AXIsProcessTrusted()`로 본다(손쉬운 사용 권한도 키 보내기를 허락한다).
+  사용자가 켜도 계속 거짓이고(NRIME), 켠 채 떴으면 꺼도 계속 참이다(cssgsg 0.6.0 확인 목록 43, 개발자 기록 `accessibility=false postEvents=true`).
+  그래서 NRIME의 `CGPreflightPostEventAccess() || AXIsProcessTrusted()`는 끈 것을 못 본다. 0.6.1부터 `AXIsProcessTrusted()`로 본다
+  (켜고 끄는 것을 바로 따라간다, 손쉬운 사용 권한이면 키도 보낸다). macOS 26 이하에서만 키 보내기만 따로 허락한 경우를 보려고 굳은 값을 더한다.
+  시스템 설정에서 목록이 바뀌면 오는 `com.apple.accessibility.api` 분산 알림과 설정 앱이 앞으로 올 때 다시 확인한다.
   macOS 27은 "손쉬운 사용"을 "기기 제어 및 데이터 접근"으로 바꿨다. 입력기는 스스로 묻지 않고(0.5.x는 첫 실행 때 한 번 물었다),
   활성화될 때(1분에 한 번까지) 확인해 설정 앱에 알린다. 청하는 것은 설정 앱 단추를 눌렀을 때만(`AXIsProcessTrustedWithOptions` 창 +
   `CGRequestPostEventAccess`). 권한이 풀리면 macOS는 cssgsg를 허용됨으로 둔 채 보낸 키를 버린다. 그때는 목록에서 지우고 다시 추가한다.
