@@ -174,43 +174,9 @@ final class CssgsgInputController: IMKInputController {
         (NSApp.delegate as? AppDelegate)?.updateStatus(CoreEngine.shared.mode)
         let client = sender as? (any IMKTextInput)
         DeveloperLogger.shared.log("Controller", "activateServer", metadata: ["app": client?.bundleIdentifier() ?? "unknown"])
-        showModeSoonAfterActivation(client)
-    }
-
-    // MARK: - 입력칸을 옮기면 지금 모드 보이기
-
-    private var activationHUDWork: DispatchWorkItem?
-    /// 활성화 때 모드 표시를 마지막으로 보인 입력칸과 그때.
-    private static var lastActivationHUD: (clientID: ObjectIdentifier, at: TimeInterval)?
-
-    /// 입력칸이 활성화되고 조금 뒤에 지금 모드를 보인다. 모드를 바꿀 때만이 아니라, 치기 전에 무슨 모드인지 알게
-    /// (NRIME 1.0.12-beta.11). 0.2초 기다렸다가 이 컨트롤러가 여전히 활성일 때만 보인다: 클릭 한 번에 포커스를 이리저리
-    /// 넘기는 앱이 있다. 같은 입력칸에는 2초에 한 번. 조합 중·후보창·비밀번호 칸에서는 보이지 않는다.
-    private func showModeSoonAfterActivation(_ activated: (any IMKTextInput)?) {
-        activationHUDWork?.cancel()
-        guard CoreEngine.shared.macSettings.hud != 0 else { return }
-        let work = DispatchWorkItem { [weak self] in
-            guard let self, Self.activeController === self,
-                  let client = activated ?? self.cachedClient ?? self.client() else { return }
-            let marked = client.markedRange()
-            guard marked.location == NSNotFound || marked.length == 0,
-                  !(NSApp.candidatePanel?.isVisible() ?? false),
-                  !self.secureInput.shouldSuppressComposition(),
-                  !self.secureInput.isAuthenticationClient(client.bundleIdentifier()) else { return }
-            let id = ObjectIdentifier(client as AnyObject)
-            let now = ProcessInfo.processInfo.systemUptime
-            if let last = Self.lastActivationHUD, last.clientID == id, now - last.at < 2 { return }
-            Self.lastActivationHUD = (id, now)
-            let settings = CoreEngine.shared.macSettings
-            let caret = settings.hud_at_mouse == 0 ? ModeHUD.caretRect(for: client) : nil
-            ModeHUD.shared.show(CoreEngine.shared.mode.label, caret: caret)
-        }
-        activationHUDWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: work)
     }
 
     override func deactivateServer(_ sender: Any!) {
-        activationHUDWork?.cancel()
         // self.client()는 이미 nil일 수 있으니 sender에 확정한다.
         commit(into: sender)
         NSApp.candidatePanel?.hide()

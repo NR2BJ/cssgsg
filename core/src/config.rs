@@ -85,7 +85,7 @@ pub enum HudPosition {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct MacConfig {
-    /// 모드를 바꾸거나 입력칸을 옮길 때(0.6.4부터) 커서 근처에 G / ㅊ / 月을 잠깐 보인다.
+    /// 모드를 바꿀 때 커서 근처에 G / ㅊ / 月을 잠깐 보인다(0.6.4만 입력칸을 옮길 때도 보였다).
     pub hud: bool,
     pub hud_position: HudPosition,
     /// 후보창 글자 크기(포인트).
@@ -407,7 +407,7 @@ impl Config {
         line("");
         let (mac, dmac) = (&self.mac, &d.mac);
         line("[mac]");
-        line("# 모드를 바꾸거나 입력칸을 옮길 때 G/ㅊ/月을 잠깐 표시");
+        line("# 모드를 바꿀 때 G/ㅊ/月을 잠깐 표시");
         line(&setting("hud", &mac.hud.to_string(), mac.hud == dmac.hud));
         line("# 모드 표시 위치: \"caret\"(입력 커서 위, 모르면 마우스 옆) 또는 \"mouse\"(마우스 옆)");
         line(&setting(
