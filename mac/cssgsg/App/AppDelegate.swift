@@ -14,7 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             ?? (Bundle.main.bundleIdentifier ?? "com.cssgsg.inputmethod.app") + "_Connection"
         server = IMKServer(name: connection, bundleIdentifier: Bundle.main.bundleIdentifier)
         let engine = CoreEngine.shared
-        Self.applyMacSettings(engine.macSettings)
+        Self.applyMacSettings(engine)
         let mozc = MozcLoader.start(engine)
         MozcStatus.update { $0 = $0.started(with: mozc) }
         HanjaLearningStore.shared.load(into: engine)
@@ -153,7 +153,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .configChanged:
             let engine = CoreEngine.shared
             let ok = engine.reloadConfig()
-            applyMacSettings(engine.macSettings)
+            applyMacSettings(engine)
             DeveloperLogger.shared.log("Settings", "config reloaded", metadata: [
                 "ok": "\(ok)", "error": engine.configError ?? "none",
             ])
@@ -176,7 +176,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// 설정 파일의 [mac] 표 중 셸이 쓰는 값.
-    private static func applyMacSettings(_ settings: CssgsgMacSettings) {
+    private static func applyMacSettings(_ engine: CoreEngine) {
+        let settings = engine.macSettings
+        ChromiumDetector.newlineKeyPressApps = engine.newlineKeyPressApps
         CandidatePanel.fontSize = CGFloat(settings.candidate_font_size)
         KeyEventReposter.insertWait = TimeInterval(settings.newline_insert_wait_ms) / 1000
         KeyEventReposter.keyPressWait = TimeInterval(settings.newline_key_press_wait_ms) / 1000

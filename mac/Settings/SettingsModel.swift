@@ -37,10 +37,12 @@ struct CssgsgConfig: Codable, Equatable {
         var hud: Bool
         var hudPosition: String
         var candidateFontSize: Int
-        /// Shift+Enter 줄바꿈 대기(밀리초): Electron·Chromium 앱의 줄바꿈 넣기와 ⌘ 다시 보내기(0~100, 기본 20).
+        /// 줄바꿈 넣기(웹 기술로 만든 앱)·⌘ 단축키 다시 보내기(모든 앱) 대기(밀리초, 0~100, 기본 20).
         var newlineInsertWaitMs: Int
-        /// Shift+Enter 줄바꿈 대기(밀리초): Shift+Enter 키를 다시 보내는 앱, 지금은 Codex(0~200, 기본 50).
+        /// Shift+Enter 다시 보내기 대기(밀리초, 0~100, 기본 50): newlineKeyPressApps의 앱.
         var newlineKeyPressWaitMs: Int
+        /// Shift+Enter 키를 다시 보낼 앱(번들 ID). 기본 Codex(com.openai.codex).
+        var newlineKeyPressApps: [String]
     }
 }
 

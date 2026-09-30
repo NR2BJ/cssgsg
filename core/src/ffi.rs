@@ -91,9 +91,9 @@ pub struct CssgsgMacSettings {
     pub hud_at_mouse: u8,
     /// 후보창 글자 크기(포인트).
     pub candidate_font_size: u32,
-    /// Shift+Enter 줄바꿈 대기(밀리초): Electron·Chromium 앱의 줄바꿈 넣기와 ⌘ 단축키 다시 보내기.
+    /// 줄바꿈 넣기(웹 기술로 만든 앱)·⌘ 단축키 다시 보내기(모든 앱) 대기(밀리초).
     pub newline_insert_wait_ms: u32,
-    /// Shift+Enter 줄바꿈 대기(밀리초): Shift+Enter 키를 다시 보내는 앱(Codex).
+    /// Shift+Enter 다시 보내기 대기(밀리초, `cssgsg_engine_newline_key_press_apps`의 앱).
     pub newline_key_press_wait_ms: u32,
 }
 
@@ -108,6 +108,7 @@ pub struct CssgsgEngine {
     notes: Vec<CString>,
     note_ptrs: Vec<*const c_char>,
     learning_tsv: CString,
+    newline_key_press_apps: CString,
 }
 
 thread_local! {
@@ -260,6 +261,7 @@ pub unsafe extern "C" fn cssgsg_engine_new(config_toml: *const c_char) -> *mut C
         notes: Vec::new(),
         note_ptrs: Vec::new(),
         learning_tsv: CString::default(),
+        newline_key_press_apps: CString::default(),
     }))
 }
 
@@ -520,6 +522,19 @@ pub unsafe extern "C" fn cssgsg_engine_mac_settings(e: *const CssgsgEngine) -> C
         newline_insert_wait_ms: mac.newline_insert_wait_ms,
         newline_key_press_wait_ms: mac.newline_key_press_wait_ms,
     }
+}
+
+/// Shift+Enter 키를 다시 보낼 앱(설정 파일 `[mac] newline_key_press_apps`)의 번들 ID를 줄바꿈으로 이은 글자열.
+/// 빈 목록이면 빈 글자열. 다음 이 함수 호출이나 엔진 해제 전까지 유효하다. `e`가 NULL이면 NULL.
+///
+/// # Safety
+/// `e`는 NULL이거나 `cssgsg_engine_new`가 돌려준, 아직 해제하지 않은 포인터여야 한다.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn cssgsg_engine_newline_key_press_apps(e: *mut CssgsgEngine) -> *const c_char {
+    // SAFETY: 위 약속대로.
+    let Some(e) = (unsafe { e.as_mut() }) else { return ptr::null() };
+    e.newline_key_press_apps = cstring(&e.engine.config().mac.newline_key_press_apps.join("\n"));
+    e.newline_key_press_apps.as_ptr()
 }
 
 #[unsafe(no_mangle)]

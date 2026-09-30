@@ -90,15 +90,19 @@ pub struct MacConfig {
     pub hud_position: HudPosition,
     /// 후보창 글자 크기(포인트).
     pub candidate_font_size: u32,
-    /// Shift+Enter 줄바꿈 대기(밀리초, 0~100, 기본 20): 조합을 확정한 뒤 줄바꿈 글자를 넣기까지. Electron·Chromium 앱
-    /// (웹 기술로 만든 앱 전부, 앱 자체를 보고 판별한다)에 쓰고, 조합 중에 누른 ⌘ 단축키를 다시 보낼 때도 이만큼 기다린다.
+    /// 줄바꿈 넣기·⌘ 단축키 대기(밀리초, 0~100, 기본 20): 웹 기술로 만든 앱(Electron·Chromium, 앱 자체를 보고 판별한다)에서
+    /// 확정한 뒤 줄바꿈 글자를 넣기까지, 그리고 모든 앱에서 조합 중에 누른 ⌘ 단축키를 다시 보내기까지 기다린다.
     /// 0.6.0·0.6.1은 기다리지 않았는데, 느린 맥에서 조합 중이던 글자가 사라졌다(NRIME 1.0.12-beta.8: M2 맥북의 Claude는
     /// 매번, Codex는 가끔). 줄바꿈이나 다시 보낸 키가 편집기가 확정을 다 받기 전에 닿았다. 알맞은 값은 맥마다 달라서
     /// 사용자가 정한다(NRIME beta.9와 같다).
     pub newline_insert_wait_ms: u32,
-    /// 줄바꿈 글자를 넣으면 메시지를 보내 버리는 앱(지금은 Codex)에는 확정한 뒤 Shift+Enter 키를 다시 보낸다.
-    /// 그 전에 기다리는 시간(밀리초, 0~200, 기본 50). 키를 보내려면 권한(기기 제어 및 데이터 접근)이 있어야 한다.
+    /// Shift+Enter 다시 보내기 대기(밀리초, 0~100, 기본 50): 아래 목록의 앱에서 확정한 뒤 Shift+Enter 키를 다시 보내기까지.
+    /// 키를 보내려면 권한(기기 제어 및 데이터 접근)이 있어야 한다. 0.6.2는 0~200이었다(읽을 때 100으로 줄인다).
     pub newline_key_press_wait_ms: u32,
+    /// Shift+Enter 키를 다시 보낼 앱(번들 ID): 웹 기술로 만든 앱 가운데 줄바꿈 글자를 넣으면 메시지를 보내 버리는 앱.
+    /// 앱 자체를 보고는 알 수 없어서 목록이다. 새로 찾으면 설정 앱 일반 탭에서 넣는다(새로 빌드하지 않게, NRIME 1.0.12-beta.10).
+    /// 기본은 Codex(ChatGPT 데스크톱) 하나. 빈 목록이면 모든 앱에 줄바꿈 글자를 넣는다.
+    pub newline_key_press_apps: Vec<String>,
     /// 0.5.x의 줄바꿈 대기(Electron `shift_enter_delay_ms`, Codex `newline_replay_ms`, 0.5.1~0.5.3 `newline_delay_offset_ms`).
     /// 0.6.0에서 대기를 없애며 버렸고, 0.6.2에서 대기를 새 이름(위의 둘)으로 되살렸다. 옛 값은 macOS가 권한 없이 보낸
     /// 키를 버리던 때 정한 것이라 옮기지 않는다. 옛 설정 파일이 오류 나지 않게 읽기만 하고 버린다.
@@ -118,6 +122,7 @@ impl Default for MacConfig {
             candidate_font_size: 14,
             newline_insert_wait_ms: 20,
             newline_key_press_wait_ms: 50,
+            newline_key_press_apps: vec!["com.openai.codex".into()],
             shift_enter_delay_ms: None,
             newline_replay_ms: None,
             newline_delay_offset_ms: None,
@@ -239,6 +244,8 @@ impl Config {
         c.mac.shift_enter_delay_ms = None;
         c.mac.newline_replay_ms = None;
         c.mac.newline_delay_offset_ms = None;
+        // 0.6.2의 Shift+Enter 다시 보내기 대기는 0~200이었다. 0.6.3부터 0~100(NRIME 1.0.12-beta.10과 같다).
+        c.mac.newline_key_press_wait_ms = c.mac.newline_key_press_wait_ms.min(100);
         c.validate()?;
         Ok(c)
     }
@@ -252,12 +259,18 @@ impl Config {
             ("tap_threshold_ms", self.tap_threshold_ms, 50, 1000),
             ("mac.candidate_font_size", self.mac.candidate_font_size, 10, 28),
             ("mac.newline_insert_wait_ms", self.mac.newline_insert_wait_ms, 0, 100),
-            ("mac.newline_key_press_wait_ms", self.mac.newline_key_press_wait_ms, 0, 200),
+            ("mac.newline_key_press_wait_ms", self.mac.newline_key_press_wait_ms, 0, 100),
         ];
         for (name, value, lo, hi) in ranges {
             if !(lo..=hi).contains(&value) {
                 return Err(format!("{name}는 {lo}~{hi} 사이여야 합니다(지금 {value})"));
             }
+        }
+        let not_bundle_id = |id: &String| {
+            id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+        };
+        if let Some(id) = self.mac.newline_key_press_apps.iter().find(|id| not_bundle_id(id)) {
+            return Err(format!("mac.newline_key_press_apps에 앱 번들 ID가 아닌 값이 있습니다: {id:?}"));
         }
         let all = self.shortcuts.all();
         for (i, &(action, s)) in all.iter().enumerate() {
@@ -411,21 +424,35 @@ impl Config {
             mac.candidate_font_size == dmac.candidate_font_size,
         ));
         line(
-            "# Shift+Enter 줄바꿈 대기(밀리초, 0~100): Electron·Chromium 앱에서 조합을 확정한 뒤 줄바꿈을 넣기까지 기다립니다.",
+            "# 줄바꿈 넣기·⌘ 단축키 대기(밀리초, 0~100): 웹 기술로 만든 앱(Electron·Chromium)에서 확정한 뒤 줄바꿈을 넣기까지,",
         );
-        line("# 조합 중에 누른 ⌘ 단축키를 다시 보낼 때도 같습니다. 조합 중이던 글자가 사라지면 늘려 보세요");
+        line(
+            "# 그리고 모든 앱에서 조합 중에 누른 ⌘ 단축키를 다시 보내기까지 기다립니다. 조합 중이던 글자가 사라지면 늘려 보세요",
+        );
         line(&setting(
             "newline_insert_wait_ms",
             &mac.newline_insert_wait_ms.to_string(),
             mac.newline_insert_wait_ms == dmac.newline_insert_wait_ms,
         ));
         line(
-            "# Shift+Enter를 다시 보내는 앱(줄바꿈 글자를 넣으면 메시지를 보내는 앱, 지금은 Codex)에서 확정한 뒤 키를 다시 보내기까지(밀리초, 0~200). 권한이 필요합니다",
+            "# Shift+Enter 다시 보내기 대기(밀리초, 0~100): 아래 목록의 앱에서 확정한 뒤 Shift+Enter 키를 다시 보내기까지 기다립니다. 권한이 필요합니다",
         );
         line(&setting(
             "newline_key_press_wait_ms",
             &mac.newline_key_press_wait_ms.to_string(),
             mac.newline_key_press_wait_ms == dmac.newline_key_press_wait_ms,
+        ));
+        line(
+            "# Shift+Enter를 다시 보낼 앱(번들 ID): 웹 기술로 만든 앱 가운데 줄바꿈 글자를 넣으면 메시지를 보내 버리는 앱입니다.",
+        );
+        line(
+            "# 이 앱들에는 줄바꿈 글자 대신 Shift+Enter 키를 다시 보냅니다. 빈 목록([])이면 모든 앱에 줄바꿈 글자를 넣습니다",
+        );
+        let apps: Vec<String> = mac.newline_key_press_apps.iter().map(|id| quoted(id)).collect();
+        line(&setting(
+            "newline_key_press_apps",
+            &format!("[{}]", apps.join(", ")),
+            mac.newline_key_press_apps == dmac.newline_key_press_apps,
         ));
         out
     }
@@ -550,14 +577,45 @@ mod tests {
 
     #[test]
     fn newline_waits_start_at_zero() {
-        // 0.6.2: 대기는 0(대기 없음)부터. 범위 밖은 거부한다.
+        // 0.6.2: 대기는 0(대기 없음)부터. 0.6.3: 둘 다 0~100. 범위 밖은 거부한다.
         let c =
-            Config::from_toml("[mac]\nnewline_insert_wait_ms = 0\nnewline_key_press_wait_ms = 200").unwrap();
-        assert_eq!((c.mac.newline_insert_wait_ms, c.mac.newline_key_press_wait_ms), (0, 200));
+            Config::from_toml("[mac]\nnewline_insert_wait_ms = 0\nnewline_key_press_wait_ms = 100").unwrap();
+        assert_eq!((c.mac.newline_insert_wait_ms, c.mac.newline_key_press_wait_ms), (0, 100));
         round_trip(&c);
         let err = Config::from_toml("[mac]\nnewline_insert_wait_ms = 101").unwrap_err();
         assert!(err.contains("mac.newline_insert_wait_ms") && err.contains("0~100"), "{err}");
-        assert!(Config::from_toml("[mac]\nnewline_key_press_wait_ms = 201").is_err());
+        // 0.6.2 파일의 100 넘는 값(그때는 200까지)은 100으로 읽는다. 설정 앱이 쓰는 값은 거부한다.
+        let old = Config::from_toml("[mac]\nnewline_key_press_wait_ms = 150").unwrap();
+        assert_eq!(old.mac.newline_key_press_wait_ms, 100);
+        let wrote = Config {
+            mac: MacConfig { newline_key_press_wait_ms: 150, ..MacConfig::default() },
+            ..Config::default()
+        };
+        assert!(wrote.validate().unwrap_err().contains("mac.newline_key_press_wait_ms"));
+    }
+
+    #[test]
+    fn newline_key_press_apps_is_a_list_the_user_edits() {
+        // 기본은 Codex 하나. 고치면 그대로 읽고, 빈 목록은 비어 있는 채로 둔다(모든 앱에 줄바꿈 글자).
+        assert_eq!(Config::default().mac.newline_key_press_apps, vec!["com.openai.codex"]);
+        let c =
+            Config::from_toml("[mac]\nnewline_key_press_apps = [\"com.openai.codex\", \"com.example.chat\"]")
+                .unwrap();
+        assert_eq!(c.mac.newline_key_press_apps, vec!["com.openai.codex", "com.example.chat"]);
+        round_trip(&c);
+        assert!(
+            c.to_toml().contains("\nnewline_key_press_apps = [\"com.openai.codex\", \"com.example.chat\"]\n")
+        );
+        let empty = Config::from_toml("[mac]\nnewline_key_press_apps = []").unwrap();
+        assert!(empty.mac.newline_key_press_apps.is_empty());
+        round_trip(&empty);
+        assert!(empty.to_toml().contains("\nnewline_key_press_apps = []\n"));
+        assert!(
+            Config::default().to_toml().contains("\n# newline_key_press_apps = [\"com.openai.codex\"]\n")
+        );
+        let err = Config::from_toml("[mac]\nnewline_key_press_apps = [\"not an id\"]").unwrap_err();
+        assert!(err.contains("newline_key_press_apps"), "{err}");
+        assert!(Config::from_toml("[mac]\nnewline_key_press_apps = [\"\"]").is_err());
     }
 
     #[test]
@@ -614,6 +672,7 @@ mod tests {
             "candidate_font_size",
             "newline_insert_wait_ms",
             "newline_key_press_wait_ms",
+            "newline_key_press_apps",
         ] {
             assert!(text.contains(&format!("# {key} = ")), "{key}");
         }

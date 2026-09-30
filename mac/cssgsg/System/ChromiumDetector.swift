@@ -17,13 +17,17 @@ enum ChromiumDetector {
     /// message submit rather than a line break (their newline path only fires
     /// on a real Shift+Enter keydown). For these, the Shift+Enter workaround
     /// replays the key press after the commit instead of inserting "\n".
+    /// That cannot be told from the app itself, so it is a list the user edits
+    /// in Settings > General (config [mac] newline_key_press_apps, Codex by
+    /// default; set by AppDelegate from the config) — a new one needs no new
+    /// build (NRIME 1.0.12-beta.10).
     ///
     /// Claude desktop is not on it (NRIME 1.0.12-beta.7 tried it and went
     /// back in beta.8): with no wait its inserted "\n" lost the syllable being
     /// composed, but the replayed key lost it too on a slower Mac. Both needed
     /// the wait (KeyEventReposter); with it, the inserted "\n" works. Its
     /// editor is Lexical (the app bundle names it), Codex's is ProseMirror.
-    private static let newlineInsertSubmitsBundleIDs: Set<String> = [
+    static var newlineKeyPressApps: Set<String> = [
         "com.openai.codex", // ChatGPT/Codex desktop — verified 2026-07 beta test
     ]
 
@@ -35,7 +39,7 @@ enum ChromiumDetector {
         guard let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else {
             return false
         }
-        return newlineInsertSubmitsBundleIDs.contains(bundleID)
+        return newlineKeyPressApps.contains(bundleID)
     }
 
     /// Returns true if the frontmost application uses Chromium/Electron.

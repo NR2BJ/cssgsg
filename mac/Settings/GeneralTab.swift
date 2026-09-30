@@ -1,4 +1,6 @@
+import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - 일반
 
@@ -90,43 +92,50 @@ struct GeneralTab: View {
             }
 
             Section {
-                LabeledContent(tr("Electron·Chromium 앱", "Electron and Chromium Apps", "Electron・Chromiumアプリ")) {
+                LabeledContent(tr("줄바꿈 넣기·⌘ 단축키", "Newline Insert and ⌘ Shortcuts", "改行の挿入・⌘ショートカット")) {
                     ValueSlider(value: model.config.mac.newlineInsertWaitMs, range: 0...100, step: 5,
                                 zeroLabel: tr("대기 없음", "No wait", "待ちなし")) { ms in
                         model.update { $0.mac.newlineInsertWaitMs = ms }
                     }
                 }
-                LabeledContent(tr("Shift+Enter를 다시 보내는 앱", "Apps That Get Shift+Enter Re-sent", "Shift+Enterを送り直すアプリ")) {
-                    ValueSlider(value: model.config.mac.newlineKeyPressWaitMs, range: 0...200, step: 5,
+                LabeledContent(tr("Shift+Enter 다시 보내기", "Shift+Enter Re-send", "Shift+Enterの送り直し")) {
+                    ValueSlider(value: model.config.mac.newlineKeyPressWaitMs, range: 0...100, step: 5,
                                 zeroLabel: tr("대기 없음", "No wait", "待ちなし")) { ms in
                         model.update { $0.mac.newlineKeyPressWaitMs = ms }
                     }
                 }
+                NewlineKeyPressAppList(model: model)
             } header: {
                 Text(tr("Shift+Enter 줄바꿈 대기", "Shift+Enter Newline Wait", "Shift+Enter 改行の待ち時間"))
             } footer: {
                 Text(tr("""
-                    조합 중인 글자를 확정한 뒤 줄바꿈을 넣기까지 기다리는 시간입니다. 조합 중이던 글자가 사라지면 값을 늘려 보세요. \
-                    알맞은 값은 Mac마다 다릅니다.
-                    Electron·Chromium 앱: Discord, Slack, Claude, VS Code처럼 웹 기술로 만든 앱 전체입니다. 조합 중에 누른 ⌘ 단축키도 \
-                    이만큼 기다렸다 다시 보냅니다. 기본 20ms.
-                    Shift+Enter를 다시 보내는 앱: 줄바꿈 글자를 넣으면 메시지를 보내 버리는 앱(지금은 Codex)에는 확정한 뒤 \
-                    Shift+Enter 키를 다시 보냅니다. 입력기 권한(정보 탭)이 필요합니다. 기본 50ms.
+                    줄바꿈 넣기·⌘ 단축키: Discord, Slack, Claude, VS Code처럼 웹 기술(Electron·Chromium)로 만든 앱에서 확정한 뒤 \
+                    줄바꿈을 넣기까지, 그리고 모든 앱에서 조합 중에 누른 ⌘ 단축키를 다시 보내기까지 기다리는 시간입니다. 기본 20ms.
+                    Shift+Enter 다시 보내기: 목록의 앱에서 확정한 뒤 Shift+Enter 키를 다시 보내기까지 기다리는 시간입니다. \
+                    입력기 권한(정보 탭)이 필요합니다. 기본 50ms.
+                    조합 중이던 글자가 사라지면 값을 늘려 보세요. 알맞은 값은 Mac마다 다릅니다.
+                    Shift+Enter를 다시 보낼 앱: 웹 기술로 만든 앱 가운데 줄바꿈 글자를 넣으면 메시지를 보내 버리는 앱을 넣어 두세요\
+                    (예: Codex, 앱 이름은 ChatGPT). 이 앱들에는 줄바꿈 글자 대신 Shift+Enter 키를 다시 보냅니다.
                     """, """
-                    How long to wait after committing the composition before the newline goes in. If the syllable being composed \
-                    disappears, increase it. The right value differs from Mac to Mac.
-                    Electron and Chromium apps: every app built on web technology, such as Discord, Slack, Claude and VS Code. \
-                    ⌘ shortcuts pressed while composing are re-sent after the same wait. Default 20 ms.
-                    Apps that get Shift+Enter re-sent: apps that send the message when a newline character is inserted (Codex \
-                    for now) get the Shift+Enter key press again after the commit. Needs the input method permission (About tab). \
-                    Default 50 ms.
+                    Newline insert and ⌘ shortcuts: how long to wait after committing the composition before inserting the newline \
+                    in apps built on web technology (Electron and Chromium: Discord, Slack, Claude, VS Code…), and before re-sending \
+                    a ⌘ shortcut pressed while composing, in any app. Default 20 ms.
+                    Shift+Enter re-send: how long to wait after committing before re-sending the Shift+Enter key press in the \
+                    listed apps. Needs the input method permission (About tab). Default 50 ms.
+                    If the syllable being composed disappears, increase it. The right value differs from Mac to Mac.
+                    Apps that get Shift+Enter re-sent: add apps built on web technology that send the message when a newline \
+                    character is inserted (for example Codex, whose app is named ChatGPT). These get the Shift+Enter key press \
+                    re-sent instead of a newline character.
                     """, """
-                    入力中の文字を確定してから改行を入れるまでの待ち時間です。入力中の文字が消える場合は値を上げてください。\
-                    適切な値はMacごとに異なります。
-                    Electron・Chromiumアプリ：Discord、Slack、Claude、VS CodeなどWeb技術で作られたアプリすべてです。\
-                    入力中に押した⌘ショートカットも、同じだけ待ってから送り直します。デフォルト20ms。
-                    Shift+Enterを送り直すアプリ：改行文字を入れるとメッセージを送信してしまうアプリ（現在はCodex）には、\
-                    確定後にShift+Enterキーを送り直します。入力メソッドの許可（情報タブ）が必要です。デフォルト50ms。
+                    改行の挿入・⌘ショートカット：Discord、Slack、Claude、VS CodeなどWeb技術（Electron・Chromium）で作られた\
+                    アプリで確定してから改行を入れるまで、そしてすべてのアプリで入力中に押した⌘ショートカットを送り直すまでの\
+                    待ち時間です。デフォルト20ms。
+                    Shift+Enterの送り直し：リストのアプリで、確定してからShift+Enterキーを送り直すまでの待ち時間です。\
+                    入力メソッドの許可（情報タブ）が必要です。デフォルト50ms。
+                    入力中の文字が消える場合は値を上げてください。適切な値はMacごとに異なります。
+                    Shift+Enterを送り直すアプリ：Web技術で作られたアプリのうち、改行文字を入れるとメッセージを送信してしまう\
+                    アプリを追加してください（例：Codex、アプリ名はChatGPT）。これらのアプリには改行文字の代わりに\
+                    Shift+Enterキーを送り直します。
                     """))
             }
 
@@ -143,5 +152,81 @@ struct GeneralTab: View {
 
         }
         .formStyle(.grouped)
+    }
+}
+
+/// Shift+Enter를 다시 보낼 앱 목록(설정 파일 [mac] newline_key_press_apps, 기본 Codex). 줄바꿈 글자를 넣으면 메시지를
+/// 보내 버리는 앱은 앱 자체를 보고 알 수 없어서, 새로 찾으면 여기서 넣는다(새로 빌드하지 않게, NRIME 1.0.12-beta.10과 같다).
+struct NewlineKeyPressAppList: View {
+    @ObservedObject var model: SettingsModel
+
+    private var apps: [String] { model.config.mac.newlineKeyPressApps }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(tr("Shift+Enter를 다시 보낼 앱", "Apps That Get Shift+Enter Re-sent", "Shift+Enterを送り直すアプリ"))
+            if apps.isEmpty {
+                Text(tr("없음 — 모든 앱에 줄바꿈 글자를 넣습니다", "None — every app gets a newline character",
+                        "なし — すべてのアプリに改行文字を入れます"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(apps, id: \.self) { bundleID in
+                HStack(spacing: 8) {
+                    if let icon = Self.icon(bundleID) {
+                        Image(nsImage: icon)
+                            .resizable()
+                            .frame(width: 18, height: 18)
+                    }
+                    Text(verbatim: Self.name(bundleID))
+                    Text(verbatim: bundleID)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button {
+                        model.update { $0.mac.newlineKeyPressApps.removeAll { $0 == bundleID } }
+                    } label: {
+                        Image(systemName: "minus.circle")
+                    }
+                    .buttonStyle(.borderless)
+                    .help(tr("목록에서 빼기", "Remove from the list", "リストから外す"))
+                }
+            }
+            Button(tr("앱 추가…", "Add App…", "アプリを追加…")) {
+                let ids = Self.chooseApps()
+                guard !ids.isEmpty else { return }
+                model.update { config in
+                    for id in ids where !config.mac.newlineKeyPressApps.contains(id) {
+                        config.mac.newlineKeyPressApps.append(id)
+                    }
+                }
+            }
+        }
+    }
+
+    private static func appURL(_ bundleID: String) -> URL? {
+        NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
+    }
+
+    /// Finder에 보이는 앱 이름. 설치되지 않았으면 번들 ID.
+    private static func name(_ bundleID: String) -> String {
+        guard let url = appURL(bundleID) else { return bundleID }
+        let name = FileManager.default.displayName(atPath: url.path)
+        return name.hasSuffix(".app") ? String(name.dropLast(4)) : name
+    }
+
+    private static func icon(_ bundleID: String) -> NSImage? {
+        appURL(bundleID).map { NSWorkspace.shared.icon(forFile: $0.path) }
+    }
+
+    /// 응용 프로그램 폴더에서 앱을 고른다(여럿 가능). 고른 앱의 번들 ID.
+    private static func chooseApps() -> [String] {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.application]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        guard panel.runModal() == .OK else { return [] }
+        return panel.urls.compactMap { Bundle(url: $0)?.bundleIdentifier }
     }
 }

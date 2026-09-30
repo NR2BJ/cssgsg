@@ -65,12 +65,26 @@ int main(void) {
     cssgsg_engine_free(c);
     CHECK(cssgsg_engine_new("[mac]\ncandidate_font_size = 40") == NULL);
     /* Shift+Enter 줄바꿈 대기(0.6.2): 0부터, 두 값은 따로. 범위 밖은 거부 */
-    c = cssgsg_engine_new("[mac]\nnewline_insert_wait_ms = 0\nnewline_key_press_wait_ms = 120");
+    c = cssgsg_engine_new("[mac]\nnewline_insert_wait_ms = 0\nnewline_key_press_wait_ms = 80");
     CHECK(c != NULL);
     m = cssgsg_engine_mac_settings(c);
-    CHECK(m.newline_insert_wait_ms == 0 && m.newline_key_press_wait_ms == 120 && m.candidate_font_size == 14);
+    CHECK(m.newline_insert_wait_ms == 0 && m.newline_key_press_wait_ms == 80 && m.candidate_font_size == 14);
     cssgsg_engine_free(c);
     CHECK(cssgsg_engine_new("[mac]\nnewline_insert_wait_ms = 101") == NULL);
+    /* 0.6.3: Shift+Enter 다시 보내기 대기도 0~100. 0.6.2 파일의 150은 100으로 읽는다 */
+    c = cssgsg_engine_new("[mac]\nnewline_key_press_wait_ms = 150");
+    CHECK(c != NULL && cssgsg_engine_mac_settings(c).newline_key_press_wait_ms == 100);
+    cssgsg_engine_free(c);
+    /* Shift+Enter를 다시 보낼 앱: 기본 Codex, 고친 목록, 빈 목록, 번들 ID가 아닌 값은 거부 */
+    CHECK(strcmp(cssgsg_engine_newline_key_press_apps(e), "com.openai.codex") == 0);
+    CHECK(cssgsg_engine_newline_key_press_apps(NULL) == NULL);
+    c = cssgsg_engine_new("[mac]\nnewline_key_press_apps = [\"com.openai.codex\", \"com.example.chat\"]");
+    CHECK(c != NULL && strcmp(cssgsg_engine_newline_key_press_apps(c), "com.openai.codex\ncom.example.chat") == 0);
+    cssgsg_engine_free(c);
+    c = cssgsg_engine_new("[mac]\nnewline_key_press_apps = []");
+    CHECK(c != NULL && strcmp(cssgsg_engine_newline_key_press_apps(c), "") == 0);
+    cssgsg_engine_free(c);
+    CHECK(cssgsg_engine_new("[mac]\nnewline_key_press_apps = [\"not an id\"]") == NULL);
     /* 0.5.x의 줄바꿈 대기 이름은 읽고 버린다(새 이름의 기본값을 쓴다) */
     c = cssgsg_engine_new("[mac]\nshift_enter_delay_ms = 25\nnewline_replay_ms = 150\nnewline_delay_offset_ms = 10");
     CHECK(c != NULL);

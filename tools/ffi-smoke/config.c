@@ -25,7 +25,12 @@ int main(void) {
     CHECK(json != NULL && strstr(json, "\"hud\":false") != NULL && strstr(json, "\"candidate_font_size\":14") != NULL
           && strstr(json, "delay") == NULL && strstr(json, "tap_overlap_ms") == NULL
           && strstr(json, "\"newline_insert_wait_ms\":20") != NULL && strstr(json, "\"newline_key_press_wait_ms\":50") != NULL);
-    CHECK(cssgsg_config_toml("{\"mac\":{\"newline_key_press_wait_ms\":201}}") == NULL);
+    CHECK(cssgsg_config_toml("{\"mac\":{\"newline_key_press_wait_ms\":101}}") == NULL);
+    CHECK(strstr(json, "\"newline_key_press_apps\":[\"com.openai.codex\"]") != NULL);
+    toml = cssgsg_config_toml("{\"mac\":{\"newline_key_press_apps\":[\"com.openai.codex\",\"com.example.chat\"]}}");
+    CHECK(toml != NULL && strstr(toml, "\nnewline_key_press_apps = [\"com.openai.codex\", \"com.example.chat\"]\n") != NULL);
+    toml = cssgsg_config_toml("{\"mac\":{\"newline_key_press_apps\":[]}}");
+    CHECK(toml != NULL && strstr(toml, "\nnewline_key_press_apps = []\n") != NULL);
     CHECK(strstr(cssgsg_config_error(), "newline_key_press_wait_ms") != NULL);
     /* 오류 */
     CHECK(cssgsg_config_json("tap_threshold_ms = 1") == NULL);

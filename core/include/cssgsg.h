@@ -130,10 +130,13 @@ typedef struct CssgsgMacSettings {
     uint8_t hud;               /* 모드를 바꿀 때 G/ㅊ/月를 잠깐 보인다 */
     uint8_t hud_at_mouse;      /* 1이면 마우스 옆, 0이면 커서 위 */
     uint32_t candidate_font_size; /* 후보창 글자 크기(포인트) */
-    uint32_t newline_insert_wait_ms;    /* Shift+Enter 줄바꿈 대기: Electron·Chromium 앱의 줄바꿈 넣기, ⌘ 단축키 다시 보내기 */
-    uint32_t newline_key_press_wait_ms; /* Shift+Enter 줄바꿈 대기: Shift+Enter 키를 다시 보내는 앱(Codex) */
+    uint32_t newline_insert_wait_ms;    /* 줄바꿈 넣기(웹 기술로 만든 앱)·⌘ 단축키 다시 보내기(모든 앱) 대기 */
+    uint32_t newline_key_press_wait_ms; /* Shift+Enter 다시 보내기 대기(아래 목록의 앱) */
 } CssgsgMacSettings;
 CssgsgMacSettings cssgsg_engine_mac_settings(const CssgsgEngine *engine);
+/* Shift+Enter 키를 다시 보낼 앱(번들 ID)을 줄바꿈으로 이은 글자열(빈 목록이면 ""). 다음 호출이나 엔진 해제 전까지 유효.
+ * engine이 NULL이면 NULL. */
+const char *cssgsg_engine_newline_key_press_apps(CssgsgEngine *engine);
 
 uint16_t cssgsg_key_from_mac_keycode(uint16_t mac_keycode);
 const char *cssgsg_last_error(void);

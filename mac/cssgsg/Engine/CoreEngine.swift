@@ -150,6 +150,12 @@ final class CoreEngine {
     /// 엔진에 넘기지 않은 키가 눌렸다(Shift+Enter를 다시 보내기 전에 잡아 둔 키): 진행 중인 수식키 탭을 무효로 한다.
     func cancelTap() { cssgsg_engine_cancel_tap(engine) }
 
+    /// Shift+Enter 키를 다시 보낼 앱(설정 파일 [mac] newline_key_press_apps, 번들 ID).
+    var newlineKeyPressApps: Set<String> {
+        guard let p = cssgsg_engine_newline_key_press_apps(engine) else { return [] }
+        return Set(String(cString: p).split(separator: "\n").map(String.init))
+    }
+
     private static func copy(_ pointer: UnsafePointer<CssgsgOutput>?) -> EngineOutput {
         guard let o = pointer?.pointee else { return EngineOutput() }
         var out = EngineOutput()
