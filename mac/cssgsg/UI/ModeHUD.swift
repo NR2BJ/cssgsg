@@ -1,8 +1,10 @@
-// NRIME(github.com/NR2BJ/NRIME)의 UI/InlineIndicator.swift를 가져와 줄였다.
+// NRIME(github.com/NR2BJ/NRIME)의 UI/InlineIndicator.swift를 가져와 줄였다(1.0.12-beta.11: 커서 찾기, 늘 보이기).
 // 자리는 호출하는 쪽이 정한다(확정하기 전의 커서 자리. 확정한 뒤에 물으면 앱마다 어긋난다).
 import Cocoa
+import InputMethodKit
 
-/// 모드를 바꿀 때 커서 근처에 G / ㅊ / 月(Graphite, 참신세벌식, 新月)을 잠깐 보이는 작은 창. 마우스 클릭을 받지 않고 포커스도 가져가지 않는다.
+/// 모드를 바꾸거나 입력칸을 옮길 때 커서 근처에 G / ㅊ / 月(Graphite, 참신세벌식, 新月)을 잠깐 보이는 작은 창.
+/// 마우스 클릭을 받지 않고 포커스도 가져가지 않는다.
 final class ModeHUD {
     static let shared = ModeHUD()
 
@@ -17,9 +19,9 @@ final class ModeHUD {
 
     private init() {}
 
-    /// `caret`이 있으면 그 위(화면 위쪽이 모자라면 아래), 없으면 마우스 옆에 보인다.
-    /// 커서 자리를 물었는데 못 찾은 경우(`caret`이 없고 `fallbackToMouse`가 false)에는 보이지 않는다.
-    func show(_ text: String, caret: NSRect?, fallbackToMouse: Bool) {
+    /// `caret`이 있으면 그 위(화면 위쪽이 모자라면 아래), 없으면 마우스 옆에 보인다. 늘 보인다: 커서를 못 찾았다고
+    /// 안 보이면 무슨 모드인지 모르는 채 치게 된다(NRIME 1.0.12-beta.11, 0.6.3까지는 커서 위 설정에서 못 찾으면 안 보였다).
+    func show(_ text: String, caret: NSRect?) {
         let size = NSSize(width: text.count > 1 ? 36 : 26, height: 24)
         let origin: NSPoint
         if let caret {
@@ -29,11 +31,9 @@ final class ModeHUD {
             } else {
                 origin = NSPoint(x: caret.minX + gap, y: above)
             }
-        } else if fallbackToMouse {
+        } else {
             let mouse = NSEvent.mouseLocation
             origin = NSPoint(x: mouse.x + gap, y: mouse.y + gap)
-        } else {
-            return
         }
 
         let panel = ensurePanel()
@@ -67,6 +67,25 @@ final class ModeHUD {
                 self.panel?.orderOut(nil)
             })
         }
+    }
+
+    /// 모드 표시를 둘 커서 자리. 모르거나 미심쩍으면 nil(그러면 마우스 옆).
+    ///
+    /// 후보창과 같은 찾기(TextInputGeometry.caretRect: 앱이 알려 주는 커서 자리, 손쉬운 사용, 같은 입력칸에서 마지막으로 맞았던
+    /// 자리)를 쓰되, 두 가지는 버린다(NRIME 1.0.12-beta.11).
+    /// - 0번 글자 자리(attributesAtZero): 높이는 맞아도 줄 맨 앞이라 가로가 틀리다.
+    /// - 그 앱의 창 밖: 다른 창의 글자, 낡은 자리, 화면 구석. 창 자리는 창 서버에서 얻어서 권한이 필요 없다.
+    static func caretRect(for client: any IMKTextInput) -> NSRect? {
+        guard let result = TextInputGeometry.caretRect(for: client),
+              result.source != .attributesAtZero,
+              TextInputGeometry.isUsableRect(result.rect) else { return nil }
+        if let bundleID = client.bundleIdentifier(),
+           let pid = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first?.processIdentifier,
+           !TextInputGeometry.caretIsInside(result.rect, windowFrames: TextInputGeometry.windowFrames(ofPID: pid)) {
+            DeveloperLogger.shared.log("HUD", "caret outside the app's windows", metadata: ["source": "\(result.source)"])
+            return nil
+        }
+        return result.rect
     }
 
     /// 한 번 만들어 계속 쓴다(macOS 26부터 창을 버려도 메모리가 돌아오지 않는다, CONCEPT §9).

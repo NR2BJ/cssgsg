@@ -140,11 +140,13 @@ struct GeneralTab: View {
             }
 
             Section(tr("모드 표시", "Mode Indicator", "モード表示")) {
-                Toggle(tr("모드 전환 시 G · ㅊ · 月 표시", "Show G · ㅊ · 月 When Switching Modes", "モード切り替え時に G · ㅊ · 月 を表示"),
+                Toggle(tr("G · ㅊ · 月 표시 (모드를 바꾸거나 입력칸을 옮길 때)",
+                          "Show G · ㅊ · 月 (When Switching Modes or Fields)",
+                          "G · ㅊ · 月 を表示（モードや入力欄を切り替えたとき）"),
                        isOn: model.binding(\.mac.hud))
                 Picker(tr("위치", "Position", "位置"), selection: model.binding(\.mac.hudPosition)) {
-                    Text(tr("커서 위 (커서 위치를 알 수 없는 앱에서는 표시하지 않음)", "Above the cursor (hidden in apps that don’t report it)",
-                            "カーソルの上（位置が分からないアプリでは表示しない）")).tag("caret")
+                    Text(tr("입력 커서 위 (모르면 마우스 옆)", "Above the text cursor (next to the mouse if unknown)",
+                            "入力カーソルの上（分からなければマウスの横）")).tag("caret")
                     Text(tr("마우스 포인터 옆", "Next to the mouse pointer", "マウスポインタの横")).tag("mouse")
                 }
                 .disabled(!model.config.mac.hud)

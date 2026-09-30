@@ -74,7 +74,7 @@ impl Default for JaConfig {
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum HudPosition {
-    /// 커서 위(커서 자리를 모르면 안 띄운다).
+    /// 입력 커서 위. 커서 자리를 모르거나 미심쩍으면(줄 맨 앞, 앱 창 밖) 마우스 옆(0.6.4부터, 전에는 안 띄웠다).
     #[default]
     Caret,
     /// 마우스 옆(늘 뜬다).
@@ -85,7 +85,7 @@ pub enum HudPosition {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct MacConfig {
-    /// 모드를 바꿀 때 커서 근처에 G / ㅊ / 月을 잠깐 보인다.
+    /// 모드를 바꾸거나 입력칸을 옮길 때(0.6.4부터) 커서 근처에 G / ㅊ / 月을 잠깐 보인다.
     pub hud: bool,
     pub hud_position: HudPosition,
     /// 후보창 글자 크기(포인트).
@@ -407,10 +407,10 @@ impl Config {
         line("");
         let (mac, dmac) = (&self.mac, &d.mac);
         line("[mac]");
-        line("# 모드를 바꿀 때 커서 근처에 G/ㅊ/月 잠깐 표시");
+        line("# 모드를 바꾸거나 입력칸을 옮길 때 G/ㅊ/月을 잠깐 표시");
         line(&setting("hud", &mac.hud.to_string(), mac.hud == dmac.hud));
         line(
-            "# 모드 표시 위치: \"caret\"(커서 위, 커서 위치를 알 수 없는 앱에서는 표시하지 않음) 또는 \"mouse\"(마우스 옆)",
+            "# 모드 표시 위치: \"caret\"(입력 커서 위, 모르면 마우스 옆) 또는 \"mouse\"(마우스 옆)",
         );
         line(&setting(
             "hud_position",
