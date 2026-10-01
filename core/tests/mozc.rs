@@ -252,3 +252,18 @@ fn reload_picks_up_the_user_dictionary() {
     m.reload();
     assert!(found, "다시 읽은 뒤 사용자 사전 낱말이 후보에 있어야 한다");
 }
+
+#[test]
+fn every_candidate_can_be_picked_including_half_width_katakana() {
+    let _serial = serial();
+    let mut m = mozc();
+    // 음역 후보(반각 가타카나 등, 사전에 없는 글자꼴)는 id가 음수다. C API가 음수 id를 "id 없음"으로 보고 보내지 않아서
+    // 마지막 후보(ｲﾉﾁ)가 골라지지 않았다(2026-10-02, 윈도우에서 찾음).
+    let v = m.start("いのち").unwrap();
+    for i in (0..v.candidates.len()).rev() {
+        let picked = m.command(ConvCmd::Select(i)).unwrap();
+        assert_eq!(picked.selected, Some(i), "{i}번 {:?}", v.candidates[i]);
+        assert_eq!(picked.segments.concat(), v.candidates[i]);
+    }
+    m.cancel();
+}

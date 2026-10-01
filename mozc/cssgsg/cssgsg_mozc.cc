@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -60,11 +61,13 @@ bool Special(CssgsgMozc& m, KeyEvent::SpecialKey key, bool shift, Output* out) {
   return true;
 }
 
-bool Session(CssgsgMozc& m, SessionCommand::CommandType type, int32_t id, Output* out) {
+// id가 있는 명령(SELECT_CANDIDATE)은 id를 그대로 보낸다. 음역 후보(반각 가타카나 등, 사전에 없는 글자꼴)의 id는 음수라서
+// "id 없음"을 음수로 나타내면 안 된다: 그렇게 했더니 마지막 후보(ﾆﾎﾝｺﾞ 같은 반각)가 골라지지 않았다(2026-10-02).
+bool Session(CssgsgMozc& m, SessionCommand::CommandType type, std::optional<int32_t> id, Output* out) {
   Command c;
   c.mutable_input()->set_type(Input::SEND_COMMAND);
   c.mutable_input()->mutable_command()->set_type(type);
-  if (id >= 0) c.mutable_input()->mutable_command()->set_id(id);
+  if (id.has_value()) c.mutable_input()->mutable_command()->set_id(*id);
   if (!Eval(m, c)) return false;
   if (out != nullptr) *out = c.output();
   return true;
@@ -74,7 +77,7 @@ bool Session(CssgsgMozc& m, SessionCommand::CommandType type, int32_t id, Output
 void Clear(CssgsgMozc& m) {
   for (int i = 0; i < 3; ++i) {
     Output o;
-    if (!Session(m, SessionCommand::REVERT, -1, &o)) break;
+    if (!Session(m, SessionCommand::REVERT, std::nullopt, &o)) break;
     if (!o.has_preedit() || o.preedit().segment_size() == 0) break;
   }
   m.last.Clear();
@@ -232,8 +235,8 @@ const char* cssgsg_mozc_command(CssgsgMozc* m, int32_t command, int32_t arg) {
     case CSSGSG_MOZC_FOCUS_RIGHT: ok = Special(*m, KeyEvent::RIGHT, false, &o); break;
     case CSSGSG_MOZC_SHRINK: ok = Special(*m, KeyEvent::LEFT, true, &o); break;
     case CSSGSG_MOZC_EXPAND: ok = Special(*m, KeyEvent::RIGHT, true, &o); break;
-    case CSSGSG_MOZC_NEXT_PAGE: ok = Session(*m, SessionCommand::CONVERT_NEXT_PAGE, -1, &o); break;
-    case CSSGSG_MOZC_PREV_PAGE: ok = Session(*m, SessionCommand::CONVERT_PREV_PAGE, -1, &o); break;
+    case CSSGSG_MOZC_NEXT_PAGE: ok = Session(*m, SessionCommand::CONVERT_NEXT_PAGE, std::nullopt, &o); break;
+    case CSSGSG_MOZC_PREV_PAGE: ok = Session(*m, SessionCommand::CONVERT_PREV_PAGE, std::nullopt, &o); break;
     case CSSGSG_MOZC_SELECT: {
       const auto& all = m->last.all_candidate_words();
       if (arg < 0 || arg >= all.candidates_size()) return nullptr;
@@ -251,7 +254,7 @@ const char* cssgsg_mozc_commit(CssgsgMozc* m) {
   if (m == nullptr) return "";
   absl::MutexLock lock(m->mu);
   Output o;
-  const bool ok = Session(*m, SessionCommand::SUBMIT, -1, &o);
+  const bool ok = Session(*m, SessionCommand::SUBMIT, std::nullopt, &o);
   m->last.Clear();
   return Keep(*m, ok && o.has_result() ? o.result().value() : "");
 }
