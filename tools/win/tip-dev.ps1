@@ -9,6 +9,7 @@
 # - DLL은 앱 컨테이너 앱(새 메모장, 시작 메뉴 검색)도 읽을 수 있는 Program Files에 둔다.
 # - 엔진 호스트(cssgsg-host.exe, 일본어 한자 변환)도 같은 폴더에, Mozc 엔진은 그 아래 mozc 폴더에 둔다. 엔진은 build\mozc-out에
 #   있을 때만 넣는다(tools\mozc\build-windows.ps1 또는 워크플로 mozc-windows.yml의 묶음을 풀어 둔 것). 설치할 때 떠 있는 호스트는 끈다.
+#   호스트는 로그인부터 늘 켜 둔다: enable이 시작 프로그램(HKCU Run의 cssgsg)에 넣고 바로 띄우며, disable이 빼고 끈다.
 # - 앱이 쥐고 있는 DLL은 지울 수 없어서 이름을 바꿔 두고 새 파일을 넣는다(이미 뜬 앱은 옛 DLL을 계속 쓴다). 옛 파일은 다시 시작할 때 지운다.
 # - 처음 등록하기 전에는 VM 스냅숏을 찍는다(망가진 입력기는 탐색기까지 끌고 간다).
 # - 사용자 쪽 단계(입력 목록, HKCU 정리, 기록 설정)는 WMI로 띄운 프로세스에서 한다. 이 스크립트를 MSIX 패키지 앱
@@ -33,6 +34,7 @@ $InstallDir = Join-Path $env:ProgramFiles 'cssgsg'
 $Target = Join-Path $InstallDir 'cssgsg_tip.dll'
 $HostExe = Join-Path $InstallDir 'cssgsg-host.exe'      # 엔진 호스트(win/host)
 $MozcDir = Join-Path $InstallDir 'mozc'                 # 호스트가 읽는 Mozc 엔진(cssgsg_mozc.dll, mozc.data)
+$RunKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'   # 호스트를 로그인 때 띄우는 시작 프로그램(값 이름 cssgsg)
 $Repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 
 function Write-Step($m) { Write-Host "== $m" }
@@ -129,9 +131,21 @@ public static extern bool InstallLayoutOrTip(string psz, uint dwFlags);
     $code = 0
     try {
         switch ($Action) {
-            'enable' { Invoke-Tip 0; Write-Host '내 입력 목록에 추가(en-US)' }
+            'enable' {
+                Invoke-Tip 0; Write-Host '내 입력 목록에 추가(en-US)'
+                # 엔진 호스트는 로그인부터 늘 켜 둔다(스토어 앱·관리자 앱은 띄울 수 없다). 지금도 띄운다: 이미 떠 있으면
+                # 새것은 바로 끝난다(사용자당 하나).
+                if (Test-Path $HostExe) {
+                    New-ItemProperty -Path $RunKey -Name 'cssgsg' -PropertyType String -Value "`"$HostExe`"" -Force | Out-Null
+                    Start-Process $HostExe
+                    Write-Host '엔진 호스트: 시작 프로그램에 넣고 띄움'
+                }
+            }
             'disable' {
                 try { Invoke-Tip 1; Write-Host '내 입력 목록에서 뺌' } catch { Write-Host "$_" }   # ILOT_UNINSTALL
+                Remove-ItemProperty -Path $RunKey -Name 'cssgsg' -ErrorAction SilentlyContinue
+                Get-Process cssgsg-host -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+                Write-Host '엔진 호스트: 시작 프로그램에서 빼고 끔'
                 # ILOT_UNINSTALL 뒤에도 사용자 TSF 정렬 캐시(SortOrder\AssemblyItem\<언어>)에 우리 항목이 남는다.
                 # 그 언어의 항목이 모두 우리 것일 때만 언어째 지운다(남의 입력기 순서는 건드리지 않는다).
                 $base = 'HKCU:\Software\Microsoft\CTF\SortOrder\AssemblyItem'
@@ -169,7 +183,8 @@ public static extern bool InstallLayoutOrTip(string psz, uint dwFlags);
                 $left = @((Test-Path "HKCU:\Software\Microsoft\CTF\TIP\$Clsid"), (Test-Path 'HKCU:\Software\Microsoft\CTF\SortOrder\AssemblyItem\0x00000409'))
                 Write-Host ("  사용자 TSF 키: {0}  en-US 정렬 캐시: {1}" -f $left[0], $left[1])
                 $running = @(Get-Process cssgsg-host -ErrorAction SilentlyContinue).Count
-                Write-Host ("  엔진 호스트: {0}  Mozc 엔진: {1}  떠 있는 호스트: {2}" -f (Test-Path $HostExe), (Test-Path (Join-Path $MozcDir 'cssgsg_mozc.dll')), $running)
+                $startup = $null -ne (Get-ItemProperty $RunKey -Name 'cssgsg' -ErrorAction SilentlyContinue)
+                Write-Host ("  엔진 호스트: {0}  Mozc 엔진: {1}  시작 프로그램: {2}  떠 있는 호스트: {3}" -f (Test-Path $HostExe), (Test-Path (Join-Path $MozcDir 'cssgsg_mozc.dll')), $startup, $running)
             }
         }
     }

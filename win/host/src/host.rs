@@ -28,25 +28,18 @@ use windows::Win32::System::Pipes::{
 };
 use windows::core::HSTRING;
 
-/// 이어진 입력기가 하나도 없이 이만큼 지나면 끝난다(다음 변환 때 입력기가 다시 띄운다).
-const IDLE_EXIT: Duration = Duration::from_secs(10 * 60);
-
 struct Options {
     tag: String,
     engine_dir: Option<PathBuf>,
     profile: Option<PathBuf>,
     no_engine: bool,
-    idle_exit: Duration,
+    /// 이어진 입력기가 하나도 없이 이만큼 지나면 끝난다. 보통은 None: 로그인부터 늘 켜 둔다(시험만 준다).
+    idle_exit: Option<Duration>,
 }
 
 fn options() -> Options {
-    let mut o = Options {
-        tag: String::new(),
-        engine_dir: None,
-        profile: None,
-        no_engine: false,
-        idle_exit: IDLE_EXIT,
-    };
+    let mut o =
+        Options { tag: String::new(), engine_dir: None, profile: None, no_engine: false, idle_exit: None };
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -55,7 +48,7 @@ fn options() -> Options {
             "--profile" => o.profile = args.next().map(PathBuf::from),
             "--no-engine" => o.no_engine = true,
             "--idle-exit-secs" => {
-                o.idle_exit = Duration::from_secs(args.next().and_then(|s| s.parse().ok()).unwrap_or(600));
+                o.idle_exit = args.next().and_then(|s| s.parse().ok()).map(Duration::from_secs);
             }
             _ => log(&format!("unknown option {a}")),
         }
@@ -215,8 +208,9 @@ fn serve(pipe: Pipe, client: u64, jobs: &Sender<Job>, clients: &AtomicUsize) {
     clients.fetch_sub(1, Ordering::SeqCst);
 }
 
-/// 엔진 스레드: 변환 엔진을 만들고 요청을 차례로 처리한다. 이어진 입력기가 없이 `idle_exit`이 지나면 프로세스를 끝낸다.
-fn engine(inbox: Receiver<Job>, options: &Options, clients: &AtomicUsize, idle_exit: Duration) {
+/// 엔진 스레드: 변환 엔진을 만들고 요청을 차례로 처리한다. `idle_exit`을 주면(시험) 이어진 입력기가 없이 그만큼 지났을 때
+/// 프로세스를 끝낸다.
+fn engine(inbox: Receiver<Job>, options: &Options, clients: &AtomicUsize, idle_exit: Option<Duration>) {
     let (mut converter, version) = load_engine(options);
     let mut owner: Option<u64> = None;
     let mut last = Instant::now();
@@ -262,7 +256,10 @@ fn engine(inbox: Receiver<Job>, options: &Options, clients: &AtomicUsize, idle_e
                 }
             }
             Err(RecvTimeoutError::Timeout) => {
-                if clients.load(Ordering::SeqCst) == 0 && last.elapsed() >= idle_exit {
+                if let Some(limit) = idle_exit
+                    && clients.load(Ordering::SeqCst) == 0
+                    && last.elapsed() >= limit
+                {
                     log("idle; exiting");
                     // 엔진을 내려 학습을 마무리한 뒤 끝낸다.
                     drop(converter);
