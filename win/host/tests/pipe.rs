@@ -22,7 +22,8 @@ impl Host {
         let tag = format!("-test-{}-{test}", std::process::id());
         let host = Self { child: launch(&tag), tag };
         let began = Instant::now();
-        while host.client().call(&Request::Hello { protocol: PROTOCOL }, Duration::from_millis(200)).is_err() {
+        while host.client().call(&Request::Hello { protocol: PROTOCOL }, Duration::from_millis(200)).is_err()
+        {
             assert!(began.elapsed() < WAIT, "호스트가 파이프를 만들지 않는다");
             std::thread::sleep(Duration::from_millis(20));
         }
