@@ -208,6 +208,20 @@ for (let n = 0; n < 40 && document.getElementById("result").hidden; n++) {
 return document.getElementById("result-title").textContent;
 """#
 
+/// 설정 창처럼 탭 둘(다른 탭, 타자 연습)을 두고 시험에서 고른다.
+final class TabChoice: ObservableObject { @Published var tab = 0 }
+
+struct PracticeTabsProbe: View {
+    @ObservedObject var choice: TabChoice
+
+    var body: some View {
+        TabView(selection: $choice.tab) {
+            Text("다른 탭").tabItem { Text("다른 탭") }.tag(0)
+            PracticeTab().tabItem { Text("타자 연습") }.tag(1)
+        }
+    }
+}
+
 MainActor.assumeIsolated {
     let dir = FileManager.default.temporaryDirectory
         .appendingPathComponent("cssgsg-practice-smoke-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
@@ -278,6 +292,40 @@ MainActor.assumeIsolated {
     check(parts.count == 2 && after == Int(parts[0])! + 1,
           "타자 연습: 진짜 키 이벤트가 웹 뷰를 거쳐 한 글자를 친다 (\(before ?? "-") → \(after.map(String.init) ?? "-"))")
     window.contentView = nil
+
+    // 탭을 고르면 웹 뷰가 키를 받고(첫 응답자), 입력기는 부르지 않는다(입력 컨텍스트 없음: Shift 톡이 입력기로 가지 않는다).
+    PracticePage.shared = PracticePage(pageURL: pageURL, recordURL: record)
+    let choice = TabChoice()
+    let tabsWindow = NSWindow(contentRect: NSRect(x: -20000, y: -20000, width: 1000, height: 760), styleMask: [.titled],
+                              backing: .buffered, defer: false)
+    tabsWindow.contentView = NSHostingView(rootView: PracticeTabsProbe(choice: choice))
+    spin(0.5)
+    let web = PracticePage.shared.webView
+    check(tabsWindow.firstResponder !== web, "타자 연습: 다른 탭에서는 웹 뷰가 키를 받지 않는다")
+    choice.tab = 1
+    spin(0.5)
+    check(tabsWindow.firstResponder === web, "타자 연습: 탭을 고르면 클릭 없이 웹 뷰가 키를 받는다")
+    choice.tab = 0
+    spin(0.3)
+    choice.tab = 1
+    spin(0.5)
+    check(tabsWindow.firstResponder === web, "타자 연습: 다른 탭에 갔다 와도 웹 뷰가 키를 받는다")
+    check(web.inputContext == nil && (tabsWindow.firstResponder as? NSView)?.inputContext == nil,
+          "타자 연습: 웹 뷰는 입력 컨텍스트가 없다(입력기가 Shift·글자를 받지 않는다)")
+    // 탭을 붙이는 동안 다른 뷰(SwiftUI)가 키를 가져가도 조금 뒤에 되찾는다
+    choice.tab = 0
+    spin(0.3)
+    choice.tab = 1
+    spin(0.05)
+    tabsWindow.makeFirstResponder(tabsWindow.contentView)
+    spin(0.6)
+    check(tabsWindow.firstResponder === web, "타자 연습: 탭을 붙이는 동안 다른 뷰가 키를 가져가도 되찾는다")
+    // 창이 다시 앞으로 오면(키 창) 되찾는다
+    tabsWindow.makeFirstResponder(tabsWindow.contentView)
+    NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: tabsWindow)
+    spin(0.2)
+    check(tabsWindow.firstResponder === web, "타자 연습: 창이 다시 앞으로 오면 웹 뷰가 키를 받는다")
+    tabsWindow.contentView = nil
 
     try? Data("{ 깨진".utf8).write(to: record)
     let third = PracticePage(pageURL: pageURL, recordURL: record)
