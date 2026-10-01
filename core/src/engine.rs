@@ -287,6 +287,35 @@ impl Engine {
         self.finish(Output::eat(), before)
     }
 
+    /// 영어 ↔ 비영어 전환이 돌아갈 비영어 모드(한국어 또는 일본어).
+    pub fn last_non_en(&self) -> Mode {
+        self.last_non_en
+    }
+
+    /// 다른 곳에서 바뀐 모드를 따라간다. 윈도우는 입력기가 앱 프로세스마다 따로 떠서, 한 앱에서 바꾼 모드를
+    /// 다른 앱의 엔진이 이것으로 맞춘다(맥은 엔진이 하나라 쓰지 않는다). 그 앱은 포커스가 없으니 조합 중인 것은
+    /// 확정하지 않고 버린다. `last_non_en`이 영어면 지금 값을 둔다.
+    pub fn follow_mode(&mut self, mode: Mode, last_non_en: Mode) -> Output {
+        let before = self.snapshot();
+        self.ko.clear();
+        self.kana.clear();
+        if self.conv.take().is_some() {
+            self.converter.cancel();
+        }
+        self.hanja = None;
+        self.buffered = None;
+        self.taps.cancel();
+        if last_non_en != Mode::En {
+            self.last_non_en = last_non_en;
+        }
+        let mut out = Output::eat();
+        if mode != self.mode {
+            self.mode = mode;
+            out.mode = Some(mode);
+        }
+        self.finish(out, before)
+    }
+
     /// 모드를 바로 바꾼다(메뉴 등). 조합 중인 것은 확정한다.
     pub fn set_mode(&mut self, mode: Mode) -> Output {
         let before = self.snapshot();

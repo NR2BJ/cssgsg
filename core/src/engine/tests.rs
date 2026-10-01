@@ -22,6 +22,22 @@ fn starts_in_korean() {
     assert_eq!(s.engine.mode(), Mode::Ko);
 }
 
+#[test]
+fn follow_mode_drops_the_composition_and_keeps_the_toggle_target() {
+    // 윈도우: 다른 앱의 입력기가 바꾼 모드를 따라간다. 조합은 확정하지 않고 버린다.
+    let mut s = Sim::new(Engine::new(Config::default()));
+    s.type_keys("jf").unwrap();
+    let out = s.engine.follow_mode(Mode::En, Mode::Ja);
+    assert_eq!((out.mode, out.commit.as_str()), (Some(Mode::En), ""));
+    assert_eq!(out.preedit, Some(Preedit::default()));
+    assert_eq!(s.engine.last_non_en(), Mode::Ja);
+    s.type_keys("{rs}").unwrap();
+    assert_eq!(s.engine.mode(), Mode::Ja, "오른쪽 Shift 톡은 따라온 비영어 모드로 간다");
+    // 같은 모드면 모드 변경을 알리지 않고, 비영어 자리에 영어가 오면 그대로 둔다.
+    assert_eq!(s.engine.follow_mode(Mode::Ja, Mode::En).mode, None);
+    assert_eq!(s.engine.last_non_en(), Mode::Ja);
+}
+
 fn typed(keys: &str) -> String {
     let mut s = sim();
     s.type_keys(keys).unwrap();

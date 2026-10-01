@@ -38,7 +38,9 @@
 - [~] Windows TSF 입력기(로드맵 3단계, 윈도우 11 VM에서 개발)
   - [x] M3a: TSF 텍스트 서비스 뼈대(`win/tip`, Rust + windows 크레이트). 글자 키 → Graphite 글자 바로 확정, 단축키는 쿼티 자리,
     등록·해제(`tools/win/tip-dev.ps1`). 패닉·FP 환경(MXCSR)이 앱으로 새지 않게 막는다. 실제 확인은 [확인 목록](docs/win-checklist.md)
-  - [ ] M3b 코어 엔진 연결(조합 밑줄, 세 모드, Shift 톡, 모드 아이콘) → M3c 후보창·게임 모드·UILess → M3d Mozc 변환 → M3e 설치기·설정 앱
+  - [~] M3b 코어 엔진 연결: 맥과 같은 코어로 참신·Graphite·新月을 친다. 조합 밑줄(TSF 조합·표시 속성), Shift 톡 전환,
+    작업 표시줄 모드 아이콘(G/ㅊ/月, 밝은·어두운 작업 표시줄), 앱 사이에서 같은 모드(TSF 전역 칸). 개발자 기록은 HKCU\Software\cssgsg `DebugLog`=1
+  - [ ] M3c 후보창·모드 HUD·게임 모드·UILess·비밀번호 칸 → M3d Mozc 변환·한국어 한자 → M3e 설치기·설정 앱(WinUI 3)
 
 ## 구조
 

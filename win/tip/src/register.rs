@@ -11,9 +11,9 @@ use windows::Win32::System::Com::{
 use windows::Win32::System::LibraryLoader::GetModuleFileNameW;
 use windows::Win32::UI::Input::KeyboardAndMouse::HKL;
 use windows::Win32::UI::TextServices::{
-    CLSID_TF_CategoryMgr, CLSID_TF_InputProcessorProfiles, GUID_TFCAT_TIP_KEYBOARD,
-    GUID_TFCAT_TIPCAP_COMLESS, GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT, GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT,
-    ITfCategoryMgr, ITfInputProcessorProfileMgr,
+    CLSID_TF_CategoryMgr, CLSID_TF_InputProcessorProfiles, GUID_TFCAT_DISPLAYATTRIBUTEPROVIDER,
+    GUID_TFCAT_TIP_KEYBOARD, GUID_TFCAT_TIPCAP_COMLESS, GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT,
+    GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT, ITfCategoryMgr, ITfInputProcessorProfileMgr,
 };
 use windows::core::{Error, GUID, HRESULT, Result};
 
@@ -26,11 +26,13 @@ const DESCRIPTION: &str = "cssgsg";
 /// - IMMERSIVESUPPORT: 스토어 앱·시작 메뉴 검색에서도 쓴다.
 /// - SYSTRAYSUPPORT: 작업 표시줄 입력 표시기에 모드 아이콘(M3b).
 /// - COMLESS: 입력기 안에서 CoCreateInstance를 쓰지 않는다(TF_Create* 사용). 일부 앱(Minecraft)은 이게 있어야 올린다.
-const CATEGORIES: [GUID; 4] = [
+/// - DISPLAYATTRIBUTEPROVIDER: 조합 밑줄 모양을 우리가 준다(앱이 텍스트 서비스에 표시 속성을 묻는다).
+const CATEGORIES: [GUID; 5] = [
     GUID_TFCAT_TIP_KEYBOARD,
     GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT,
     GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT,
     GUID_TFCAT_TIPCAP_COMLESS,
+    GUID_TFCAT_DISPLAYATTRIBUTEPROVIDER,
 ];
 
 fn clsid_key() -> String {

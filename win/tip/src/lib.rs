@@ -1,7 +1,7 @@
 //! cssgsg 윈도우 입력기: TSF 텍스트 서비스(TIP) DLL.
 //!
-//! M3a 뼈대다. COM 클래스 팩토리, ITfTextInputProcessorEx, 키 이벤트 싱크, 프로필 등록·해제까지 있고,
-//! 글자 키는 Graphite 글자로 바꿔 바로 확정한다. 조합(밑줄), 세 모드, Shift 톡 전환은 M3b에서 코어 엔진으로 바꾼다.
+//! 키를 코어 엔진(맥과 같은 cssgsg-core)에 넣고, 엔진 출력대로 TSF 조합(밑줄)과 확정을 한다. 한·영·일 세 모드와
+//! Shift 톡 전환은 엔진이 하고, 모드는 작업 표시줄 아이콘(G/ㅊ/月)으로 보이며 앱 사이에서 하나로 맞춘다([`service`]).
 //!
 //! 남의 프로세스(탐색기, 시작 메뉴 검색, 게임) 안에서 도는 코드라서 지킨다.
 //! - COM 진입점은 모두 [`guard::guarded`]로 감싼다. 패닉을 COM 경계 밖으로 내보내지 않고(밖으로 풀리면 그 프로세스가 죽는다),
@@ -12,15 +12,20 @@
 //! - 키를 뗄 때(key-up)와 수식키는 먹지 않는다. 짝이 안 맞는 뗌을 먹으면 앱에서 키가 눌린 채로 남는다.
 #![cfg(windows)]
 
+mod display;
 mod edit;
 mod factory;
 mod guard;
 mod keys;
+mod langbar;
+mod plan;
 mod register;
 mod service;
 
 use std::ffi::c_void;
+use std::io::Write;
 use std::sync::atomic::{AtomicPtr, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 use windows::Win32::Foundation::{
     CLASS_E_CLASSNOTAVAILABLE, E_POINTER, E_UNEXPECTED, HINSTANCE, HMODULE, S_FALSE, S_OK,
@@ -34,6 +39,12 @@ pub const CLSID_TEXT_SERVICE: GUID = GUID::from_u128(0xA9227DC2_56BC_4023_AE29_8
 pub const GUID_PROFILE: GUID = GUID::from_u128(0xDCFBD969_D52F_4AFB_ABC0_271CC58FE18C);
 /// 프로필 언어: en-US.
 pub const LANGID_EN_US: u16 = 0x0409;
+/// 조합 표시 속성: 입력 중(가는 밑줄).
+pub const GUID_DISPLAY_ATTRIBUTE_INPUT: GUID = GUID::from_u128(0x5D2BD476_8831_4D21_9207_BE1AE451EC27);
+/// 조합 표시 속성: 변환 중 포커스된 문절(굵은 밑줄).
+pub const GUID_DISPLAY_ATTRIBUTE_FOCUSED: GUID = GUID::from_u128(0xD9845973_3763_4314_8FDE_BDA44C91F643);
+/// TSF 전역 칸: 앱 사이에서 같은 모드(값 = 모드 | 직전 비영어 모드 << 4).
+pub const GUID_COMPARTMENT_MODE: GUID = GUID::from_u128(0x557E78D1_7585_4FA7_9F39_3767F2A4A2B7);
 
 static MODULE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 
@@ -53,6 +64,51 @@ pub(crate) fn debug_log(message: &str) {
     unsafe {
         windows::Win32::System::Diagnostics::Debug::OutputDebugStringW(windows::core::PCWSTR(wide.as_ptr()))
     };
+    static FILE: OnceLock<Option<Mutex<std::fs::File>>> = OnceLock::new();
+    let file = FILE.get_or_init(|| {
+        if !debug_enabled() {
+            return None;
+        }
+        let dir = std::path::Path::new(&std::env::var_os("LOCALAPPDATA")?).join("cssgsg");
+        std::fs::create_dir_all(&dir).ok()?;
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(dir.join("tip-debug.log"))
+            .ok()
+            .map(Mutex::new)
+    });
+    if let Some(file) = file
+        && let Ok(mut f) = file.lock()
+    {
+        let t = unsafe { windows::Win32::System::SystemInformation::GetLocalTime() };
+        let exe = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()));
+        let _ = writeln!(
+            f,
+            "{:02}:{:02}:{:02}.{:03} {}[{}] {message}",
+            t.wHour,
+            t.wMinute,
+            t.wSecond,
+            t.wMilliseconds,
+            exe.unwrap_or_default(),
+            std::process::id()
+        );
+    }
+}
+
+/// 개발자 기록을 켰는지(HKCU\Software\cssgsg 의 DebugLog=1). 프로세스마다 한 번 읽는다.
+/// 켜면 debug_log가 %LOCALAPPDATA%\cssgsg\tip-debug.log에도 쓰고(앱 컨테이너 프로세스는 쓸 곳이 없어 건너뛴다),
+/// 텍스트 서비스가 키마다 한 줄씩 남긴다. 친 글자는 남기지 않는다(키 코드·길이만).
+pub(crate) fn debug_enabled() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| {
+        windows_registry::CURRENT_USER
+            .open("Software\\cssgsg")
+            .and_then(|k| k.get_u32("DebugLog"))
+            .is_ok_and(|v| v != 0)
+    })
 }
 
 #[unsafe(no_mangle)]
