@@ -16,6 +16,7 @@ crate-type = ["cdylib", "rlib"]
 cssgsg-core = { path = "../../core", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
+cssgsg-ipc = { path = "../ipc" }
 windows-core = "0.62"
 windows-registry = "0.6"
 windows = { version = "0.62", features = [

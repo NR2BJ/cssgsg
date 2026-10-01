@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["core", "cli", "config-ffi", "win/tip"]
+members = ["core", "cli", "config-ffi", "win/tip", "win/ipc", "win/host"]
 
 [workspace.package]
 version = "0.1.0"

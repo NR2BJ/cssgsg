@@ -28,10 +28,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "cssgsg-host"
+version = "0.1.0"
+dependencies = [
+ "cssgsg-core",
+ "cssgsg-ipc",
+ "windows",
+ "windows-registry",
+]
+
+[[package]]
+name = "cssgsg-ipc"
+version = "0.1.0"
+dependencies = [
+ "cssgsg-core",
+ "serde",
+ "serde_json",
+ "windows",
+]
+
+[[package]]
 name = "cssgsg-tip"
 version = "0.1.0"
 dependencies = [
  "cssgsg-core",
+ "cssgsg-ipc",
  "windows",
  "windows-core",
  "windows-registry",

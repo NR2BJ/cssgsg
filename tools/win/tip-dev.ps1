@@ -7,6 +7,8 @@
 #   powershell -ExecutionPolicy Bypass -File tools\win\tip-dev.ps1 debuglog-off
 #
 # - DLL은 앱 컨테이너 앱(새 메모장, 시작 메뉴 검색)도 읽을 수 있는 Program Files에 둔다.
+# - 엔진 호스트(cssgsg-host.exe, 일본어 한자 변환)도 같은 폴더에, Mozc 엔진은 그 아래 mozc 폴더에 둔다. 엔진은 build\mozc-out에
+#   있을 때만 넣는다(tools\mozc\build-windows.ps1 또는 워크플로 mozc-windows.yml의 묶음을 풀어 둔 것). 설치할 때 떠 있는 호스트는 끈다.
 # - 앱이 쥐고 있는 DLL은 지울 수 없어서 이름을 바꿔 두고 새 파일을 넣는다(이미 뜬 앱은 옛 DLL을 계속 쓴다). 옛 파일은 다시 시작할 때 지운다.
 # - 처음 등록하기 전에는 VM 스냅숏을 찍는다(망가진 입력기는 탐색기까지 끌고 간다).
 # - 사용자 쪽 단계(입력 목록, HKCU 정리, 기록 설정)는 WMI로 띄운 프로세스에서 한다. 이 스크립트를 MSIX 패키지 앱
@@ -29,6 +31,8 @@ $ProfileGuid = '{DCFBD969-D52F-4AFB-ABC0-271CC58FE18C}'  # GUID_PROFILE
 $Tip = "0x0409:$Clsid$ProfileGuid"                       # InstallLayoutOrTip 형식(en-US)
 $InstallDir = Join-Path $env:ProgramFiles 'cssgsg'
 $Target = Join-Path $InstallDir 'cssgsg_tip.dll'
+$HostExe = Join-Path $InstallDir 'cssgsg-host.exe'      # 엔진 호스트(win/host)
+$MozcDir = Join-Path $InstallDir 'mozc'                 # 호스트가 읽는 Mozc 엔진(cssgsg_mozc.dll, mozc.data)
 $Repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 
 function Write-Step($m) { Write-Host "== $m" }
@@ -62,6 +66,22 @@ if ($Elevated) {
                 ForEach-Object { Remove-OrLater $_.FullName }
             if (Test-Path $Target) { Remove-OrLater $Target }
             Copy-Item $Dll $Target
+            # 엔진 호스트(일본어 한자 변환): 떠 있으면 끈다(다음 변환 때 입력기가 새것을 띄운다).
+            Get-Process cssgsg-host -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Get-ChildItem $InstallDir -Filter 'cssgsg-host.exe.old-*' -ErrorAction SilentlyContinue |
+                ForEach-Object { Remove-OrLater $_.FullName }
+            if (Test-Path $HostExe) { Remove-OrLater $HostExe }
+            Copy-Item (Join-Path (Split-Path $Dll) 'cssgsg-host.exe') $HostExe
+            # Mozc 엔진: 빌드했거나(tools\mozc\build-windows.ps1) 워크플로 묶음을 풀어 둔 build\mozc-out. 없으면 히라가나·가타카나만.
+            $engine = Join-Path $Repo 'build\mozc-out'
+            if (Test-Path (Join-Path $engine 'lib\cssgsg_mozc.dll')) {
+                New-Item -ItemType Directory -Force $MozcDir | Out-Null
+                foreach ($f in Get-ChildItem $MozcDir -File -ErrorAction SilentlyContinue) { Remove-OrLater $f.FullName }
+                Copy-Item (Join-Path $engine 'lib\cssgsg_mozc.dll'), (Join-Path $engine 'data\mozc.data') $MozcDir
+                if (Test-Path (Join-Path $engine 'MOZC_VERSION')) { Copy-Item (Join-Path $engine 'MOZC_VERSION') $MozcDir }
+                Write-Host "Mozc 엔진: $((Get-Content (Join-Path $engine 'MOZC_VERSION') -ErrorAction SilentlyContinue) -join ' ')"
+            }
+            else { Write-Host 'Mozc 엔진 없음(build\mozc-out): 일본어 변환은 히라가나·가타카나만' }
             $p = Start-Process regsvr32.exe -ArgumentList '/s', "`"$Target`"" -Wait -PassThru
             Write-Host "regsvr32 종료 코드 $($p.ExitCode)"
             $code = $p.ExitCode
@@ -73,6 +93,13 @@ if ($Elevated) {
                 $code = $p.ExitCode
             }
             foreach ($f in Get-ChildItem $InstallDir -Filter 'cssgsg_tip.dll*' -ErrorAction SilentlyContinue) { Remove-OrLater $f.FullName }
+            # 엔진 호스트와 Mozc 엔진. 학습·사용자 사전(%LOCALAPPDATA%\cssgsg\mozc)은 남긴다(맥과 같다).
+            Get-Process cssgsg-host -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            foreach ($f in Get-ChildItem $InstallDir -Filter 'cssgsg-host.exe*' -ErrorAction SilentlyContinue) { Remove-OrLater $f.FullName }
+            if (Test-Path $MozcDir) {
+                foreach ($f in Get-ChildItem $MozcDir -File) { Remove-OrLater $f.FullName }
+                if (-not (Get-ChildItem $MozcDir)) { Remove-Item $MozcDir -Force }
+            }
             if (Test-Path $InstallDir) {
                 if (-not (Get-ChildItem $InstallDir)) { Remove-Item $InstallDir -Force }
                 # 남은 파일이 다시 시작 때 지워진 뒤 폴더도(예약은 적은 차례대로 처리된다).
@@ -141,6 +168,8 @@ public static extern bool InstallLayoutOrTip(string psz, uint dwFlags);
                 foreach ($l in $langs) { Write-Host ("  {0}: {1}" -f $l.LanguageTag, ($l.InputMethodTips -join ', ')) }
                 $left = @((Test-Path "HKCU:\Software\Microsoft\CTF\TIP\$Clsid"), (Test-Path 'HKCU:\Software\Microsoft\CTF\SortOrder\AssemblyItem\0x00000409'))
                 Write-Host ("  사용자 TSF 키: {0}  en-US 정렬 캐시: {1}" -f $left[0], $left[1])
+                $running = @(Get-Process cssgsg-host -ErrorAction SilentlyContinue).Count
+                Write-Host ("  엔진 호스트: {0}  Mozc 엔진: {1}  떠 있는 호스트: {2}" -f (Test-Path $HostExe), (Test-Path (Join-Path $MozcDir 'cssgsg_mozc.dll')), $running)
             }
         }
     }
@@ -179,7 +208,12 @@ switch ($Action) {
         Push-Location $Repo
         # cargo는 진행 상황을 표준 오류로 낸다. Windows PowerShell 5.1은 그걸 오류로 바꾸니(출력을 받아 갈 때) 잠깐 푼다.
         $ErrorActionPreference = 'Continue'
-        try { cargo build --release -p cssgsg-tip 2>&1 | ForEach-Object { "$_" }; $built = $LASTEXITCODE -eq 0 }
+        # 호스트는 따로 빌드한다: 같이 빌드하면 코어 기능이 합쳐져 Mozc 변환기 코드가 입력기 DLL에도 들어간다.
+        try {
+            cargo build --release -p cssgsg-tip 2>&1 | ForEach-Object { "$_" }
+            $built = $LASTEXITCODE -eq 0
+            if ($built) { cargo build --release -p cssgsg-host 2>&1 | ForEach-Object { "$_" }; $built = $LASTEXITCODE -eq 0 }
+        }
         finally { Pop-Location; $ErrorActionPreference = 'Stop' }
         if (-not $built) { throw 'cargo build 실패' }
         Invoke-Elevated 'install' (Join-Path $Repo 'build\cargo\release\cssgsg_tip.dll')

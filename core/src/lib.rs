@@ -14,7 +14,7 @@ pub mod hotkey;
 pub mod kana;
 pub mod key;
 pub mod latin;
-#[cfg(feature = "mozc")]
+#[cfg(feature = "mozc-engine")]
 pub mod mozc;
 pub mod shortcut;
 pub mod sim;

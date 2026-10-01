@@ -16,6 +16,7 @@ mod display;
 mod edit;
 mod factory;
 mod guard;
+mod host;
 mod keys;
 mod langbar;
 mod plan;

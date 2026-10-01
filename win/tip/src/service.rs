@@ -38,6 +38,7 @@ use windows::core::{
 
 use crate::edit::{ApplyOps, Attrs, EndComposition, Measure, ReadInputScope, ScopeRead, Slot, UiHook};
 use crate::guard::{guarded, poisoned};
+use crate::host::{self, HostConverter, HostLink};
 use crate::keys::{self, Clock};
 use crate::langbar::ModeButton;
 use crate::plan::plan;
@@ -98,6 +99,8 @@ struct Active {
     mode_slot: Option<(ITfCompartment, u32)>,
     /// 개발자 기록(HKCU\Software\cssgsg DebugLog=1): 키 코드와 길이만 남긴다(글자는 남기지 않는다).
     log: bool,
+    /// 엔진 호스트 연결(일본어 한자 변환). 엔진의 변환기와 같이 쥔다.
+    host: Option<HostLink>,
 }
 
 /// 지난 키 메시지와 그 결과.
@@ -263,15 +266,22 @@ impl TextService_Impl {
             }
         };
         let log = read_debug_flag();
+        // 일본어 한자 변환은 사용자당 하나인 엔진 호스트가 한다(Mozc). 연결은 처음 변환할 때(또는 일본어로 바꿀 때) 잇는다.
+        let mut engine = Engine::new(Config::windows_default());
+        let host = host::link();
+        if let Some(link) = &host {
+            engine.set_converter(Box::new(HostConverter::new(link.clone())));
+        }
         *self.state.try_borrow_mut().map_err(|_| E_UNEXPECTED)? = Some(Active {
             thread_mgr: thread_mgr.clone(),
             client_id,
-            engine: Engine::new(Config::windows_default()),
+            engine,
             attrs,
             button: None,
             thread_cookie: None,
             mode_slot: None,
             log,
+            host,
         });
 
         let keystrokes: ITfKeystrokeMgr = thread_mgr.cast()?;
@@ -533,6 +543,13 @@ impl TextService_Impl {
     fn after(&self, out: &Output) {
         if let Some(mode) = out.mode {
             self.show_mode(mode, true);
+        }
+        // 이 앱에서 일본어로 바꿨다: 첫 변환을 기다리지 않게 엔진 호스트를 미리 띄우고 잇는다.
+        if out.mode == Some(Mode::Ja) {
+            let link = self.state.try_borrow().ok().and_then(|s| s.as_ref().and_then(|a| a.host.clone()));
+            if let Some(link) = link {
+                host::prepare(&link);
+            }
         }
         if out.caps_lock_off && keys::caps_on() {
             toggle_caps_lock();

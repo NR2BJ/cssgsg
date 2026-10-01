@@ -1,0 +1,25 @@
+[package]
+name = "cssgsg-ipc"
+description = "cssgsg 윈도우: 입력기와 엔진 호스트 사이의 메시지와 파이프"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+# 메시지 정의는 어느 OS에서나 빌드된다(시험). 파이프(src/pipe.rs)는 윈도우 전용이다.
+[dependencies]
+cssgsg-core = { path = "../../core", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+] }

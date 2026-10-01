@@ -3,9 +3,12 @@
 //! 실제 변환은 Mozc가 한다(맥: 입력기 프로세스 안의 엔진 스레드, 윈도우: 엔진 호스트).
 //! 코어는 읽기를 넘기고 결과 화면(문절·후보)을 받아 표시만 한다. 셸이 이 트레이트를 구현해서 넣는다.
 //! 엔진이 아직 준비되지 않았으면 `start`가 `None`을 돌려주고, 입력 스레드는 기다리지 않는다.
+//! 명령과 화면은 직렬화된다: 윈도우는 앱마다 뜨는 입력기가 파이프로 엔진 호스트에 묻는다(win/ipc).
+
+use serde::{Deserialize, Serialize};
 
 /// 변환 중 명령. Mozc 세션 명령과 대응한다. 페이지 넘김·격자 이동은 엔진이 목표 번호를 계산해 `Select`로 보낸다.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ConvCmd {
     Next,
     Prev,
@@ -18,7 +21,7 @@ pub enum ConvCmd {
 }
 
 /// 변환 결과 화면.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConvView {
     /// 문절별 지금 선택된 글자.
     pub segments: Vec<String>,
