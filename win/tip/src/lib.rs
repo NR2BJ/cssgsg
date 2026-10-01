@@ -19,6 +19,7 @@ mod guard;
 mod host;
 mod keys;
 mod langbar;
+mod menu;
 mod plan;
 mod register;
 mod service;

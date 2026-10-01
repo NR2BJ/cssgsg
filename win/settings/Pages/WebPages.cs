@@ -61,6 +61,8 @@ partial class WebPage : Grid
             }
         };
         await Prepare(core);
+        // 탭이 보이는 동안 다 읽혔으면 바로 키를 받게 한다.
+        core.NavigationCompleted += (_, _) => TakeFocus();
         core.Navigate(home);
     }
 
@@ -74,8 +76,29 @@ partial class WebPage : Grid
         View.Visibility = Visibility.Collapsed;
     }
 
-    /// 탭이 보일 때 키를 바로 받게 한다(클릭 없이 칠 수 있게).
-    public void Shown() => View.Focus(FocusState.Programmatic);
+    bool showing;
+
+    /// 탭이 보일 때(창이 다시 앞으로 올 때도) 키를 바로 받게 한다(클릭 없이 칠 수 있게). 탭 목록을 누른 뒤에는 목록이
+    /// 포커스를 다시 가져가서, 맥처럼 조금 뒤에 한 번 더 준다. 타자 연습 페이지는 포커스가 없으면 "여기를 누르면 이어서
+    /// 칩니다"를 띄운다(처음 사용자 확인: 탭을 처음 열면 그 안내가 떠 있었다).
+    public void Shown()
+    {
+        showing = true;
+        TakeFocus();
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, TakeFocus);
+        var later = DispatcherQueue.CreateTimer();
+        later.Interval = TimeSpan.FromMilliseconds(300);
+        later.IsRepeating = false;
+        later.Tick += (_, _) => TakeFocus();
+        later.Start();
+    }
+
+    public void Hidden() => showing = false;
+
+    void TakeFocus()
+    {
+        if (showing && View.CoreWebView2 != null) View.Focus(FocusState.Programmatic);
+    }
 }
 
 sealed partial class LearnPage() : WebPage(Path.Combine("learn", "index.html"));

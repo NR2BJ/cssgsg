@@ -1,5 +1,8 @@
-# 윈도우용 Mozc 엔진(cssgsg_mozc.dll)을 GitHub 컴퓨터에서 빌드하고 시험해서 묶음을 아티팩트로 올린다. 손으로만 돌린다.
-# 윈도우 빌드가 자리 잡으면 mozc-component.yml에 합쳐 맥 엔진과 한 릴리스(같은 태그)로 낸다. 그때까지 릴리스는 내지 않는다.
+# 윈도우용 Mozc 엔진(cssgsg_mozc.dll)을 GitHub 컴퓨터에서 빌드하고 시험해서 묶음(cssgsg-mozc-windows-x64.zip)을 만든다.
+# - 손으로 돌리거나(workflow_dispatch), 맥 엔진 워크플로(mozc-component.yml)가 새 엔진을 낼 때 같은 커밋으로 부른다(workflow_call).
+# - publish가 켜져 있으면 맥 엔진과 같은 태그(mozc-<판>-<yyyymmdd>-<커밋 7자리>)의 엔진 릴리스에 묶음을 올린다. 그 릴리스가
+#   아직 없으면 만든다(prerelease, "최신" 아님). 윈도우 엔진 호스트가 하루 한 번 이 묶음을 찾아 받는다(win/host/src/updater.rs).
+#   맥 입력기(MozcUpdater)는 이름이 cssgsg-mozc.zip인 것만 받아서 이 묶음은 보지 않는다.
 #
 # 빌드는 tools/mozc/build-windows.ps1(Bazel + Mozc가 받는 clang-cl), 묶음은 tools/mozc/package-component-windows.ps1.
 # 시험: 내보낸 함수가 C API뿐이고 C 런타임이 정적인지(dumpbin), 확인용 도구가 한글 폴더·가나 인자로 변환하는지,
@@ -13,12 +16,24 @@ on:
         description: Mozc 커밋(비우면 tools/mozc/MOZC_COMMIT)
         type: string
         default: ""
+      publish:
+        description: 같은 태그의 엔진 릴리스에 묶음을 올린다
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      commit:
+        type: string
+        default: ""
+      publish:
+        type: boolean
+        default: false
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
-  group: mozc-windows
+  group: mozc-windows-${{ inputs.commit }}
   cancel-in-progress: false
 
 jobs:
@@ -29,6 +44,7 @@ jobs:
       run:
         shell: pwsh
     env:
+      GH_TOKEN: ${{ github.token }}
       # upstream windows.yaml과 같다(NDK를 찾지 않게).
       ANDROID_NDK_HOME: ""
     steps:
@@ -117,3 +133,18 @@ jobs:
             build/mozc-component/TITLE
             build/mozc-out/MOZC_VERSION
           retention-days: 14
+
+      - name: Publish to the engine release
+        if: inputs.publish
+        run: |
+          $tag = (Get-Content build/mozc-component/TAG -Raw).Trim()
+          $title = (Get-Content build/mozc-component/TITLE -Raw).Trim()
+          $zip = 'build/mozc-component/cssgsg-mozc-windows-x64.zip'
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $zip --clobber
+          } else {
+            $notes = "Mozc engine for cssgsg, built from google/mozc@$((Get-Content build/mozc-out/MOZC_VERSION -Raw).Split(' ')[0]). The input method downloads it by itself and uses it from its next start; this is not an app release. / cssgsg가 스스로 받아 쓰는 Mozc 엔진입니다. 다음에 시작될 때부터 쓰며, 앱 릴리스가 아닙니다."
+            gh release create $tag $zip --prerelease --latest=false --target $env:GITHUB_SHA --title $title --notes $notes
+          }
+          if ($LASTEXITCODE) { exit 1 }

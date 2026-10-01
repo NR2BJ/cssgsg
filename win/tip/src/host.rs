@@ -16,6 +16,7 @@ use cssgsg_core::convert::{ConvCmd, ConvView, Converter, EchoConverter};
 use cssgsg_ipc::pipe::{CallError, Client, may_spawn_host, pipe_name, user_sid};
 use cssgsg_ipc::{Reply, Request, Versioned};
 use windows::Win32::System::LibraryLoader::GetModuleFileNameW;
+use windows::Win32::UI::WindowsAndMessaging::{ASFW_ANY, AllowSetForegroundWindow};
 
 use crate::{debug_log, module};
 
@@ -81,15 +82,65 @@ pub fn report_pick(link: &HostLink, reading: &str, text: &str) {
     }
 }
 
+/// 메뉴에서 연 설정 앱·다시 시작: 호스트가 처음 뜰 수도 있어서 넉넉히(그동안 메뉴를 고른 앱만 잠깐 기다린다).
+const MENU_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// 설정 앱을 연다(작업 표시줄 아이콘 메뉴). 호스트가 띄운다: 이 앱이 앱 컨테이너면 설정 앱이 그 안에 갇히고, 관리자 권한
+/// 앱이면 설정 앱도 관리자가 된다. 호스트에 닿지 못하면 띄워도 되는 앱에서만 직접 띄운다.
+pub fn open_settings(link: Option<&HostLink>, tab: Option<&str>) {
+    // 호스트가 띄운 설정 창이 앞으로 올 수 있게, 지금 앞에 있는(메뉴를 고른) 이 앱이 허락해 둔다.
+    let _ = unsafe { AllowSetForegroundWindow(ASFW_ANY) };
+    let request = Request::OpenSettings { tab: tab.map(str::to_string) };
+    let asked = link
+        .and_then(|l| l.client.try_borrow_mut().ok())
+        .map(|mut client| client.call(&request, MENU_TIMEOUT));
+    if let Some(Ok(Reply::Done)) = asked {
+        return;
+    }
+    debug_log(&format!("open settings through the host: {:?}", asked.as_ref().map(kind)));
+    if !may_spawn_host() {
+        return;
+    }
+    let Some(exe) = beside_dll(&["settings", "cssgsg-settings.exe"]) else { return };
+    let mut command = std::process::Command::new(exe);
+    if let Some(tab) = tab {
+        command.args(["--tab", tab]);
+    }
+    if let Err(e) = command.spawn() {
+        debug_log(&format!("open settings: {e}"));
+    }
+}
+
+/// 엔진 호스트를 다시 띄운다(메뉴의 "다시 시작"). 떠 있지 않았으면 띄우기만 한다.
+pub fn restart(link: Option<&HostLink>) {
+    let Some(mut client) = link.and_then(|l| l.client.try_borrow_mut().ok()) else { return };
+    match client.call(&Request::Restart, MENU_TIMEOUT) {
+        Ok(Reply::Done) => debug_log("host restarting"),
+        other => {
+            debug_log(&format!("host restart: {}", kind(&other)));
+            client.prepare();
+        }
+    }
+}
+
 /// 이 DLL 옆의 cssgsg-host.exe.
 fn host_exe() -> Option<PathBuf> {
+    beside_dll(&["cssgsg-host.exe"])
+}
+
+/// 이 DLL이 있는 폴더(설치 폴더) 아래의 파일.
+fn beside_dll(parts: &[&str]) -> Option<PathBuf> {
     let mut buffer = [0u16; 1024];
     let n = unsafe { GetModuleFileNameW(Some(module()), &mut buffer) } as usize;
     if n == 0 || n >= buffer.len() {
         return None;
     }
     let dll = PathBuf::from(String::from_utf16_lossy(&buffer[..n]));
-    Some(dll.parent()?.join("cssgsg-host.exe"))
+    let mut path = dll.parent()?.to_path_buf();
+    for part in parts {
+        path.push(part);
+    }
+    Some(path)
 }
 
 /// 답의 종류(개발자 기록에는 글자를 남기지 않는다).
@@ -102,6 +153,7 @@ fn kind(reply: &Result<Reply, CallError>) -> String {
         Ok(Reply::Lost) => "lost".into(),
         Ok(Reply::Error { message }) => format!("error {message}"),
         Ok(Reply::Sync { .. }) => "sync".into(),
+        Ok(Reply::Engine { .. }) => "engine".into(),
         Err(e) => format!("{e:?}"),
     }
 }

@@ -70,4 +70,23 @@ static partial class User32
 
     [LibraryImport("user32.dll")]
     public static partial uint GetDpiForWindow(IntPtr hwnd);
+
+    [LibraryImport("user32.dll", StringMarshalling = StringMarshalling.Utf16)]
+    public static partial uint RegisterWindowMessageW(string name);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool PostMessageW(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
+}
+
+/// 창 프로시저 가로채기(WinUI 창이 받는 우리 메시지를 보려고).
+static unsafe partial class ComCtl32
+{
+    [LibraryImport("comctl32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool SetWindowSubclass(IntPtr hwnd,
+        delegate* unmanaged<IntPtr, uint, IntPtr, IntPtr, UIntPtr, UIntPtr, IntPtr> proc, UIntPtr id, UIntPtr data);
+
+    [LibraryImport("comctl32.dll")]
+    public static partial IntPtr DefSubclassProc(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
 }

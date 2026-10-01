@@ -15,7 +15,6 @@ sealed partial class AboutPage : SettingsPage
     readonly Button addInput;
     readonly TextBlock host = new() { TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Right };
     readonly Button restartHost;
-    readonly TextBlock startup = new();
     readonly StackPanel updateStatus = new() { Orientation = Orientation.Horizontal, Spacing = 8 };
     readonly TextBlock lastCheck = new();
     readonly Button checkNow;
@@ -54,8 +53,7 @@ sealed partial class AboutPage : SettingsPage
                 "kana only, and it starts again the next time you switch to Japanese.",
                 "エンジンホスト（cssgsg-host.exe）は日本語変換（Mozc）、設定ファイル、選んだ漢字の記憶を受け持つプロセスです。" +
                 "サインイン時に起動して常駐します（メモリ約20MB）。停止中は日本語がかなのみになり、次に日本語に切り替えたときに再び起動します。"),
-            Ui.Row(T("상태", "Status", "状態"), hostRow),
-            Ui.Row(T("로그인할 때 시작", "Start at Sign-in", "サインイン時に起動"), startup)));
+            Ui.Row(T("상태", "Status", "状態"), hostRow)));
 
         foreach (var name in new[] { T("정식", "Stable", "正式版"), T("베타", "Beta", "ベータ") }) channel.Items.Add(name);
         channel.SelectedIndex = updater.Beta ? 1 : 0;
@@ -131,7 +129,6 @@ sealed partial class AboutPage : SettingsPage
         inputList.Text = listed ? T("추가됨", "Added", "追加済み") : T("추가 안 됨", "Not added", "未追加");
         inputList.Foreground = listed ? Ui.Brush("SystemFillColorSuccessBrush") : Ui.Brush("SystemFillColorCautionBrush");
         addInput.Visibility = listed || !File.Exists(Paths.HostExe) ? Visibility.Collapsed : Visibility.Visible;
-        startup.Text = Shell.HostStartsAtLogin() ? T("예", "Yes", "はい") : T("아니요", "No", "いいえ");
         restartHost.IsEnabled = File.Exists(Paths.HostExe);
         Quietly(() => developer.IsOn = Shell.DeveloperLog);
         logFile.IsEnabled = File.Exists(Paths.DeveloperLog);
@@ -149,6 +146,10 @@ sealed partial class AboutPage : SettingsPage
             "" => T("실행 중 · Mozc를 읽지 못함(가나만 입력)", "Running · Mozc couldn’t be loaded (kana only)", "実行中・Mozc を読み込めず（かなのみ）"),
             _ => T($"실행 중 · Mozc {engine}", $"Running · Mozc {engine}", $"実行中・Mozc {engine}"),
         };
+        // 설치기가 로그인할 때 띄우게 해 둔다. 누가 시작 프로그램에서 껐을 때만 알린다.
+        if (File.Exists(Paths.HostExe) && !Shell.HostStartsAtLogin())
+            host.Text += T("\n로그인할 때 시작하지 않음(작업 관리자 → 시작 앱)", "\nDoesn’t start at sign-in (Task Manager → Startup apps)",
+                "\nサインイン時に起動しない（タスク マネージャー → スタートアップ アプリ）");
         restartHost.Content = engine == null ? T("시작", "Start", "起動") : T("다시 시작", "Restart", "再起動");
     }
 
@@ -156,8 +157,7 @@ sealed partial class AboutPage : SettingsPage
     {
         restartHost.IsEnabled = false;
         host.Text = T("다시 시작하는 중…", "Restarting…", "再起動中…");
-        await HostClient.QuitAsync();
-        Shell.StartHost();
+        await HostClient.RestartAsync();
         // 엔진(Mozc)을 읽을 때까지 잠깐 걸린다.
         for (var i = 0; i < 20 && await HostClient.EngineVersionAsync() == null; i++) await Task.Delay(150);
         restartHost.IsEnabled = true;

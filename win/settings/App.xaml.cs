@@ -31,22 +31,24 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        var cli = Environment.GetCommandLineArgs();
+        var i = Array.IndexOf(cli, "--tab");
+        var tab = i >= 0 && i + 1 < cli.Length ? cli[i + 1] : null;
         single = new Mutex(true, @"Local\cssgsg-settings", out var first);
         if (!first)
         {
-            BringOtherToFront();
+            BringOtherToFront(tab);
             Exit();
             return;
         }
         // 웹 뷰 데이터는 설치 폴더(쓸 수 없다) 대신 사용자 폴더에 둔다. 웹 뷰를 만들기 전에 정한다.
         Environment.SetEnvironmentVariable("WEBVIEW2_USER_DATA_FOLDER", Paths.WebViewData);
-        var cli = Environment.GetCommandLineArgs();
-        var i = Array.IndexOf(cli, "--tab");
-        window = new MainWindow(i >= 0 && i + 1 < cli.Length ? cli[i + 1] : null);
+        window = new MainWindow(tab);
         window.Activate();
     }
 
-    static void BringOtherToFront()
+    /// 떠 있는 설정 창을 앞으로 가져오고, 탭을 달라고 했으면 그 탭을 보이라고 한다.
+    static void BringOtherToFront(string? tab)
     {
         foreach (var p in Process.GetProcessesByName("cssgsg-settings"))
         {
@@ -55,6 +57,8 @@ public partial class App : Application
                 if (p.Id == Environment.ProcessId || p.MainWindowHandle == IntPtr.Zero) continue;
                 if (User32.IsIconic(p.MainWindowHandle)) User32.ShowWindow(p.MainWindowHandle, User32.SW_RESTORE);
                 User32.SetForegroundWindow(p.MainWindowHandle);
+                var param = MainWindow.ShowTabParam(tab);
+                if (param != IntPtr.Zero) User32.PostMessageW(p.MainWindowHandle, MainWindow.ShowTabMessage, param, IntPtr.Zero);
             }
         }
     }

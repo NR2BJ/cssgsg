@@ -107,10 +107,45 @@ static class HostClient
         return reply.Body?["Hello"]?["engine"]?.GetValue<string>() ?? "";
     }
 
+    /// Mozc 엔진 하나(win/ipc EngineBuild).
+    public sealed record EngineBuild(string Version, string Date, string Commit, bool Downloaded);
+
+    /// 엔진 업데이트 상태(win/ipc EngineInfo). 시각은 유닉스 초.
+    public sealed record EngineInfo(EngineBuild? Active, EngineBuild? Pending, bool Checking, long? CheckedAt, long? FailedAt, string? Failure);
+
+    static EngineBuild? Build(JsonNode? n) => n is JsonObject o
+        ? new EngineBuild(o["version"]?.GetValue<string>() ?? "", o["date"]?.GetValue<string>() ?? "",
+            o["commit"]?.GetValue<string>() ?? "", o["downloaded"]?.GetValue<bool>() ?? false)
+        : null;
+
+    /// 호스트의 엔진 상태. 호스트가 없으면 NoHost, 이 요청을 모르는 옛 호스트면 Failed.
+    public static async Task<(HostClient.Status Status, EngineInfo? Info)> EngineStatusAsync()
+    {
+        var reply = await CallAsync("\"EngineStatus\"", 1500);
+        if (!reply.Ok) return (reply.Status, null);
+        var info = reply.Body?["Engine"]?["info"];
+        if (info == null) return (Status.Failed, null);
+        return (Status.Done, new EngineInfo(Build(info["active"]), Build(info["pending"]),
+            info["checking"]?.GetValue<bool>() ?? false, info["checked_at"]?.GetValue<long>(),
+            info["failed_at"]?.GetValue<long>(), info["failure"]?.GetValue<string>()));
+    }
+
+    /// 새 엔진을 지금 확인하라고 한다(확인은 호스트가 뒤에서 한다).
+    public static Task<Reply> CheckEngineAsync() => CallAsync("\"CheckEngine\"");
+
     public static Task<Reply> ReloadAsync() => CallAsync("\"Reload\"");
     public static Task<Reply> ClearHanjaLearningAsync() => CallAsync("\"ClearHanjaLearning\"");
     /// 엔진을 내리고 다시 읽어서 조금 걸린다.
     public static Task<Reply> ClearMozcLearningAsync() => CallAsync("\"ClearMozcLearning\"", 15000);
+
+    /// 호스트를 다시 띄운다(호스트가 새 호스트를 띄우고 끝난다). 떠 있지 않았거나 옛 호스트라 모르면 끄고 띄운다.
+    public static async Task RestartAsync()
+    {
+        var reply = await CallAsync("\"Restart\"", 3000);
+        if (reply.Ok) return;
+        await QuitAsync();
+        Shell.StartHost();
+    }
 
     /// 호스트를 끝낸다(학습을 마무리하고). 파이프가 없어질 때까지 3초까지 기다린다.
     public static async Task<bool> QuitAsync()

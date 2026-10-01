@@ -11,11 +11,13 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
 use cssgsg_core::convert::{Converter, EchoConverter};
-use cssgsg_core::mozc::MozcConverter;
+use cssgsg_core::mozc::{MozcConverter, SUPPORTED_ABI};
 use cssgsg_ipc::pipe::{pipe_name, pipe_sddl, user_sid};
-use cssgsg_ipc::{PROTOCOL, Reply, Request, decode, encode};
+use cssgsg_ipc::{EngineBuild, PROTOCOL, Reply, Request, decode, encode};
 
+use crate::engines;
 use crate::files::UserFiles;
+use crate::updater::Updater;
 
 /// 파이프 인스턴스의 버퍼 크기(요청은 작다). 답은 이보다 커도 된다: 메시지 모드라 입력기가 이어 읽는다.
 const PIPE_BUFFER: u32 = 64 * 1024;
@@ -42,6 +44,10 @@ struct Options {
     idle_exit: Option<Duration>,
     /// 설정·한자 기억 폴더(보통 %APPDATA%\cssgsg, 시험은 따로).
     user_dir: Option<PathBuf>,
+    /// 다시 시작(`Request::Restart`)으로 뜬 호스트: 앞 호스트(프로세스 번호)가 끝나기를 기다린 뒤 파이프를 만든다.
+    wait_for: Option<u32>,
+    /// 엔진 업데이트를 저절로 확인하지 않는다(설정 앱의 "지금 확인"만).
+    no_update: bool,
 }
 
 fn options() -> Options {
@@ -52,6 +58,8 @@ fn options() -> Options {
         no_engine: false,
         idle_exit: None,
         user_dir: None,
+        wait_for: None,
+        no_update: false,
     };
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -60,7 +68,9 @@ fn options() -> Options {
             "--engine-dir" => o.engine_dir = args.next().map(PathBuf::from),
             "--profile" => o.profile = args.next().map(PathBuf::from),
             "--no-engine" => o.no_engine = true,
+            "--no-update" => o.no_update = true,
             "--user-dir" => o.user_dir = args.next().map(PathBuf::from),
+            "--wait-for" => o.wait_for = args.next().and_then(|s| s.parse().ok()),
             "--idle-exit-secs" => {
                 o.idle_exit = args.next().and_then(|s| s.parse().ok()).map(Duration::from_secs);
             }
@@ -79,6 +89,9 @@ pub fn main() {
         _ => {}
     }
     let options = options();
+    if let Some(pid) = options.wait_for {
+        wait_for_exit(pid, Duration::from_secs(5));
+    }
     let Some(sid) = user_sid() else {
         log("no user SID");
         return;
@@ -232,7 +245,11 @@ fn serve(pipe: Pipe, client: u64, jobs: &Sender<Job>, clients: &AtomicUsize) {
 /// 엔진 스레드: 변환 엔진을 만들고 요청을 차례로 처리한다. `idle_exit`을 주면(시험) 이어진 입력기가 없이 그만큼 지났을 때
 /// 프로세스를 끝낸다.
 fn engine(inbox: Receiver<Job>, options: &Options, clients: &AtomicUsize, idle_exit: Option<Duration>) {
-    let (mut converter, mut version) = load_engine(options);
+    let (mut converter, mut version, active) = load_engine(options);
+    // 엔진 업데이트: 설치본으로 돌 때만 저절로 확인한다(시험·개발 호스트는 "지금 확인"만).
+    let automatic =
+        !options.no_update && !options.no_engine && options.engine_dir.is_none() && options.tag.is_empty();
+    let updater = Updater::start(SUPPORTED_ABI, exe_dir().join("mozc"), active, automatic);
     let mut files = UserFiles::open(options.user_dir.clone().unwrap_or_else(default_user_dir));
     let mut owner: Option<u64> = None;
     let mut last = Instant::now();
@@ -249,8 +266,33 @@ fn engine(inbox: Receiver<Job>, options: &Options, clients: &AtomicUsize, idle_e
                     std::thread::sleep(Duration::from_millis(100));
                     std::process::exit(0);
                 }
+                if request == Request::Restart {
+                    // 새 호스트는 이 호스트가 끝나기를 기다렸다가 파이프를 만든다(사용자당 하나). 띄우지 못하면 그대로 남는다.
+                    match spawn_successor() {
+                        Ok(()) => {
+                            let _ = reply.send(Reply::Done);
+                            log("restarting");
+                            files.save(true);
+                            drop(converter);
+                            std::thread::sleep(Duration::from_millis(100));
+                            std::process::exit(0);
+                        }
+                        Err(e) => {
+                            log(&format!("restart: {e}"));
+                            let _ = reply.send(Reply::Error { message: format!("restart: {e}") });
+                        }
+                    }
+                    continue;
+                }
                 let answer = match request {
-                    Request::Quit => Reply::Done,
+                    Request::Quit | Request::Restart => Reply::Done,
+                    Request::OpenSettings { tab } => match open_settings(tab.as_deref()) {
+                        Ok(()) => Reply::Done,
+                        Err(message) => {
+                            log(&format!("open settings: {message}"));
+                            Reply::Error { message }
+                        }
+                    },
                     Request::Hello { .. } => Reply::Hello { protocol: PROTOCOL, engine: version.clone() },
                     Request::Start { reading, learn } => {
                         if owner.is_some() {
@@ -289,13 +331,22 @@ fn engine(inbox: Receiver<Job>, options: &Options, clients: &AtomicUsize, idle_e
                         log("hanja learning cleared");
                         Reply::Done
                     }
+                    Request::EngineStatus => Reply::Engine { info: updater.snapshot() },
+                    Request::CheckEngine => {
+                        updater.check_now();
+                        Reply::Done
+                    }
                     Request::ClearMozcLearning => {
                         // 엔진이 학습 파일을 열어 두고 있어서(윈도우는 연 파일을 지울 수 없다) 먼저 내린다.
                         // 하던 변환은 버린다(그 입력기의 다음 명령은 Lost: 보이던 글자를 그대로 확정한다).
                         owner = None;
                         drop(std::mem::replace(&mut converter, Box::new(EchoConverter::default())));
                         let cleared = clear_mozc_learning(&profile_dir(options));
-                        (converter, version) = load_engine(options);
+                        let active;
+                        (converter, version, active) = load_engine(options);
+                        if let Ok(mut info) = updater.info.lock() {
+                            info.active = active;
+                        }
                         match cleared {
                             Ok(n) => {
                                 log(&format!("Mozc learning cleared ({n} files)"));
@@ -337,34 +388,56 @@ fn engine(inbox: Receiver<Job>, options: &Options, clients: &AtomicUsize, idle_e
     }
 }
 
-/// 변환 엔진: Mozc(이 실행 파일 옆 mozc 폴더)를 읽고, 못 읽으면 히라가나·가타카나만 내는 변환기.
-fn load_engine(options: &Options) -> (Box<dyn Converter>, Option<String>) {
+/// 변환 엔진: 받아 둔 더 새 Mozc, 아니면 이 실행 파일 옆 mozc 폴더의 Mozc를 읽는다(engines). 읽지 못한 받은 엔진은
+/// 나쁜 엔진으로 적고 다음 것을 읽는다. 하나도 못 읽으면 히라가나·가타카나만 내는 변환기.
+/// 돌려주는 것: 변환기, 엔진이 알리는 Mozc 버전(Hello), 쓰는 엔진(설정 앱에 보일 것).
+fn load_engine(options: &Options) -> (Box<dyn Converter>, Option<String>, Option<EngineBuild>) {
+    let none = || (Box::new(EchoConverter::default()) as Box<dyn Converter>, None, None);
     if options.no_engine {
-        return (Box::new(EchoConverter::default()), None);
+        return none();
     }
-    let dir = options.engine_dir.clone().unwrap_or_else(|| exe_dir().join("mozc"));
     let profile = profile_dir(options);
     // Mozc는 프로필 폴더를 만들지 않고, 비우면 upstream Mozc의 폴더(%LOCALAPPDATA%\Mozc)를 쓴다.
     if let Err(e) = std::fs::create_dir_all(&profile) {
         log(&format!("profile folder: {e}"));
     }
-    let path = |p: &Path| p.to_string_lossy().into_owned();
-    let started = Instant::now();
-    match MozcConverter::load(
-        &path(&dir.join("cssgsg_mozc.dll")),
-        &path(&dir.join("mozc.data")),
-        &path(&profile),
-    ) {
-        Ok(mozc) => {
-            let version = mozc.version();
-            log(&format!("Mozc {version} ready in {} ms", started.elapsed().as_millis()));
-            (Box::new(mozc), Some(version))
+    let list = match &options.engine_dir {
+        Some(dir) => engines::bundled(dir).into_iter().collect(),
+        None => {
+            engines::candidates(engines::bundled(&exe_dir().join("mozc")), engines::downloaded(SUPPORTED_ABI))
         }
-        Err(e) => {
-            log(&format!("Mozc unavailable ({e}); kana only"));
-            (Box::new(EchoConverter::default()), None)
+    };
+    let path = |p: &Path| p.to_string_lossy().into_owned();
+    for engine in list {
+        if !engines::begin_start(&engine) {
+            log(&format!("Mozc {} gave up: it didn't finish starting twice", engine.build.commit));
+            continue;
+        }
+        let started = Instant::now();
+        let loaded = MozcConverter::load(
+            &path(&engine.dir.join(engines::LIBRARY)),
+            &path(&engine.dir.join(engines::DATA)),
+            &path(&profile),
+        );
+        engines::end_start(&engine);
+        match loaded {
+            Ok(mozc) => {
+                let version = mozc.version();
+                let source = if engine.build.downloaded { "downloaded" } else { "bundled" };
+                log(&format!("Mozc {version} ({source}) ready in {} ms", started.elapsed().as_millis()));
+                let build = EngineBuild { version: version.clone(), ..engine.build };
+                return (Box::new(mozc), Some(version), Some(build));
+            }
+            Err(e) => {
+                log(&format!("Mozc {} unavailable ({e})", engine.dir.display()));
+                if engine.build.downloaded {
+                    engines::mark_bad(&engine.build.commit);
+                }
+            }
         }
     }
+    log("no Mozc engine; kana only");
+    none()
 }
 
 /// Mozc가 배운 것을 적는 파일(맥 설정 앱이 지우는 것과 같다): 문절 나누기, 고른 후보, 전각·반각, 추천 기록.
@@ -386,6 +459,46 @@ fn clear_mozc_learning(profile: &Path) -> Result<usize, String> {
 
 fn exe_dir() -> PathBuf {
     std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)).unwrap_or_default()
+}
+
+/// 이 호스트를 대신할 새 호스트를 띄운다(같은 옵션 + 이 프로세스가 끝나기를 기다리라는 `--wait-for`).
+fn spawn_successor() -> std::io::Result<()> {
+    let mut args: Vec<String> = Vec::new();
+    let mut given = std::env::args().skip(1);
+    while let Some(a) = given.next() {
+        if a == "--wait-for" {
+            given.next();
+        } else {
+            args.push(a);
+        }
+    }
+    args.extend(["--wait-for".into(), std::process::id().to_string()]);
+    std::process::Command::new(std::env::current_exe()?).args(args).spawn().map(drop)
+}
+
+/// 앞 호스트가 끝나기를 기다린다(그 호스트가 파이프를 놓아야 새 파이프를 만들 수 있다). 이미 끝났으면 바로.
+fn wait_for_exit(pid: u32, limit: Duration) {
+    use windows::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject};
+    if let Ok(process) = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, false, pid) } {
+        unsafe {
+            WaitForSingleObject(process, limit.as_millis() as u32);
+            let _ = CloseHandle(process);
+        }
+    }
+}
+
+/// 설정 앱(설치 폴더의 settings\cssgsg-settings.exe)을 이 사용자로 띄운다. 이미 떠 있으면 그 앱이 창을 앞으로 가져온다.
+fn open_settings(tab: Option<&str>) -> Result<(), String> {
+    let exe = exe_dir().join("settings").join("cssgsg-settings.exe");
+    let mut command = std::process::Command::new(&exe);
+    if let Some(tab) = tab {
+        // 탭 이름만 받는다(설정 앱 인자에 다른 것이 섞이지 않게).
+        if tab.is_empty() || !tab.bytes().all(|b| b.is_ascii_lowercase()) {
+            return Err(format!("bad tab {tab:?}"));
+        }
+        command.args(["--tab", tab]);
+    }
+    command.spawn().map(drop).map_err(|e| format!("{}: {e}", exe.display()))
 }
 
 /// Mozc 학습·사용자 사전 폴더(`--profile`, 보통 %LOCALAPPDATA%\cssgsg\mozc).

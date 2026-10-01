@@ -342,7 +342,8 @@ impl TextService_Impl {
             .inspect_err(|e| debug_log(&format!("mode compartment: {e:?}")))
             .ok();
 
-        let button = ComObject::new(ModeButton::new(Mode::Ko));
+        let handler = self.menu_handler(mode_slot.as_ref().map(|(c, _)| c.clone()), client_id);
+        let button = ComObject::new(ModeButton::new(Mode::Ko, Some(handler)));
         let added = thread_mgr
             .cast::<ITfLangBarItemMgr>()
             .and_then(|m| unsafe { m.AddItem(&button.to_interface::<ITfLangBarItemButton>()) })
@@ -364,6 +365,27 @@ impl TextService_Impl {
         self.follow_global_mode(true);
         self.sync_host();
         Ok(())
+    }
+
+    /// 작업 표시줄 모드 아이콘 메뉴에서 고른 것을 처리한다([`crate::menu`]).
+    /// - 모드: 앱 사이에서 같은 모드를 쓰는 전역 칸에 적는다. 이 앱을 포함한 모든 앱의 입력기가 알림을 받고 따라간다.
+    /// - 설정·배열 학습·타자 연습, 다시 시작: 엔진 호스트에 시킨다([`host::open_settings`], [`host::restart`]).
+    fn menu_handler(&self, slot: Option<ITfCompartment>, client_id: u32) -> crate::menu::Handler {
+        use crate::menu::Command;
+        let link = self.state.try_borrow().ok().and_then(|s| s.as_ref().and_then(|a| a.host.clone()));
+        Rc::new(move |command| match command {
+            Command::Mode(mode) => {
+                if let Some(c) = &slot {
+                    let last = get_i32(c).and_then(|v| Mode::from_i32(v >> 4 & 0xF)).unwrap_or(Mode::Ko);
+                    let last = if mode == Mode::En { last } else { mode };
+                    let _ = set_i32(c, client_id, mode_value(mode, last));
+                }
+            }
+            Command::Settings => host::open_settings(link.as_ref(), None),
+            Command::Learn => host::open_settings(link.as_ref(), Some("learn")),
+            Command::Practice => host::open_settings(link.as_ref(), Some("practice")),
+            Command::Restart => host::restart(link.as_ref()),
+        })
     }
 
     /// 엔진 호스트와 설정 파일·한자 기억을 맞춘다(켤 때, 입력칸이 바뀔 때: 설정 앱에서 고치고 돌아오면 바로 쓴다).

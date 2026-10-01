@@ -189,6 +189,34 @@ fn the_settings_app_clears_what_was_learned() {
 }
 
 #[test]
+fn restart_hands_over_to_a_new_host() {
+    let host = Host::start("restart-request");
+    let mut c = host.client();
+    assert_eq!(start(&mut c, "かな"), ["かな", "カナ"]);
+    // 다시 시작: 새 호스트가 앞 호스트가 끝나기를 기다렸다가 같은 파이프를 만든다. 쥐고 있던 연결은 다시 이어진다.
+    assert_eq!(c.call(&Request::Restart, WAIT).unwrap(), Reply::Done);
+    let began = Instant::now();
+    loop {
+        match c.call(&Request::Hello { protocol: PROTOCOL }, Duration::from_millis(300)) {
+            Ok(Reply::Hello { .. }) => break,
+            _ => {
+                assert!(began.elapsed() < WAIT, "새 호스트가 뜨지 않는다");
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
+    }
+    assert_eq!(start(&mut c, "かな"), ["かな", "カナ"]);
+    // 설정 앱 열기: 시험 호스트 옆에는 설정 앱이 없어서 까닭이 온다. 탭 이름 말고는 받지 않는다.
+    assert!(matches!(c.call(&Request::OpenSettings { tab: None }, WAIT).unwrap(), Reply::Error { .. }));
+    match c.call(&Request::OpenSettings { tab: Some("--evil".into()) }, WAIT).unwrap() {
+        Reply::Error { message } => assert!(message.contains("bad tab"), "{message}"),
+        other => panic!("{other:?}"),
+    }
+    // 새 호스트는 시험이 띄운 것이 아니라서 끝내라고 한다.
+    assert_eq!(c.call(&Request::Quit, WAIT).unwrap(), Reply::Done);
+}
+
+#[test]
 fn one_host_per_pipe_and_a_dead_host_is_noticed() {
     let host = Host::start("single");
     let mut c = host.client();

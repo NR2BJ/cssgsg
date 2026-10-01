@@ -14,6 +14,45 @@ public sealed partial class MainWindow : Window
 {
     enum Tab { General, Korean, Japanese, Learn, Practice, About }
 
+    /// `--tab` 이름 → 탭. 모르는 이름이면 null.
+    static Tab? TabNamed(string? name) => name switch
+    {
+        "general" => Tab.General,
+        "korean" => Tab.Korean,
+        "japanese" => Tab.Japanese,
+        "learn" => Tab.Learn,
+        "practice" => Tab.Practice,
+        "about" => Tab.About,
+        _ => null,
+    };
+
+    /// 이미 떠 있는 설정 앱에 탭을 보이라고 보내는 메시지(맥의 분산 알림 show-tab). wParam = 탭 번호 + 1.
+    /// 두 번째로 띄운 설정 앱(작업 표시줄 아이콘 메뉴의 "배열 학습" 등)이 보내고 끝난다.
+    public static readonly uint ShowTabMessage = User32.RegisterWindowMessageW("cssgsg-settings-show-tab");
+
+    public static IntPtr ShowTabParam(string? name) => TabNamed(name) is { } tab ? (IntPtr)((int)tab + 1) : IntPtr.Zero;
+
+    static MainWindow? shown;
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    static IntPtr WindowProc(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam, UIntPtr id, UIntPtr data)
+    {
+        if (msg == ShowTabMessage && shown is { } window && (int)wParam is var n and >= 1 and <= 6)
+        {
+            var tab = (Tab)(n - 1);
+            window.DispatcherQueue.TryEnqueue(() => window.ShowTab(tab));
+            return IntPtr.Zero;
+        }
+        return ComCtl32.DefSubclassProc(hwnd, msg, wParam, lParam);
+    }
+
+    void ShowTab(Tab tab)
+    {
+        var item = nav.MenuItems.OfType<NavigationViewItem>().FirstOrDefault(i => i.Tag is Tab t && t == tab);
+        if (item != null) nav.SelectedItem = item;
+        Select(tab);
+    }
+
     readonly SettingsModel model = new();
     readonly UserDictionaryModel dictionary = new();
     readonly Updater updater = new();
@@ -49,15 +88,7 @@ public sealed partial class MainWindow : Window
         {
             if (e.SelectedItem is NavigationViewItem { Tag: Tab tab }) Select(tab);
         };
-        current = startTab switch
-        {
-            "korean" => Tab.Korean,
-            "japanese" => Tab.Japanese,
-            "learn" => Tab.Learn,
-            "practice" => Tab.Practice,
-            "about" => Tab.About,
-            _ => Tab.General,
-        };
+        current = TabNamed(startTab) ?? Tab.General;
         Build();
 
         model.Changed += () =>
@@ -74,12 +105,22 @@ public sealed partial class MainWindow : Window
                 return;
             }
             model.Reload();
-            (pages[current] as SettingsPage)?.Shown();
+            switch (pages[current])
+            {
+                case SettingsPage p:
+                    p.Shown();
+                    break;
+                case WebPage w:
+                    w.Shown();
+                    break;
+            }
         };
 
         var icon = Path.Combine(Paths.AppDir, "Assets", "cssgsg.ico");
         if (File.Exists(icon)) AppWindow.SetIcon(icon);
         var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+        shown = this;
+        unsafe { ComCtl32.SetWindowSubclass(hwnd, &WindowProc, 1, 0); }
         var scale = User32.GetDpiForWindow(hwnd) / 96.0;
         if (scale <= 0) scale = 1;
         AppWindow.Resize(new SizeInt32((int)(980 * scale), (int)(780 * scale)));
@@ -138,7 +179,11 @@ public sealed partial class MainWindow : Window
     {
         if (tab != current) recorder.Stop();
         current = tab;
-        foreach (var (t, page) in pages) page.Visibility = t == tab ? Visibility.Visible : Visibility.Collapsed;
+        foreach (var (t, page) in pages)
+        {
+            page.Visibility = t == tab ? Visibility.Visible : Visibility.Collapsed;
+            if (t != tab && page is WebPage hidden) hidden.Hidden();
+        }
         switch (pages[tab])
         {
             case SettingsPage p:

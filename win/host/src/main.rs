@@ -5,18 +5,24 @@
 //!
 //! 로그인할 때 시작 프로그램(HKCU …\Run의 cssgsg)으로 떠서 늘 켜져 있다(사용자 결정 2026-10-02: 스토어 앱·관리자 앱은
 //! 호스트를 띄울 수 없으니, 그런 앱에서도 변환되게). 죽으면 보통 앱의 입력기가 다시 띄운다. 메시지는 cssgsg-ipc.
-//! 엔진(cssgsg_mozc.dll, mozc.data)은 이 실행 파일 옆의 mozc 폴더, 학습은 %LOCALAPPDATA%\cssgsg\mozc.
+//! 엔진(cssgsg_mozc.dll, mozc.data)은 이 실행 파일 옆의 mozc 폴더, 또는 호스트가 받아 둔 더 새 엔진
+//! (%LOCALAPPDATA%\cssgsg\mozc-engines, 하루 한 번 확인). 학습은 %LOCALAPPDATA%\cssgsg\mozc.
 //!
-//! 옵션(시험·개발용): --tag <붙임>(파이프 이름), --engine-dir <폴더>, --profile <폴더>, --no-engine(히라가나·가타카나만),
-//! --idle-exit-secs <초>(이어진 입력기 없이 그만큼 지나면 끝난다. 주지 않으면 끝나지 않는다).
+//! 옵션(시험·개발용): --tag <붙임>(파이프 이름), --engine-dir <폴더>(그 엔진만), --profile <폴더>, --no-engine(히라가나·가타카나만),
+//! --no-update(엔진 업데이트를 저절로 확인하지 않음), --idle-exit-secs <초>(이어진 입력기 없이 그만큼 지나면 끝난다. 주지 않으면
+//! 끝나지 않는다), --wait-for <프로세스 번호>(다시 시작: 앞 호스트가 끝나기를 기다린다).
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+#[cfg(windows)]
+mod engines;
 #[cfg(windows)]
 mod files;
 #[cfg(windows)]
 mod host;
 #[cfg(windows)]
 mod setup;
+#[cfg(windows)]
+mod updater;
 
 #[cfg(windows)]
 fn main() {

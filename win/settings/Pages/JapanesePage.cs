@@ -10,6 +10,11 @@ sealed partial class JapanesePage : SettingsPage
     readonly UserDictionaryView dictionaryView;
     readonly TextBlock engineVersion = new() { IsTextSelectionEnabled = true, HorizontalAlignment = HorizontalAlignment.Right };
     readonly TextBlock engineSource = new() { HorizontalAlignment = HorizontalAlignment.Right };
+    readonly TextBlock pendingText = new() { TextWrapping = TextWrapping.Wrap };
+    readonly Grid pendingRow;
+    readonly TextBlock checkCaption = new() { TextWrapping = TextWrapping.Wrap };
+    readonly Button checkButton;
+    bool watching;
 
     public JapanesePage(SettingsModel model, UserDictionaryModel dictionary) : base(model, T("일본어", "Japanese", "日本語"))
     {
@@ -66,11 +71,31 @@ sealed partial class JapanesePage : SettingsPage
         var versionBox = new StackPanel { Spacing = 2, Children = { engineVersion, engineSource } };
         engineSource.Style = Ui.Style("CaptionTextBlockStyle");
         engineSource.Foreground = Ui.Brush("TextFillColorSecondaryBrush");
+        var apply = Ui.Button(T("지금 적용", "Apply Now", "今すぐ適用"), () => _ = ApplyEngineAsync());
+        ToolTipService.SetToolTip(apply, T("엔진 호스트가 곧바로 다시 시작하며 새 Mozc를 씁니다.", "The engine host restarts right away with the new Mozc.",
+            "エンジンホストがすぐに再起動し、新しい Mozc を使います。"));
+        pendingRow = Ui.Row(pendingText, apply);
+        pendingRow.Visibility = Visibility.Collapsed;
+        checkCaption.Style = Ui.Style("CaptionTextBlockStyle");
+        checkCaption.Foreground = Ui.Brush("TextFillColorSecondaryBrush");
+        checkButton = Ui.Button(T("지금 확인", "Check Now", "今すぐ確認"), () => _ = CheckEngineAsync());
+        var updates = new TextBlock { Text = T("업데이트", "Updates", "アップデート") };
+        var updatesLabel = new StackPanel { Spacing = 2, Children = { updates, checkCaption } };
+        var updatesRow = new Grid { MinHeight = 52, Padding = new Thickness(0, 8, 0, 8), ColumnSpacing = 16 };
+        updatesRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        updatesRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        updatesLabel.VerticalAlignment = VerticalAlignment.Center;
+        checkButton.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(checkButton, 1);
+        updatesRow.Children.Add(updatesLabel);
+        updatesRow.Children.Add(checkButton);
         Add(Ui.Section(T("변환 엔진 (Mozc)", "Conversion Engine (Mozc)", "変換エンジン（Mozc）"),
-            T("Mozc 엔진은 cssgsg에 들어 있어 cssgsg와 함께 업데이트됩니다(정보 탭).",
-                "The Mozc engine ships with cssgsg and updates with it (About tab).",
-                "Mozc エンジンは cssgsg に含まれ、cssgsg と一緒にアップデートされます（情報タブ）。"),
-            Ui.Row(T("버전", "Version", "バージョン"), versionBox)));
+            T("Mozc는 cssgsg와 따로 업데이트됩니다. 엔진 호스트가 하루에 한 번 GitHub에서 새 버전을 확인해 내려받고, 다음에 호스트가 시작될 때부터 씁니다.",
+                "Mozc updates separately from cssgsg. Once a day the engine host checks GitHub for a newer one, downloads it, and uses it from its next start.",
+                "Mozc は cssgsg とは別にアップデートされます。エンジンホストが1日に1回 GitHub で新しいバージョンを確認してダウンロードし、次に起動したときから使います。"),
+            Ui.Row(T("버전", "Version", "バージョン"), versionBox),
+            pendingRow,
+            updatesRow));
 
         Add(Ui.Section(T("변환 학습", "Conversion History", "変換の学習"),
             T("Mozc가 기억한 변환(문절 나누기, 고른 후보)을 지웁니다. 개인 사전은 그대로 남습니다.",
@@ -91,29 +116,92 @@ sealed partial class JapanesePage : SettingsPage
         _ = ShowEngineAsync();
     }
 
-    /// 엔진 호스트가 읽은 Mozc 버전. 호스트가 없으면 설치된 엔진의 MOZC_VERSION("<커밋> <날짜> <버전>").
+    /// 엔진 상태: 쓰는 엔진(내려받은 것인지), 받아 두고 기다리는 엔진, 마지막 확인(맥 MozcEngineSection).
+    /// 호스트가 없으면 설치된 엔진의 MOZC_VERSION("<커밋> <날짜> <버전>").
     async Task ShowEngineAsync()
     {
-        var running = await HostClient.EngineVersionAsync();
+        var (status, info) = await HostClient.EngineStatusAsync();
         var (installed, date) = InstalledEngine();
-        var datePart = date != null ? $" ({date})" : "";
-        if (running is { Length: > 0 })
+        checkButton.IsEnabled = status == HostClient.Status.Done && info?.Checking != true;
+        if (status != HostClient.Status.Done || info == null)
         {
-            engineVersion.Text = $"{running}{datePart}";
-            engineSource.Text = T("엔진 호스트가 쓰는 엔진", "Engine in use by the engine host", "エンジンホストが使っているエンジン");
+            engineVersion.Text = installed != null ? $"{installed} ({date})" : "—";
+            engineSource.Text = status == HostClient.Status.NoHost
+                ? T("설치된 엔진 (엔진 호스트가 실행 중이 아님)", "Installed engine (the engine host isn’t running)",
+                    "インストール済みのエンジン（エンジンホストが起動していません）")
+                : T("설치된 엔진", "Installed engine", "インストール済みのエンジン");
+            pendingRow.Visibility = Visibility.Collapsed;
+            checkCaption.Text = status == HostClient.Status.NoHost
+                ? T("엔진 호스트가 실행 중이 아닙니다", "The engine host isn’t running", "エンジンホストが起動していません")
+                : "";
+            return;
         }
-        else if (running != null)
+        if (info.Active is { } active)
         {
-            engineVersion.Text = installed != null ? $"{installed}{datePart}" : "—";
-            engineSource.Text = T("엔진을 읽지 못했습니다 (가나만 입력)", "The engine couldn’t be loaded (kana only)",
-                "エンジンを読み込めませんでした（かなのみ）");
+            engineVersion.Text = $"{active.Version} ({active.Date})";
+            engineSource.Text = active.Downloaded
+                ? T("내려받은 엔진", "Downloaded engine", "ダウンロードしたエンジン")
+                : T("설치본에 든 엔진", "Engine that came with cssgsg", "cssgsg に含まれるエンジン");
         }
         else
         {
-            engineVersion.Text = installed != null ? $"{installed}{datePart}" : "—";
-            engineSource.Text = T("설치된 엔진 (엔진 호스트가 실행 중이 아님)", "Installed engine (the engine host isn’t running)",
-                "インストール済みのエンジン（エンジンホストが起動していません）");
+            engineVersion.Text = installed != null ? $"{installed} ({date})" : "—";
+            engineSource.Text = T("엔진을 읽지 못했습니다 (가나만 입력)", "The engine couldn’t be loaded (kana only)",
+                "エンジンを読み込めませんでした（かなのみ）");
         }
+        if (info.Pending is { } pending)
+        {
+            pendingText.Text = T($"새 Mozc {pending.Version} ({pending.Date})를 받아 두었습니다. 엔진 호스트가 다시 시작하면 적용됩니다.",
+                $"New Mozc {pending.Version} ({pending.Date}) is downloaded and applies when the engine host restarts.",
+                $"新しい Mozc {pending.Version}（{pending.Date}）をダウンロード済みです。エンジンホストの再起動時に適用されます。");
+            pendingRow.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            pendingRow.Visibility = Visibility.Collapsed;
+        }
+        static string When(long seconds) => DateTimeOffset.FromUnixTimeSeconds(seconds).ToLocalTime().ToString("g");
+        checkCaption.Text = info.Checking
+            ? T("확인 중…", "Checking…", "確認中…")
+            : info.FailedAt is { } failed
+                ? T("마지막 확인 실패: ", "Last check failed: ", "最終確認に失敗: ") + When(failed) + (info.Failure != null ? $" ({info.Failure})" : "")
+                : info.CheckedAt is { } checkedAt
+                    ? T("마지막 확인: ", "Last checked: ", "最終確認: ") + When(checkedAt)
+                    : "";
+    }
+
+    /// "지금 확인": 호스트가 뒤에서 확인하는 동안 상태를 1초마다 다시 읽는다(2분까지).
+    async Task CheckEngineAsync()
+    {
+        if (watching) return;
+        watching = true;
+        checkButton.IsEnabled = false;
+        try
+        {
+            if (!(await HostClient.CheckEngineAsync()).Ok) return;
+            for (var i = 0; i < 120; i++)
+            {
+                await Task.Delay(1000);
+                await ShowEngineAsync();
+                var (_, info) = await HostClient.EngineStatusAsync();
+                if (info?.Checking != true) break;
+            }
+        }
+        finally
+        {
+            watching = false;
+            await ShowEngineAsync();
+        }
+    }
+
+    /// "지금 적용": 엔진 호스트를 다시 띄운다. 뜰 때 받아 둔 새 엔진을 읽는다.
+    async Task ApplyEngineAsync()
+    {
+        pendingRow.Visibility = Visibility.Collapsed;
+        engineSource.Text = T("다시 시작하는 중…", "Restarting…", "再起動中…");
+        await HostClient.RestartAsync();
+        for (var i = 0; i < 30 && await HostClient.EngineVersionAsync() == null; i++) await Task.Delay(200);
+        await ShowEngineAsync();
     }
 
     static (string? Version, string? Date) InstalledEngine()

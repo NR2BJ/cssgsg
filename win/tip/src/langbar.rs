@@ -23,8 +23,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{BOOL, BSTR, GUID, IUnknown, Interface, Ref, Result, implement, w};
 
-use crate::CLSID_TEXT_SERVICE;
 use crate::guard::guarded;
+use crate::{CLSID_TEXT_SERVICE, debug_log, menu};
 
 pub fn label(mode: Mode) -> &'static str {
     match mode {
@@ -48,11 +48,20 @@ const SINK_COOKIE: u32 = 1;
 pub struct ModeButton {
     mode: Cell<Mode>,
     sink: RefCell<Option<ITfLangBarItemSink>>,
+    /// 아이콘 메뉴에서 고른 것을 처리한다([`crate::menu`]).
+    menu: Option<menu::Handler>,
 }
 
 impl ModeButton {
-    pub fn new(mode: Mode) -> Self {
-        Self { mode: Cell::new(mode), sink: RefCell::new(None) }
+    pub fn new(mode: Mode, menu: Option<menu::Handler>) -> Self {
+        Self { mode: Cell::new(mode), sink: RefCell::new(None), menu }
+    }
+
+    fn chosen(&self, command: Option<menu::Command>) {
+        if let (Some(command), Some(handler)) = (command, &self.menu) {
+            debug_log(&format!("mode icon menu: {command:?}"));
+            handler(command);
+        }
     }
 
     /// 모드가 바뀌면 작업 표시줄에 다시 그려 달라고 알린다.
@@ -102,16 +111,43 @@ impl ITfLangBarItem_Impl for ModeButton_Impl {
 }
 
 impl ITfLangBarItemButton_Impl for ModeButton_Impl {
-    fn OnClick(&self, _click: TfLBIClick, _pt: &POINT, _area: *const RECT) -> Result<()> {
-        Ok(())
+    /// 작업 표시줄 아이콘을 눌렀다(왼쪽·오른쪽 모두): 맥 메뉴 막대처럼 메뉴를 띄운다.
+    fn OnClick(&self, click: TfLBIClick, pt: &POINT, area: *const RECT) -> Result<()> {
+        guarded(
+            || Ok(()),
+            || {
+                debug_log(&format!("mode icon click {}", click.0));
+                // SAFETY: TSF가 준 아이콘 사각형(없으면 NULL).
+                let around = unsafe { area.as_ref() }.copied();
+                let command = menu::show(*pt, around, self.mode.get());
+                self.chosen(command);
+                Ok(())
+            },
+        )
     }
 
-    fn InitMenu(&self, _menu: Ref<ITfMenu>) -> Result<()> {
-        Ok(())
+    /// TSF가 메뉴를 대신 그리는 길(언어 막대): 같은 항목을 채운다.
+    fn InitMenu(&self, menu: Ref<ITfMenu>) -> Result<()> {
+        guarded(
+            || Ok(()),
+            || {
+                debug_log("mode icon InitMenu");
+                if let Ok(menu) = menu.ok() {
+                    menu::fill(menu, self.mode.get());
+                }
+                Ok(())
+            },
+        )
     }
 
-    fn OnMenuSelect(&self, _id: u32) -> Result<()> {
-        Ok(())
+    fn OnMenuSelect(&self, id: u32) -> Result<()> {
+        guarded(
+            || Ok(()),
+            || {
+                self.chosen(menu::command(id));
+                Ok(())
+            },
+        )
     }
 
     /// 부를 때마다 새 아이콘을 만든다(받은 쪽이 지운다). 작업 표시줄 색도 그때 본다.
@@ -229,7 +265,7 @@ pub fn icon(mode: Mode, light: bool) -> Result<HICON> {
 /// 시험용: 이 버튼을 COM 인터페이스로.
 #[cfg(test)]
 pub fn button(mode: Mode) -> (ITfLangBarItemButton, ITfSource) {
-    let b: ITfLangBarItemButton = ModeButton::new(mode).into();
+    let b: ITfLangBarItemButton = ModeButton::new(mode, None).into();
     let s: ITfSource = b.cast().unwrap();
     (b, s)
 }

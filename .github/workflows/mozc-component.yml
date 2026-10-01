@@ -4,6 +4,7 @@
 # upstream Mozc의 버전이나 사전 데이터가 가장 최근에 낸 엔진 뒤로 바뀌었으면(tools/mozc/component-needed.sh) 빌드하고,
 # 코어의 Mozc 시험과 입력기의 엔진 코드 시험(tools/mac/mozc-smoke)을 통과하면 mozc-<판>-<yyyymmdd>-<커밋 7자리>
 # 태그의 prerelease로 cssgsg-mozc.zip을 낸다. 앱 업데이트는 이 릴리스를 보지 않는다(pkg가 없다).
+# 같은 커밋의 윈도우 엔진(cssgsg-mozc-windows-x64.zip)은 mozc-windows.yml이 빌드해 같은 릴리스에 붙인다.
 name: Mozc component
 
 on:
@@ -29,6 +30,9 @@ jobs:
     timeout-minutes: 180
     env:
       GH_TOKEN: ${{ github.token }}
+    outputs:
+      build: ${{ steps.decide.outputs.build }}
+      commit: ${{ steps.decide.outputs.commit }}
     steps:
       - uses: actions/checkout@v7
 
@@ -71,9 +75,21 @@ jobs:
           TAG="$(cat build/mozc-component/TAG)"
           TITLE="$(cat build/mozc-component/TITLE)"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "$TAG is already published"
+            # 윈도우 묶음이 먼저 만든 릴리스면 맥 묶음을 붙인다.
+            gh release upload "$TAG" build/mozc-component/cssgsg-mozc.zip --clobber
             exit 0
           fi
           gh release create "$TAG" build/mozc-component/cssgsg-mozc.zip \
             --prerelease --target "$GITHUB_SHA" --title "$TITLE" \
             --notes "Mozc engine for cssgsg, built from google/mozc@${{ steps.decide.outputs.commit }} (${{ steps.decide.outputs.reason }}). The input method downloads it by itself and uses it from its next start; this is not an app release. / cssgsg가 스스로 받아 쓰는 Mozc 엔진입니다. 입력기가 다음에 시작될 때부터 쓰며, 앱 릴리스가 아닙니다."
+
+  # 같은 Mozc 커밋으로 윈도우 엔진을 빌드해 같은 릴리스에 붙인다(윈도우 엔진 호스트가 받는다).
+  windows:
+    needs: component
+    if: needs.component.outputs.build == 'true'
+    uses: ./.github/workflows/mozc-windows.yml
+    with:
+      commit: ${{ needs.component.outputs.commit }}
+      publish: true
+    permissions:
+      contents: write

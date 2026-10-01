@@ -50,6 +50,39 @@ pub enum Request {
     /// Mozc가 배운 변환(문절 나누기, 고른 후보)을 지운다(설정 앱). 사용자 사전은 그대로다.
     /// 호스트는 엔진을 내리고(학습 파일을 놓게) 파일을 지운 뒤 다시 읽는다.
     ClearMozcLearning,
+    /// 설정 앱을 연다(작업 표시줄 모드 아이콘 메뉴). `tab`은 처음 보일 탭(learn, practice …). 입력기가 직접 띄우면 앱 컨테이너
+    /// 앱 안에서는 설정 앱이 그 컨테이너에 갇히고 관리자 권한 앱에서는 관리자가 되므로 호스트가 띄운다.
+    OpenSettings { tab: Option<String> },
+    /// 호스트를 다시 띄운다(메뉴·설정 앱의 "다시 시작"): 새 호스트를 띄우고(이 호스트가 끝나기를 기다린다) 학습을 마무리한 뒤 끝난다.
+    /// 앱 컨테이너 앱처럼 호스트를 띄울 수 없는 곳에서 눌러도 호스트가 비지 않는다. 받아 둔 새 Mozc 엔진도 이때 쓴다.
+    Restart,
+    /// Mozc 엔진 상태(설정 앱 일본어 탭): 쓰는 엔진, 받아 두고 기다리는 새 엔진, 마지막 확인. 답은 [`Reply::Engine`].
+    EngineStatus,
+    /// 새 Mozc 엔진을 지금 확인한다(하루 한 번을 기다리지 않고). 확인은 뒤에서 하고 바로 답한다(상태로 지켜본다).
+    CheckEngine,
+}
+
+/// Mozc 엔진 하나: 판(Mozc 버전), upstream 커밋 날짜·커밋, 내려받은 것인지(아니면 설치본에 든 것).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EngineBuild {
+    pub version: String,
+    pub date: String,
+    pub commit: String,
+    pub downloaded: bool,
+}
+
+/// 엔진 업데이트 상태(맥 MozcStatus와 같은 몫). 시각은 유닉스 초.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EngineInfo {
+    /// 지금 쓰는 엔진. 읽지 못했으면 None(가나만 낸다).
+    pub active: Option<EngineBuild>,
+    /// 받아 두었고 호스트가 다시 시작하면 쓸 새 엔진.
+    pub pending: Option<EngineBuild>,
+    pub checking: bool,
+    pub checked_at: Option<u64>,
+    /// 마지막 확인이 실패한 때와 까닭(성공하면 지운다).
+    pub failed_at: Option<u64>,
+    pub failure: Option<String>,
 }
 
 fn yes() -> bool {
@@ -90,6 +123,8 @@ pub enum Reply {
     Error { message: String },
     /// Sync의 답: 판이 다른 것만 담는다. 설정은 늘 올바른 것만 준다(틀린 파일은 호스트가 기록하고 앞의 것을 쓴다).
     Sync { config: Option<Versioned>, learning: Option<Versioned> },
+    /// EngineStatus의 답.
+    Engine { info: EngineInfo },
 }
 
 /// 메시지를 파이프에 실을 바이트로.
@@ -129,6 +164,11 @@ mod tests {
             Request::Quit,
             Request::ClearHanjaLearning,
             Request::ClearMozcLearning,
+            Request::OpenSettings { tab: None },
+            Request::OpenSettings { tab: Some("practice".into()) },
+            Request::Restart,
+            Request::EngineStatus,
+            Request::CheckEngine,
         ];
         for r in requests {
             assert_eq!(decode::<Request>(&encode(&r)), Some(r));
@@ -143,6 +183,18 @@ mod tests {
             Reply::Lost,
             Reply::Error { message: "?".into() },
             Reply::Sync { config: Some(Versioned { version: 7, text: "a = 1\n".into() }), learning: None },
+            Reply::Engine {
+                info: EngineInfo {
+                    active: Some(EngineBuild {
+                        version: "3.34.6239.101".into(),
+                        date: "2026-09-28".into(),
+                        commit: "a069a88d4cb5c011de0f9aebb6c149a1c808d904".into(),
+                        downloaded: false,
+                    }),
+                    checked_at: Some(1_790_000_000),
+                    ..EngineInfo::default()
+                },
+            },
         ];
         for r in replies {
             assert_eq!(decode::<Reply>(&encode(&r)), Some(r));
