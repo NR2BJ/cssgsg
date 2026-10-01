@@ -272,54 +272,88 @@ impl ITfEditSession_Impl for Measure_Impl {
     }
 }
 
-/// 입력칸이 비밀번호 칸인지 읽는다(앱이 알린 입력 범위 IS_PASSWORD·IS_NUMERIC_PASSWORD, Firefox 등). 못 읽으면 None.
-#[implement(ITfEditSession)]
-pub struct ReadPasswordScope {
-    context: ITfContext,
-    out: Rc<Cell<Option<bool>>>,
+/// 입력 범위를 읽은 결과. 세션이 돌았는지(앱 문서를 읽을 수 있는지)도 입력칸을 가리는 데 쓰고, 개발자 기록에도 남긴다.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum ScopeRead {
+    /// 세션이 돌지 않았다(텍스트 저장소가 없는 문맥, 거절).
+    #[default]
+    NotRun,
+    /// 선택 영역이 없다.
+    NoSelection,
+    /// 앱이 입력 범위를 주지 않았다(빈 값). Chromium은 위치별 속성을 주지 않아 흔히 이렇다.
+    Empty,
+    /// 앱이 준 입력 범위(InputScope 값).
+    Scopes(Vec<i32>),
+    /// 이 단계에서 실패했다.
+    Failed(&'static str),
 }
 
-impl ReadPasswordScope {
+impl ScopeRead {
+    /// 앱 문서의 선택 영역까지 읽혔는지(텍스트 저장소가 있는 진짜 입력칸). Firefox가 입력칸 아닌 곳에 두는 문맥은
+    /// 세션은 돌지만 선택 영역을 주지 않는다(개발자 기록, 2026-10-02).
+    pub fn readable(&self) -> bool {
+        !matches!(self, Self::NotRun | Self::Failed("selection"))
+    }
+
+    /// 입력 범위가 비밀번호 칸이다(IS_PASSWORD·IS_NUMERIC_PASSWORD, Firefox 등).
+    pub fn is_password(&self) -> bool {
+        matches!(self, Self::Scopes(s) if s.iter().any(|&s| s == IS_PASSWORD.0 || s == IS_NUMERIC_PASSWORD.0))
+    }
+}
+
+/// 입력칸의 입력 범위를 읽는다(동기 읽기 세션).
+#[implement(ITfEditSession)]
+pub struct ReadInputScope {
+    context: ITfContext,
+    out: Rc<RefCell<ScopeRead>>,
+}
+
+impl ReadInputScope {
     pub fn new(context: ITfContext) -> Self {
         Self { context, out: Rc::default() }
     }
 
-    pub fn result(&self) -> Rc<Cell<Option<bool>>> {
+    pub fn result(&self) -> Rc<RefCell<ScopeRead>> {
         self.out.clone()
+    }
+
+    unsafe fn read(&self, ec: u32) -> ScopeRead {
+        let failed = |stage| move |_| ScopeRead::Failed(stage);
+        let run = || -> std::result::Result<ScopeRead, ScopeRead> {
+            unsafe {
+                let mut selection = [TF_SELECTION::default()];
+                let mut fetched = 0;
+                self.context
+                    .GetSelection(ec, TF_DEFAULT_SELECTION, &mut selection, &mut fetched)
+                    .map_err(failed("selection"))?;
+                let range = ManuallyDrop::into_inner(std::mem::take(&mut selection[0].range));
+                let Some(range) = range.filter(|_| fetched > 0) else { return Ok(ScopeRead::NoSelection) };
+                let property =
+                    self.context.GetAppProperty(&GUID_PROP_INPUTSCOPE).map_err(failed("property"))?;
+                let value = property.GetValue(ec, &range).map_err(failed("value"))?;
+                let Ok(unknown) = IUnknown::try_from(&value) else { return Ok(ScopeRead::Empty) };
+                let scope: ITfInputScope = unknown.cast().map_err(failed("interface"))?;
+                let mut scopes: *mut InputScope = std::ptr::null_mut();
+                let mut count = 0u32;
+                scope.GetInputScopes(&mut scopes, &mut count).map_err(failed("scopes"))?;
+                if scopes.is_null() {
+                    return Ok(ScopeRead::Scopes(Vec::new()));
+                }
+                let list = std::slice::from_raw_parts(scopes, count as usize).iter().map(|s| s.0).collect();
+                CoTaskMemFree(Some(scopes as *const std::ffi::c_void));
+                Ok(ScopeRead::Scopes(list))
+            }
+        };
+        run().unwrap_or_else(|e| e)
     }
 }
 
-impl ITfEditSession_Impl for ReadPasswordScope_Impl {
+impl ITfEditSession_Impl for ReadInputScope_Impl {
     fn DoEditSession(&self, ec: u32) -> Result<()> {
         guarded(
             || Err(E_UNEXPECTED.into()),
-            || unsafe {
-                let mut selection = [TF_SELECTION::default()];
-                let mut fetched = 0;
-                self.context.GetSelection(ec, TF_DEFAULT_SELECTION, &mut selection, &mut fetched)?;
-                let range = ManuallyDrop::into_inner(std::mem::take(&mut selection[0].range));
-                let Some(range) = range.filter(|_| fetched > 0) else {
-                    self.out.set(Some(false));
-                    return Ok(());
-                };
-                let property = self.context.GetAppProperty(&GUID_PROP_INPUTSCOPE)?;
-                let value = property.GetValue(ec, &range)?;
-                let Ok(unknown) = IUnknown::try_from(&value) else {
-                    self.out.set(Some(false));
-                    return Ok(());
-                };
-                let scope: ITfInputScope = unknown.cast()?;
-                let mut scopes: *mut InputScope = std::ptr::null_mut();
-                let mut count = 0u32;
-                scope.GetInputScopes(&mut scopes, &mut count)?;
-                let password = !scopes.is_null()
-                    && std::slice::from_raw_parts(scopes, count as usize)
-                        .iter()
-                        .any(|s| *s == IS_PASSWORD || *s == IS_NUMERIC_PASSWORD);
-                if !scopes.is_null() {
-                    CoTaskMemFree(Some(scopes as *const std::ffi::c_void));
-                }
-                self.out.set(Some(password));
+            || {
+                *self.out.borrow_mut() = unsafe { self.read(ec) };
                 Ok(())
             },
         )

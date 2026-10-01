@@ -36,7 +36,7 @@ use windows::core::{
     BOOL, ComObject, GUID, HRESULT, IUnknown, IUnknownImpl, Interface, Ref, Result, implement,
 };
 
-use crate::edit::{ApplyOps, Attrs, EndComposition, Measure, ReadPasswordScope, Slot, UiHook};
+use crate::edit::{ApplyOps, Attrs, EndComposition, Measure, ReadInputScope, ScopeRead, Slot, UiHook};
 use crate::guard::{guarded, poisoned};
 use crate::keys::{self, Clock};
 use crate::langbar::ModeButton;
@@ -78,8 +78,8 @@ pub struct TextService {
     clock: RefCell<Clock>,
     /// 조합이 밖에서 끝났는데 그때 엔진을 빌릴 수 없었다(재진입). 다음 키 앞에서 엔진 조합을 버린다.
     terminated: Cell<bool>,
-    /// 지난번에 읽은 "비밀번호 칸"(입력 범위). 조합 중에는 입력칸이 그대로라 다시 읽지 않는다.
-    password: Cell<bool>,
+    /// 지난번에 읽은 입력 범위. 조합 중에는 입력칸이 그대로라 다시 읽지 않는다.
+    scope: RefCell<ScopeRead>,
     /// 지난 키의 입력칸 종류(실제 쪽에서 문서를 고칠 때 쓴다).
     field: Cell<Field>,
     /// 후보창과 모드 HUD(편집 세션이 자리를 잰 뒤 맞춘다).
@@ -123,21 +123,46 @@ impl TextService {
             seen: RefCell::new(None),
             clock: RefCell::new(Clock::default()),
             terminated: Cell::new(false),
-            password: Cell::new(false),
+            scope: RefCell::new(ScopeRead::NotRun),
             field: Cell::new(Field::Normal),
             screen: Rc::new(RefCell::new(Screen::default())),
         }
     }
 }
 
-/// 입력칸 종류([`TextService_Impl::classify`]).
+/// 입력칸 종류([`decide`]).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Field {
     Normal,
     /// 입력기가 글자를 바꾸면 안 되는 곳(읽기 전용, 앱이 입력기를 끈 문맥, 웹 페이지 본문, 문맥 없음): 키를 넘긴다.
+    /// 언어 전환 탭은 된다(갇히지 않게).
     Closed,
-    /// 비밀번호 칸: 모드와 상관없이 Graphite로 바로 확정한다.
+    /// 비밀번호 칸: 모드와 상관없이 Graphite로 바로 확정한다(사용자 결정 "비밀번호도 Graphite").
     Password,
+}
+
+/// 입력칸 종류를 TSF에서 읽은 것으로 정한다. 둘째 값은 근거(개발자 기록).
+/// - 읽기 전용이면 닫힌 칸. Chromium(윈도우 11)의 페이지 본문 문서는 빈 텍스트 저장소가 읽기 전용이라고 알린다.
+/// - 입력 범위가 IS_PASSWORD·IS_NUMERIC_PASSWORD면 비밀번호 칸(Firefox 등).
+/// - 입력기 끔(GUID_COMPARTMENT_KEYBOARD_DISABLED)과 빈 문맥(GUID_COMPARTMENT_EMPTYCONTEXT)이 둘 다 켜졌는데 선택 영역이
+///   읽히면 비밀번호 칸: Chromium은 비밀번호 칸 문서에 둘을 켜고(`ui/base/ime/win/tsf_bridge.cc` InitializeDisabledContext),
+///   입력 범위는 IS_PASSWORD가 아니라 IS_PRIVATE로 준다(`tsf_input_scope.cc`). Firefox가 둘을 켜는 입력칸 아닌 곳
+///   (페이지 본문)은 선택 영역을 주지 않는다.
+/// - 그 밖에 하나라도 켜졌으면 닫힌 칸.
+fn decide(readonly: bool, scope: &ScopeRead, disabled: bool, empty: bool) -> (Field, &'static str) {
+    if readonly {
+        (Field::Closed, "readonly")
+    } else if scope.is_password() {
+        (Field::Password, "scope")
+    } else if disabled && empty && scope.readable() {
+        (Field::Password, "disabled+empty")
+    } else if disabled {
+        (Field::Closed, "disabled")
+    } else if empty {
+        (Field::Closed, "empty")
+    } else {
+        (Field::Normal, "")
+    }
 }
 
 /// 문서를 언제 고치는지([`TextService_Impl::apply`]).
@@ -346,7 +371,8 @@ impl TextService_Impl {
             self.settle_context(context);
         }
         // 문맥이 없으면(입력칸이 없는 창, 입력기를 끈 창: 게임, Win32 비밀번호 칸) 글자를 넣을 곳이 없다: 키를 넘긴다.
-        let field = context.map_or(Field::Closed, |c| self.classify(c, down && !self.has_composition()));
+        let (field, why) = context
+            .map_or((Field::Closed, "no context"), |c| self.classify(c, down && !self.has_composition()));
         self.field.set(field);
         let ctx = Context {
             secure_field: field != Field::Normal,
@@ -366,12 +392,14 @@ impl TextService_Impl {
             }
             if a.log {
                 debug_log(&format!(
-                    "key {:?} down={} mods={:?} repeat={} field={:?} -> eat={} commit={} preedit={:?} mode={:?}",
+                    "key {:?} down={} mods={:?} repeat={} field={:?}({}) scope={:?} -> eat={} commit={} preedit={:?} mode={:?}",
                     ev.key,
                     ev.down,
                     ev.mods,
                     ev.repeat,
                     field,
+                    why,
+                    self.scope.try_borrow().map(|s| s.clone()).unwrap_or_default(),
                     out.consumed,
                     out.commit.chars().count(),
                     out.preedit.as_ref().map(|p| p.text.chars().count()),
@@ -387,24 +415,17 @@ impl TextService_Impl {
         Some((out, false))
     }
 
-    /// 이 입력칸이 어떤 칸인지.
-    /// - 입력 범위가 IS_PASSWORD·IS_NUMERIC_PASSWORD면 [`Field::Password`]: 모드와 상관없이 Graphite로 바로 확정한다
-    ///   (사용자 결정 "비밀번호도 Graphite", 윈도우는 비밀번호 칸에도 글자를 넣을 수 있다). Chromium은 비밀번호 칸에
-    ///   입력기 끔·빈 문맥 칸을 켜지만, 입력칸이 아닌 곳(윈도우 11, 페이지 본문)에도 똑같이 켜서 입력 범위로만 가린다.
-    /// - 읽기 전용(TF_SD_READONLY), 입력기 끔(GUID_COMPARTMENT_KEYBOARD_DISABLED), 빈 문맥(GUID_COMPARTMENT_EMPTYCONTEXT)이면
-    ///   [`Field::Closed`]: 키를 모두 앱에 넘긴다(웹 단축키 등). 언어 전환 탭은 된다(갇히지 않게).
+    /// 이 입력칸이 어떤 칸인지([`decide`]). 둘째 값은 근거(개발자 기록).
     ///
     /// 입력 범위는 편집 쿠키가 있어야 읽혀서 `read_scope`일 때만(조합이 없는 키 눌림) 동기 읽기 세션으로 읽고,
     /// 아니면 지난 값을 쓴다(조합 중에는 입력칸이 그대로다).
-    fn classify(&self, context: &ITfContext, read_scope: bool) -> Field {
-        if unsafe { context.GetStatus() }.is_ok_and(|s| s.dwDynamicFlags & TF_SD_READONLY != 0) {
-            return Field::Closed;
-        }
-        if read_scope && let Some(password) = self.read_password_scope(context) {
-            self.password.set(password);
-        }
-        if self.password.get() {
-            return Field::Password;
+    fn classify(&self, context: &ITfContext, read_scope: bool) -> (Field, &'static str) {
+        let readonly = unsafe { context.GetStatus() }.is_ok_and(|s| s.dwDynamicFlags & TF_SD_READONLY != 0);
+        if read_scope && !readonly {
+            let read = self.read_input_scope(context);
+            if let Ok(mut scope) = self.scope.try_borrow_mut() {
+                *scope = read;
+            }
         }
         let flag = |guid: &GUID| {
             context
@@ -414,20 +435,23 @@ impl TextService_Impl {
                 .and_then(|c| get_i32(&c))
                 .is_some_and(|v| v != 0)
         };
-        if flag(&GUID_COMPARTMENT_KEYBOARD_DISABLED) || flag(&GUID_COMPARTMENT_EMPTYCONTEXT) {
-            return Field::Closed;
-        }
-        Field::Normal
+        let (disabled, empty) =
+            (flag(&GUID_COMPARTMENT_KEYBOARD_DISABLED), flag(&GUID_COMPARTMENT_EMPTYCONTEXT));
+        let Ok(scope) = self.scope.try_borrow() else { return (Field::Closed, "busy") };
+        decide(readonly, &scope, disabled, empty)
     }
 
-    fn read_password_scope(&self, context: &ITfContext) -> Option<bool> {
-        let client_id = self.state.try_borrow().ok().and_then(|s| s.as_ref().map(|a| a.client_id))?;
-        let session = ReadPasswordScope::new(context.clone());
+    fn read_input_scope(&self, context: &ITfContext) -> ScopeRead {
+        let Some(client_id) = self.state.try_borrow().ok().and_then(|s| s.as_ref().map(|a| a.client_id))
+        else {
+            return ScopeRead::NotRun;
+        };
+        let session = ReadInputScope::new(context.clone());
         let result = session.result();
         let session: ITfEditSession = session.into();
         match unsafe { context.RequestEditSession(client_id, &session, TF_ES_SYNC | TF_ES_READ) } {
-            Ok(hr) if hr.is_ok() => result.get(),
-            _ => None,
+            Ok(hr) if hr.is_ok() => result.take(),
+            _ => ScopeRead::NotRun,
         }
     }
 
@@ -787,7 +811,9 @@ impl ITfThreadMgrEventSink_Impl for TextService_Impl {
         guarded(
             || Ok(()),
             || {
-                self.password.set(false);
+                if let Ok(mut scope) = self.scope.try_borrow_mut() {
+                    *scope = ScopeRead::NotRun;
+                }
                 if self.has_composition() {
                     self.end_composition();
                 }
@@ -837,6 +863,31 @@ mod tests {
             assert_eq!((Mode::from_i32(v & 0xF), Mode::from_i32(v >> 4 & 0xF)), (Some(m), Some(l)));
         }
         assert_eq!(conversion_value(Mode::Ja), 9);
+    }
+
+    #[test]
+    fn fields_follow_what_the_app_reports() {
+        use windows::Win32::UI::TextServices::IS_PASSWORD;
+        let field = |readonly, scope: &ScopeRead, disabled, empty| decide(readonly, scope, disabled, empty).0;
+        let password_scope = ScopeRead::Scopes(vec![IS_PASSWORD.0]);
+        // Firefox 비밀번호 칸: 입력기 끔 + 입력 범위 IS_PASSWORD.
+        assert_eq!(field(false, &password_scope, true, false), Field::Password);
+        // Chromium 비밀번호 칸(Edge 기록): 입력기 끔·빈 문맥을 켜고 입력 범위는 IS_PRIVATE(61), 숫자 칸은 IS_DIGITS(28)도.
+        assert_eq!(field(false, &ScopeRead::Scopes(vec![61]), true, true), Field::Password);
+        assert_eq!(field(false, &ScopeRead::Scopes(vec![61, 28]), true, true), Field::Password);
+        assert_eq!(field(false, &ScopeRead::Empty, true, true), Field::Password);
+        // Chromium 페이지 본문(윈도우 11): 빈 텍스트 저장소가 읽기 전용이라고 알린다.
+        assert_eq!(field(true, &ScopeRead::NotRun, true, true), Field::Closed);
+        // Firefox 페이지 본문(기록): 둘 다 켰고 세션은 돌지만 선택 영역을 주지 않는다. 세션이 돌았는지만 본 판은 이것을
+        // 비밀번호 칸으로 봐서 YouTube 단축키를 먹었다.
+        assert_eq!(field(false, &ScopeRead::Failed("selection"), true, true), Field::Closed);
+        assert_eq!(field(false, &ScopeRead::NotRun, true, true), Field::Closed);
+        // 입력기만 끈 칸, 빈 문맥만 켠 칸.
+        assert_eq!(field(false, &ScopeRead::Empty, true, false), Field::Closed);
+        assert_eq!(field(false, &ScopeRead::Empty, false, true), Field::Closed);
+        // 보통 칸(입력 범위 IS_DEFAULT).
+        assert_eq!(field(false, &ScopeRead::Scopes(vec![0]), false, false), Field::Normal);
+        assert_eq!(field(false, &ScopeRead::Failed("value"), false, false), Field::Normal);
     }
 
     #[test]

@@ -1,0 +1,48 @@
+<!doctype html>
+<!-- 입력칸 시험 페이지: 브라우저에서 열어 입력기가 칸을 어떻게 가리는지 본다(docs/win-checklist.md 18~21).
+     비밀번호 칸은 모드와 상관없이 Graphite, 보통 칸은 그 모드. 개발자 기록 키 줄의 field=·scope=와 같이 본다. -->
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cssgsg 입력칸 시험</title>
+<style>
+  :root { color-scheme: light dark; --bg: #fafafa; --fg: #1d1d1f; --muted: #6e6e73; --line: #d2d2d7; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1c1c1e; --fg: #f5f5f7; --muted: #a1a1a6; --line: #3a3a3c; } }
+  body { margin: 0; padding: 24px 16px; background: var(--bg); color: var(--fg); font: 16px/1.5 "Segoe UI", "Malgun Gothic", sans-serif; }
+  main { max-width: 560px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p { color: var(--muted); margin: 0 0 20px; }
+  label { display: block; margin: 18px 0 6px; font-weight: 600; }
+  label span { font-weight: 400; color: var(--muted); }
+  .row { display: flex; gap: 8px; }
+  input, textarea { flex: 1; width: 100%; box-sizing: border-box; padding: 8px 10px; font: inherit; color: inherit;
+    background: transparent; border: 1px solid var(--line); border-radius: 6px; }
+  button { font: inherit; padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; }
+</style>
+</head>
+<body>
+<main>
+  <h1>cssgsg 입력칸 시험</h1>
+  <p>칸마다 ㅊ 모드로 <b>j l w w i</b>를 칩니다. 비밀번호 칸은 hello(Graphite)가, 나머지는 한글이 들어가야 합니다.</p>
+
+  <label for="a">1. 비밀번호 <span>(type=password)</span></label>
+  <input id="a" type="password" autocomplete="off">
+
+  <label for="b">2. 보기 단추가 있는 비밀번호 <span>(누르면 type=text로 바뀝니다)</span></label>
+  <div class="row">
+    <input id="b" type="password" autocomplete="off">
+    <button type="button" onclick="const f = document.getElementById('b'); f.type = f.type === 'password' ? 'text' : 'password'; this.textContent = f.type === 'password' ? '보기' : '숨기기';">보기</button>
+  </div>
+
+  <label for="c">3. 숫자 비밀번호 <span>(type=password inputmode=numeric)</span></label>
+  <input id="c" type="password" inputmode="numeric" autocomplete="off">
+
+  <label for="d">4. 보통 칸 <span>(type=text)</span></label>
+  <input id="d" type="text" autocomplete="off">
+
+  <label for="e">5. 여러 줄 <span>(textarea)</span></label>
+  <textarea id="e" rows="3"></textarea>
+</main>
+</body>
+</html>

@@ -60,7 +60,7 @@ mozc/       Mozc C API 래퍼(cssgsg용, libcssgsg_mozc.dylib). 소스·빌드�
 .github/    Mozc 엔진 워크플로(mozc-component.yml): upstream Mozc가 바뀌면 GitHub에서 엔진을 빌드해 낸다
 tools/      ffi-smoke(C 헤더 확인), ohi-oracle(오이 차분 비교), crosscheck(배열 데이터·키 코드 표 교차 검증),
             mac(pkg·릴리스·서명 스크립트, 셸·업데이트·설정 앱·Mozc 엔진 스모크 테스트), mozc(엔진 빌드·묶기),
-            win(입력기 개발용 설치·제거), learn(학습 페이지 빌드), practice(타자 연습 페이지 빌드·연습 글)
+            win(입력기 개발용 설치·제거, 입력칸 시험 페이지), learn(학습 페이지 빌드), practice(타자 연습 페이지 빌드·연습 글)
 docs/       verification.md(검증 현황), mac-checklist.md·win-checklist.md(설치 뒤 확인 목록), releases/(릴리스 노트)
 learn/      배열 학습 페이지(설정 앱 학습 탭). template.html → tools/learn/build.mjs → index.html
 practice/   타자 연습 페이지(세 언어, 단일 HTML). template.html + tools/practice/*.txt → tools/practice/build.mjs → index.html

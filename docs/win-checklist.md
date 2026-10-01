@@ -23,10 +23,10 @@
 | 15 | M3c | ㅊ | `u`(ㅁ) 후 오른쪽 Ctrl 톡, 6 | 기호표 후보창(아래에 페이지 번호), 6으로 ※ | 2026-10-02, VS Code |
 | 16 | M3c | 月 | `c k e u w l` 후 Space, Tab | 후보창이 뜨고 Tab에 격자로 펼쳐진다(Mozc 전이라 히라가나·가타카나 후보) | 2026-10-02, VS Code |
 | 17 | M3c | ㅊ | `k r e` 후 오른쪽 Ctrl을 누른 채 C | 한자가 아니라 국이 확정되고 Ctrl+C가 앱으로 간다 | |
-| 18 | M3c | Edge·Chrome 로그인 페이지의 비밀번호 칸 | ㅊ 모드에서 `j l w w i`, 눈 모양 단추로 보기 | hello (모드와 상관없이 Graphite, 조합·밑줄 없음) | |
+| 18 | M3c | Edge 비밀번호 칸([시험 페이지](../tools/win/field-test.html) 1~3번) | ㅊ 모드에서 `j l w w i` | hello (모드와 상관없이 Graphite, 조합·밑줄 없음). 보기(눈)로 드러낸 뒤에는 Edge가 보통 칸으로 알려서 그 모드로 쳐진다(Firefox는 드러내도 Graphite) | 2026-10-02, Edge·Firefox |
 | 19 | M3c | 비밀번호 칸 | 글자를 친 뒤 Ctrl+A, Ctrl+C, Ctrl+V | 키캡(쿼티)대로 전체 선택·복사·붙여넣기 | 2026-10-02, Firefox |
 | 20 | M3c | Firefox 비밀번호 칸 | 月 모드에서 `j l w w i 1` | hello1 | 2026-10-02, Firefox |
-| 21 | M3c | 브라우저 페이지 본문(입력칸 밖, 예: YouTube 동영상) | ㅊ 모드에서 `k`, `l` | 사이트 단축키가 키캡(쿼티)대로(k 재생·멈춤, l 10초 앞으로). 글자가 조합되지 않는다 | 2026-10-02, Firefox |
+| 21 | M3c | 브라우저 페이지 본문(입력칸 밖, 예: YouTube 동영상) | ㅊ 모드에서 `k`, `l` | 사이트 단축키가 키캡(쿼티)대로(k 재생·멈춤, l 10초 앞으로). 글자가 조합되지 않는다 | 2026-10-02, Firefox·Edge |
 | 22 | M3c | ㅊ, Discord·Claude 앱 입력칸 | `j f s m t d` 치자마자 Shift+Enter, 여러 번 빠르게(보내지 말고 지운다) | 매번 안녕 뒤에 줄바꿈. 녕이 사라지거나 줄바꿈 뒤로 가지 않는다(맥은 느린 맥북에서 대기가 필요했다) | |
 | 23 | M3c | ㅊ, Discord | `j f s m t d` 치자마자 Enter | 안녕이 통째로 전송되고 입력칸에 글자가 남지 않는다 | |
 | 24 | M3c | 月, Discord·Claude 앱 입력칸 | `c k e u w l` 치자마자 Shift+Enter | にほんご 뒤에 줄바꿈 | |
