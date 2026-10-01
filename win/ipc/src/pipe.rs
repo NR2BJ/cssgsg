@@ -77,13 +77,15 @@ pub fn pipe_name(sid: &str, tag: &str) -> String {
 
 /// 호스트가 파이프에 거는 보안(SDDL). 앱 컨테이너 안의 입력기는 사용자 SID와 컨테이너 쪽(AC) 검사를 둘 다 통과해야 해서
 /// 둘 다 준다. 무결성 표시는 낮음(LW)이라 앱 컨테이너(낮은 무결성)도 쓸 수 있다.
+/// 주인(O:)은 사용자로 못 박는다: 관리자 권한으로 뜬 호스트는 기본 주인이 Administrators라 입력기의 주인 확인
+/// (이 사용자의 파이프인지)에 걸린다. 2026-10-02 GitHub 러너(관리자로 돈다)의 호스트 시험이 모두 그렇게 실패했다.
 pub fn pipe_sddl(sid: &str) -> String {
-    format!("D:P(A;;GA;;;SY)(A;;GA;;;{sid})(A;;GA;;;AC)S:(ML;;NW;;;LW)")
+    format!("O:{sid}D:P(A;;GA;;;SY)(A;;GA;;;{sid})(A;;GA;;;AC)S:(ML;;NW;;;LW)")
 }
 
 /// 이 프로세스가 호스트를 띄워도 되는지. 앱 컨테이너(스토어 앱, 시작 메뉴 검색) 안에서 띄우면 호스트가 그 컨테이너를
-/// 물려받아 학습 폴더에 쓰지 못하고, 관리자 권한 앱에서 띄우면 호스트도 관리자가 되어 보통 앱이 쓰지 못한다
-/// (파이프 주인이 Administrators가 된다). 그런 앱은 이미 떠 있는 호스트만 쓴다.
+/// 물려받아 학습 폴더에 쓰지 못하고, 관리자 권한 앱에서 띄우면 쓸데없이 관리자 권한 호스트가 된다(보통 앱의 요청을
+/// 관리자 프로세스가 받게 된다). 그런 앱은 이미 떠 있는 호스트만 쓴다.
 pub fn may_spawn_host() -> bool {
     let container = token_info(TokenIsAppContainer).is_none_or(|b| b[0] as u32 != 0);
     // SAFETY: TokenElevation 버퍼는 TOKEN_ELEVATION이다.

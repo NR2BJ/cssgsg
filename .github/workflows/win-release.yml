@@ -49,7 +49,7 @@ jobs:
           if ($LASTEXITCODE) { exit 1 }
           cargo clippy --workspace --all-targets -- -D warnings
           if ($LASTEXITCODE) { exit 1 }
-          cargo test --workspace
+          cargo test --workspace --no-fail-fast
           if ($LASTEXITCODE) { exit 1 }
 
       - name: Resolve Mozc commit
