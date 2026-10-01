@@ -1,14 +1,14 @@
 //! Mozc 변환기(일본어 한자). `mozc` 기능을 켜면 쓴다.
 //!
-//! Mozc는 입력기 프로세스 안에서 돈다(mozc_server 없음). 엔진은 libcssgsg_mozc.dylib(mozc/cssgsg C API)이고
+//! 맥: Mozc는 입력기 프로세스 안에서 돈다(mozc_server 없음). 엔진은 libcssgsg_mozc.dylib(mozc/cssgsg C API)이고
 //! 실행 중에 읽는다(dlopen). 그래서 입력기를 새로 내지 않아도 더 새 Mozc로 바꿀 수 있다(NRIME 1.0.12와 같다).
 //! 어느 엔진(앱에 든 것, 입력기가 받은 더 새것)을 읽을지는 셸이 정하고(mac/cssgsg/Mozc), 여기서는 받은 경로를 읽는다.
+//! 윈도우: 같은 C API를 cssgsg_mozc.dll로 빌드하고, 사용자당 하나인 엔진 호스트가 읽는다(LoadLibraryExW, CONCEPT §6.3).
 //!
 //! 변환할 때마다 코어가 가진 가나 읽기를 통째로 넘기고, 결과 화면(문절·후보)을 JSON으로 받는다.
-//! 엔진 준비 10~20ms, 변환 1ms 안쪽(2026-09-29 실측).
-//! dlopen은 macOS·리눅스의 libSystem/libc에 있어서 따로 의존성 없이 직접 선언한다.
+//! 엔진 준비 10~20ms, 변환 1ms 안쪽(2026-09-29 실측). 경로와 읽기는 UTF-8로 넘긴다(윈도우의 Mozc도 UTF-8로 받는다).
 
-use std::ffi::{CStr, CString, c_char, c_int, c_void};
+use std::ffi::{CStr, CString, c_char, c_void};
 
 use serde::Deserialize;
 
@@ -22,16 +22,93 @@ struct RawMozc {
     _private: [u8; 0],
 }
 
-const RTLD_NOW: c_int = 0x2;
-#[cfg(target_os = "macos")]
-const RTLD_LOCAL: c_int = 0x4;
-#[cfg(not(target_os = "macos"))]
-const RTLD_LOCAL: c_int = 0;
+/// 엔진 라이브러리 읽기. dlopen은 macOS·리눅스의 libSystem/libc에, LoadLibraryExW는 kernel32에 있어서
+/// 따로 의존성 없이 직접 선언한다.
+#[cfg(unix)]
+mod sys {
+    use std::ffi::{CStr, CString, c_char, c_int, c_void};
 
-unsafe extern "C" {
-    fn dlopen(path: *const c_char, mode: c_int) -> *mut c_void;
-    fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
-    fn dlerror() -> *const c_char;
+    const RTLD_NOW: c_int = 0x2;
+    #[cfg(target_os = "macos")]
+    const RTLD_LOCAL: c_int = 0x4;
+    #[cfg(not(target_os = "macos"))]
+    const RTLD_LOCAL: c_int = 0;
+
+    unsafe extern "C" {
+        fn dlopen(path: *const c_char, mode: c_int) -> *mut c_void;
+        fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
+        fn dlerror() -> *const c_char;
+    }
+
+    /// 라이브러리를 읽는다. 실패하면 까닭.
+    pub fn open(library: &str) -> Result<*mut c_void, String> {
+        let path = CString::new(library).map_err(|_| "엔진 경로에 NUL이 있다".to_string())?;
+        // SAFETY: NUL로 끝나는 경로. 라이브러리의 초기화 코드가 돈다(우리가 빌드한 Mozc).
+        let handle = unsafe { dlopen(path.as_ptr(), RTLD_NOW | RTLD_LOCAL) };
+        if handle.is_null() {
+            // SAFETY: dlerror는 NULL이거나 NUL로 끝나는 문자열을 돌려준다. 곧바로 복사한다.
+            let e = unsafe { dlerror() };
+            let reason = if e.is_null() {
+                "?".into()
+            } else {
+                unsafe { CStr::from_ptr(e) }.to_string_lossy().into_owned()
+            };
+            return Err(format!("dlopen: {reason}"));
+        }
+        Ok(handle)
+    }
+
+    /// 읽은 라이브러리에서 이름으로 찾는다. 없으면 NULL.
+    pub fn symbol(handle: *mut c_void, name: &CStr) -> *mut c_void {
+        // SAFETY: open이 돌려준 핸들과 NUL로 끝나는 이름.
+        unsafe { dlsym(handle, name.as_ptr()) }
+    }
+}
+
+#[cfg(windows)]
+mod sys {
+    use std::ffi::{CStr, c_char, c_void};
+    use std::os::windows::ffi::OsStrExt;
+
+    /// 엔진이 기대는 DLL은 엔진 폴더와 System32에서만 찾는다(앱 폴더나 PATH에서 바꿔치기된 DLL을 읽지 않게).
+    const LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR: u32 = 0x100;
+    const LOAD_LIBRARY_SEARCH_SYSTEM32: u32 = 0x800;
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn LoadLibraryExW(name: *const u16, file: *mut c_void, flags: u32) -> *mut c_void;
+        fn GetProcAddress(module: *mut c_void, name: *const c_char) -> *mut c_void;
+        fn GetLastError() -> u32;
+    }
+
+    /// 라이브러리를 읽는다. 실패하면 까닭(윈도우 오류 번호).
+    pub fn open(library: &str) -> Result<*mut c_void, String> {
+        if library.contains('\0') {
+            return Err("엔진 경로에 NUL이 있다".into());
+        }
+        // LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR은 완전한 경로만 받는다(`/`·`..`도 여기서 푼다).
+        let full = std::path::absolute(library).map_err(|e| format!("LoadLibraryExW: {e}"))?;
+        let wide: Vec<u16> = full.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+        // SAFETY: NUL로 끝나는 UTF-16 경로. 라이브러리의 초기화 코드가 돈다(우리가 빌드한 Mozc).
+        let handle = unsafe {
+            LoadLibraryExW(
+                wide.as_ptr(),
+                std::ptr::null_mut(),
+                LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32,
+            )
+        };
+        if handle.is_null() {
+            // SAFETY: 인자 없는 함수. 바로 앞 호출의 오류 번호.
+            return Err(format!("LoadLibraryExW: 오류 {}", unsafe { GetLastError() }));
+        }
+        Ok(handle)
+    }
+
+    /// 읽은 라이브러리에서 이름으로 찾는다. 없으면 NULL.
+    pub fn symbol(handle: *mut c_void, name: &CStr) -> *mut c_void {
+        // SAFETY: open이 돌려준 모듈 핸들과 NUL로 끝나는 이름.
+        unsafe { GetProcAddress(handle, name.as_ptr()) }
+    }
 }
 
 /// 엔진의 C API(cssgsg_mozc.h). 읽은 엔진은 내리지 않는다: C++ 코드를 내리는 것은 안전하지 않다.
@@ -48,21 +125,14 @@ struct Api {
     version: unsafe extern "C" fn() -> *const c_char,
 }
 
-fn last_dl_error() -> String {
-    // SAFETY: dlerror는 NULL이거나 NUL로 끝나는 문자열을 돌려준다. 곧바로 복사한다.
-    let e = unsafe { dlerror() };
-    if e.is_null() { "?".into() } else { unsafe { CStr::from_ptr(e) }.to_string_lossy().into_owned() }
-}
-
 /// 읽은 라이브러리에서 C 함수 `name`을 찾는다.
 ///
 /// # Safety
-/// `handle`은 dlopen이 돌려준 핸들, `T`는 그 함수의 모양(`unsafe extern "C" fn`)이어야 한다.
+/// `handle`은 [`sys::open`]이 돌려준 핸들, `T`는 그 함수의 모양(`unsafe extern "C" fn`)이어야 한다.
 unsafe fn function<T: Copy>(handle: *mut c_void, name: &str) -> Result<T, String> {
     assert_eq!(size_of::<T>(), size_of::<*mut c_void>());
     let c = CString::new(name).map_err(|_| "이름에 NUL이 있다".to_string())?;
-    // SAFETY: 살아 있는 핸들과 NUL로 끝나는 이름.
-    let p = unsafe { dlsym(handle, c.as_ptr()) };
+    let p = sys::symbol(handle, &c);
     if p.is_null() {
         return Err(format!("C API에 {name}이 없다"));
     }
@@ -73,12 +143,7 @@ unsafe fn function<T: Copy>(handle: *mut c_void, name: &str) -> Result<T, String
 impl Api {
     /// 엔진 라이브러리를 읽고 C API를 찾는다. 판이 다르면 거절한다.
     fn load(library: &str) -> Result<&'static Api, String> {
-        let path = CString::new(library).map_err(|_| "엔진 경로에 NUL이 있다".to_string())?;
-        // SAFETY: NUL로 끝나는 경로. 라이브러리의 초기화 코드가 돈다(우리가 빌드한 Mozc).
-        let handle = unsafe { dlopen(path.as_ptr(), RTLD_NOW | RTLD_LOCAL) };
-        if handle.is_null() {
-            return Err(format!("dlopen: {}", last_dl_error()));
-        }
+        let handle = sys::open(library)?;
         // SAFETY: 판을 알려 주는 함수의 모양은 판이 바뀌어도 그대로다.
         let abi: unsafe extern "C" fn() -> i32 = unsafe { function(handle, "cssgsg_mozc_abi_version")? };
         // SAFETY: 인자 없는 함수.
@@ -119,8 +184,9 @@ pub struct MozcConverter {
 }
 
 impl MozcConverter {
-    /// 엔진을 읽고 만든다. `library`: libcssgsg_mozc.dylib, `data`: 같이 빌드한 mozc.data,
-    /// `profile_dir`: 학습·사용자 사전 폴더(Mozc 프로세스 전체에 하나다. 마지막으로 만든 것이 쓴다).
+    /// 엔진을 읽고 만든다. `library`: libcssgsg_mozc.dylib(윈도우는 cssgsg_mozc.dll), `data`: 같이 빌드한 mozc.data,
+    /// `profile_dir`: 학습·사용자 사전 폴더(Mozc 프로세스 전체에 하나다. 마지막으로 만든 것이 쓴다). 비우면 Mozc 기본 폴더
+    /// (윈도우는 upstream Mozc와 같은 %LOCALAPPDATA%\Mozc)를 쓰니 늘 준다. 폴더는 미리 만들어 둔다(Mozc는 만들지 않는다).
     /// 만든 뒤 낱말 하나를 변환해 본다. 엔진이 읽히기만 하고 변환하지 못하면(데이터가 맞지 않는 등) 실패다.
     /// 실패하면 까닭을 돌려준다(셸이 로그에 남기고, 받은 엔진이면 다시 쓰지 않는다).
     pub fn load(library: &str, data: &str, profile_dir: &str) -> Result<Self, String> {

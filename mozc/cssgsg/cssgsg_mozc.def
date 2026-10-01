@@ -1,0 +1,14 @@
+; Exports of cssgsg_mozc.dll: the C API in cssgsg_mozc.h and nothing else, so Mozc,
+; abseil and protobuf stay private to the DLL. Same list as the -exported_symbol
+; options of libcssgsg_mozc.dylib in BUILD.bazel; change both together.
+EXPORTS
+    cssgsg_mozc_abi_version
+    cssgsg_mozc_version
+    cssgsg_mozc_new
+    cssgsg_mozc_free
+    cssgsg_mozc_start
+    cssgsg_mozc_command
+    cssgsg_mozc_commit
+    cssgsg_mozc_cancel
+    cssgsg_mozc_set_learning
+    cssgsg_mozc_reload

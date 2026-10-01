@@ -1,0 +1,119 @@
+# 윈도우용 Mozc 엔진(cssgsg_mozc.dll)을 GitHub 컴퓨터에서 빌드하고 시험해서 묶음을 아티팩트로 올린다. 손으로만 돌린다.
+# 윈도우 빌드가 자리 잡으면 mozc-component.yml에 합쳐 맥 엔진과 한 릴리스(같은 태그)로 낸다. 그때까지 릴리스는 내지 않는다.
+#
+# 빌드는 tools/mozc/build-windows.ps1(Bazel + Mozc가 받는 clang-cl), 묶음은 tools/mozc/package-component-windows.ps1.
+# 시험: 내보낸 함수가 C API뿐이고 C 런타임이 정적인지(dumpbin), 확인용 도구가 한글 폴더·가나 인자로 변환하는지,
+# 코어의 Mozc 시험(LoadLibraryExW로 읽기)까지.
+name: Mozc Windows engine
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Mozc 커밋(비우면 tools/mozc/MOZC_COMMIT)
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mozc-windows
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 150
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      # upstream windows.yaml과 같다(NDK를 찾지 않게).
+      ANDROID_NDK_HOME: ""
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Free disk space
+        run: Get-PSDrive -PSProvider FileSystem | Format-Table Name, @{ n = 'FreeGB'; e = { [math]::Round($_.Free / 1GB, 1) } }
+
+      - name: Resolve Mozc commit
+        id: commit
+        env:
+          INPUT_COMMIT: ${{ inputs.commit }}
+        run: |
+          $c = if ($env:INPUT_COMMIT) { $env:INPUT_COMMIT.Trim() } else { (Get-Content tools/mozc/MOZC_COMMIT -Raw).Trim() }
+          "commit=$c" >> $env:GITHUB_OUTPUT
+
+      - name: Restore Mozc build deps (LLVM, MSYS2)
+        uses: actions/cache@v6
+        with:
+          path: build/mozc/src/third_party_cache
+          key: mozc-win-deps-${{ steps.commit.outputs.commit }}
+          restore-keys: mozc-win-deps-
+
+      - name: Restore Bazel caches
+        uses: actions/cache@v6
+        with:
+          path: |
+            C:\bzl\disk
+            C:\bzl\repos
+          key: mozc-win-bazel-${{ steps.commit.outputs.commit }}
+          restore-keys: mozc-win-bazel-
+
+      - name: Build
+        env:
+          MOZC_COMMIT: ${{ steps.commit.outputs.commit }}
+          MOZC_BAZEL_FLAGS: --disk_cache=C:/bzl/disk --repository_cache=C:/bzl/repos
+        run: ./tools/mozc/build-windows.ps1
+
+      - name: Check exports and the static C runtime
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $dumpbin = & $vswhere -latest -products * -find 'VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe' | Select-Object -First 1
+          $dll = 'build\mozc-out\lib\cssgsg_mozc.dll'
+          $exports = & $dumpbin /nologo /exports $dll
+          $exports
+          $names = 'abi_version', 'version', 'new', 'free', 'start', 'command', 'commit', 'cancel', 'set_learning', 'reload'
+          foreach ($f in $names) { if (-not ($exports -match "\bcssgsg_mozc_$f\b")) { throw "missing export cssgsg_mozc_$f" } }
+          $exported = @($exports | Where-Object { $_ -match '^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]{8}\s+(\S+)' })
+          if ($exported.Count -ne $names.Count) { throw "expected only the $($names.Count) C API functions, got $($exported.Count)" }
+          $imports = & $dumpbin /nologo /dependents $dll
+          $imports
+          if ($imports -match '(?i)vcruntime|msvcp|ucrtbase|api-ms-win-crt') { throw 'expected the static C runtime (/MT)' }
+
+      - name: Smoke test cssgsg_mozc_main (Hangul profile folder, kana argument)
+        run: |
+          $prof = Join-Path $env:RUNNER_TEMP ('mozc-main-' + [char]0xD504 + [char]0xB85C + [char]0xD544)
+          New-Item -ItemType Directory -Force $prof | Out-Null
+          $log = Join-Path $env:RUNNER_TEMP 'mozc-main.txt'
+          $exe = (Resolve-Path build\mozc-out\bin\cssgsg_mozc_main.exe).Path
+          $data = (Resolve-Path build\mozc-out\data\mozc.data).Path
+          $reading = -join [char[]](0x306B, 0x307B, 0x3093, 0x3054)
+          $p = Start-Process $exe -ArgumentList "`"$data`"", "`"$prof`"", $reading, 'next', 'commit' -RedirectStandardOutput $log -NoNewWindow -Wait -PassThru
+          $text = [IO.File]::ReadAllText($log, [Text.Encoding]::UTF8)
+          $text
+          if ($p.ExitCode -ne 0) { throw "cssgsg_mozc_main exited with $($p.ExitCode)" }
+          if (-not $text.Contains((-join [char[]](0x65E5, 0x672C, 0x8A9E)))) { throw 'expected the candidate 日本語' }
+          if (-not (Test-Path (Join-Path $prof 'config1.db'))) { throw 'nothing written to the Hangul profile folder' }
+
+      - name: Test with cssgsg (core Mozc tests through LoadLibraryExW)
+        env:
+          CSSGSG_MOZC_LIB: ${{ github.workspace }}\build\mozc-out\lib\cssgsg_mozc.dll
+          CSSGSG_MOZC_DATA: ${{ github.workspace }}\build\mozc-out\data\mozc.data
+        run: |
+          cargo test -q -p cssgsg-core --features mozc --test mozc
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Package
+        run: ./tools/mozc/package-component-windows.ps1
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: mozc-windows-x64
+          path: |
+            build/mozc-component/cssgsg-mozc-windows-x64.zip
+            build/mozc-component/TAG
+            build/mozc-component/TITLE
+            build/mozc-out/MOZC_VERSION
+          retention-days: 14

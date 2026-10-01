@@ -48,6 +48,21 @@ mozc_cc_binary(
     deps = [":cssgsg_mozc"],
 )
 
+# 윈도우: 사용자당 하나인 엔진 호스트가 실행 중에 읽는다(LoadLibraryExW, CONCEPT §6.3). C API만 내보낸다(.def).
+# C 런타임은 명령줄의 --features=static_link_msvcrt로 정적 링크한다(tools/mozc/build-windows.ps1, 모든 대상에 같아야 한다).
+# 링크 옵션은 upstream의 mozc_tip64.dll과 같다: 기대는 DLL은 System32에서만 찾고, CET 섀도 스택을 켠다.
+mozc_cc_binary(
+    name = "cssgsg_mozc.dll",
+    linkopts = [
+        "/DEPENDENTLOADFLAG:0x800",
+        "/CETCOMPAT",
+    ],
+    linkshared = True,
+    target_compatible_with = ["@platforms//os:windows"],
+    win_def_file = "cssgsg_mozc.def",
+    deps = [":cssgsg_mozc"],
+)
+
 mozc_cc_binary(
     name = "cssgsg_mozc_main",
     srcs = ["cssgsg_mozc_main.cc"],

@@ -1,5 +1,5 @@
-//! Mozc 변환(`mozc` 기능). 엔진: CSSGSG_MOZC_LIB 또는 build/mozc-out/lib/libcssgsg_mozc.dylib,
-//! 데이터: CSSGSG_MOZC_DATA 또는 build/mozc-out/data/mozc.data(tools/mozc/build.sh).
+//! Mozc 변환(`mozc` 기능). 엔진: CSSGSG_MOZC_LIB 또는 build/mozc-out/lib/libcssgsg_mozc.dylib(윈도우 cssgsg_mozc.dll),
+//! 데이터: CSSGSG_MOZC_DATA 또는 build/mozc-out/data/mozc.data(tools/mozc/build.sh, 윈도우 build-windows.ps1).
 //! 실행: cargo test -p cssgsg-core --features mozc --test mozc
 //! 엔진 워크플로(.github/workflows/mozc-component.yml)도 새로 빌드한 엔진을 이것으로 시험한 뒤에 낸다.
 //! 학습 폴더는 테스트 전체가 임시 폴더 하나를 같이 쓴다(Mozc 설정이 프로세스 전체에 하나라서).
@@ -17,6 +17,11 @@ use cssgsg_core::{Config, Engine, Mode};
 
 static SERIAL: Mutex<()> = Mutex::new(());
 
+#[cfg(not(windows))]
+const ENGINE: &str = "lib/libcssgsg_mozc.dylib";
+#[cfg(windows)]
+const ENGINE: &str = "lib/cssgsg_mozc.dll";
+
 fn serial() -> MutexGuard<'static, ()> {
     SERIAL.lock().unwrap_or_else(|e| e.into_inner())
 }
@@ -25,8 +30,7 @@ fn serial() -> MutexGuard<'static, ()> {
 fn paths() -> (String, String, String) {
     static PROFILE: OnceLock<String> = OnceLock::new();
     let out = format!("{}/../build/mozc-out", env!("CARGO_MANIFEST_DIR"));
-    let library =
-        std::env::var("CSSGSG_MOZC_LIB").unwrap_or_else(|_| format!("{out}/lib/libcssgsg_mozc.dylib"));
+    let library = std::env::var("CSSGSG_MOZC_LIB").unwrap_or_else(|_| format!("{out}/{ENGINE}"));
     let data = std::env::var("CSSGSG_MOZC_DATA").unwrap_or_else(|_| format!("{out}/data/mozc.data"));
     let profile = PROFILE.get_or_init(|| {
         let dir = std::env::temp_dir().join(format!("cssgsg-mozc-test-{}", std::process::id()));
@@ -68,9 +72,18 @@ fn refuses_what_is_not_an_engine() {
     let _serial = serial();
     let (library, data, profile) = paths();
     // 없는 파일, Mozc가 아닌 라이브러리, 맞지 않는 데이터: 모두 까닭과 함께 실패하고 프로세스는 멀쩡하다.
-    let missing = MozcConverter::load("/nonexistent/libcssgsg_mozc.dylib", &data, &profile).err().unwrap();
-    assert!(missing.starts_with("dlopen:"), "{missing}");
-    let other = MozcConverter::load("/usr/lib/libz.1.dylib", &data, &profile).err().unwrap();
+    #[cfg(not(windows))]
+    let (nowhere, not_mozc, loader) =
+        ("/nonexistent/libcssgsg_mozc.dylib", "/usr/lib/libz.1.dylib".to_string(), "dlopen:");
+    #[cfg(windows)]
+    let (nowhere, not_mozc, loader) = (
+        r"C:\nonexistent\cssgsg_mozc.dll",
+        format!(r"{}\System32\version.dll", std::env::var("SystemRoot").unwrap()),
+        "LoadLibraryExW:",
+    );
+    let missing = MozcConverter::load(nowhere, &data, &profile).err().unwrap();
+    assert!(missing.starts_with(loader), "{missing}");
+    let other = MozcConverter::load(&not_mozc, &data, &profile).err().unwrap();
     assert!(other.contains("cssgsg_mozc_abi_version"), "{other}");
     let not_data = format!("{}/Cargo.toml", env!("CARGO_MANIFEST_DIR"));
     let bad_data = MozcConverter::load(&library, &not_data, &profile).err().unwrap();

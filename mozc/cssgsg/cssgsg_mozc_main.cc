@@ -7,6 +7,11 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <vector>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 #include "cssgsg/cssgsg_mozc.h"
 
@@ -19,7 +24,7 @@ void Print(const char* step, const char* json, double ms) {
 }
 }  // namespace
 
-int main(int argc, char** argv) {
+int Run(int argc, char** argv) {
   if (argc < 4) {
     std::fprintf(stderr, "usage: %s <mozc.data> <profile_dir> <reading> [commands...]\n", argv[0]);
     return 2;
@@ -65,3 +70,23 @@ int main(int argc, char** argv) {
   cssgsg_mozc_free(m);
   return 0;
 }
+
+#ifdef _WIN32
+// 윈도우는 main의 인자를 ANSI 코드 페이지로 준다(にほんご가 ????가 된다). 넓은 인자를 받아 UTF-8로 바꿔 넘긴다:
+// C API는 경로와 읽기를 UTF-8로 받는다.
+int wmain(int argc, wchar_t** wargv) {
+  std::vector<std::string> args;
+  for (int i = 0; i < argc; ++i) {
+    const int n = WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1, nullptr, 0, nullptr, nullptr);
+    std::string s(n > 1 ? n - 1 : 0, '\0');
+    if (n > 1) WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1, s.data(), n, nullptr, nullptr);
+    args.push_back(std::move(s));
+  }
+  std::vector<char*> argv;
+  for (std::string& s : args) argv.push_back(s.data());
+  argv.push_back(nullptr);
+  return Run(argc, argv.data());
+}
+#else
+int main(int argc, char** argv) { return Run(argc, argv); }
+#endif
