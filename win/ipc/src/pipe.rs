@@ -148,8 +148,16 @@ impl Client {
     /// 요청 하나를 보내고 답을 받는다. 연결이 없으면 잇고(호스트가 없으면 띄운 뒤 기다린다), 연결과 답 모두 `timeout` 안에.
     pub fn call(&mut self, request: &Request, timeout: Duration) -> Result<Reply, CallError> {
         let deadline = Instant::now() + timeout;
+        let was_connected = self.pipe.is_some();
         self.connect(timeout)?;
-        self.exchange(request, deadline)
+        match self.exchange(request, deadline) {
+            // 쥐고 있던 연결이 끊겼다: 호스트가 다시 떴을 수 있다(업데이트, 다시 시작). 새로 이어 한 번만 더 보낸다.
+            Err(CallError::Broken(_)) if was_connected => {
+                self.connect(deadline.saturating_duration_since(Instant::now()))?;
+                self.exchange(request, deadline)
+            }
+            other => other,
+        }
     }
 
     /// 이미 연결되어 있을 때만 보낸다(취소·사전 다시 읽기: 이것 때문에 호스트를 띄우지 않는다).

@@ -87,6 +87,23 @@ fn a_start_elsewhere_takes_over_the_conversion() {
 }
 
 #[test]
+fn a_restarted_host_is_reached_without_losing_a_call() {
+    let first = Host::start("restart");
+    let tag = first.tag.clone();
+    let mut c = first.client();
+    assert_eq!(start(&mut c, "かな"), ["かな", "カナ"]);
+    // 호스트가 다시 뜬다(업데이트 등). 쥐고 있던 연결은 끊겼지만 다음 호출은 새 호스트에 닿는다.
+    drop(first);
+    let second = Host { child: launch(&tag), tag };
+    let began = Instant::now();
+    while second.client().call(&Request::Hello { protocol: PROTOCOL }, Duration::from_millis(200)).is_err() {
+        assert!(began.elapsed() < WAIT, "새 호스트가 파이프를 만들지 않는다");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(start(&mut c, "かな"), ["かな", "カナ"]);
+}
+
+#[test]
 fn one_host_per_pipe_and_a_dead_host_is_noticed() {
     let host = Host::start("single");
     let mut c = host.client();
