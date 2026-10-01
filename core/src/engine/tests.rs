@@ -773,6 +773,30 @@ fn control_hanja_shortcut_keeps_the_composition() {
     assert_eq!(s.preedit, "");
 }
 
+#[test]
+fn windows_hanja_is_a_right_control_tap() {
+    // 윈도우 기본은 오른쪽 Control 탭(한국 키보드의 한자 키 자리). Alt 조합은 앱 메뉴가 먼저 가져가서 쓸 수 없다.
+    assert_eq!(Config::windows_default().shortcuts.hanja, crate::shortcut::Shortcut::Tap(Key::CONTROL_RIGHT));
+    let mut s = Sim::new(Engine::new(Config::windows_default()));
+    s.type_keys("kre{rc}").unwrap();
+    assert_eq!(
+        (s.text.as_str(), s.preedit.as_str()),
+        ("", "國"),
+        "Control을 눌러도 조합을 남겨 두고, 떼면 한자"
+    );
+    s.type_keys("{rc}").unwrap();
+    assert_eq!(s.preedit, "局", "변환 중에 다시 톡 하면 다음 후보");
+    s.type_keys("{ent}").unwrap();
+    assert_eq!((s.text.as_str(), s.preedit.as_str()), ("局", ""));
+    // 그 Control로 다른 단축키를 치면 그 키에서 확정하고 앱에 넘긴다(탭이 아니라 한자도 아니다).
+    s.type_keys("kre").unwrap();
+    s.chord(Key::CONTROL_RIGHT, Mods::CTRL_R, Key::C);
+    assert_eq!((s.text.as_str(), s.preedit.as_str()), ("局국", ""));
+    // 왼쪽 Control은 전처럼 누르는 순간 확정한다.
+    s.type_keys("kre{C-a}").unwrap();
+    assert_eq!((s.text.as_str(), s.preedit.as_str()), ("局국국", ""));
+}
+
 // ---------------------------------------------------------------- 빠른 탭 전환 보정
 
 /// 한국어 모드에서 오른쪽 Shift를 누른 채 j를 치고, `release`초 뒤에 Shift를 뗀다(시각은 초).

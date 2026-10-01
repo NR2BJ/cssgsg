@@ -26,21 +26,23 @@ use windows::Win32::UI::TextServices::{
     ITfDisplayAttributeProvider_Impl, ITfDocumentMgr, ITfEditSession, ITfKeyEventSink, ITfKeyEventSink_Impl,
     ITfKeystrokeMgr, ITfLangBarItemButton, ITfLangBarItemMgr, ITfSource, ITfTextInputProcessor_Impl,
     ITfTextInputProcessorEx, ITfTextInputProcessorEx_Impl, ITfThreadMgr, ITfThreadMgrEventSink,
-    ITfThreadMgrEventSink_Impl, TF_E_SYNCHRONOUS, TF_ES_ASYNCDONTCARE, TF_ES_READWRITE, TF_ES_SYNC,
+    ITfThreadMgrEventSink_Impl, TF_E_SYNCHRONOUS, TF_ES_ASYNCDONTCARE, TF_ES_READ, TF_ES_READWRITE,
+    TF_ES_SYNC,
 };
 use windows::Win32::UI::WindowsAndMessaging::GetMessageTime;
 use windows::core::{
     BOOL, ComObject, GUID, HRESULT, IUnknown, IUnknownImpl, Interface, Ref, Result, implement,
 };
 
-use crate::edit::{ApplyOps, Attrs, EndComposition, Slot};
+use crate::edit::{ApplyOps, Attrs, EndComposition, Measure, Slot, UiHook};
 use crate::guard::{guarded, poisoned};
 use crate::keys::{self, Clock};
 use crate::langbar::ModeButton;
 use crate::plan::plan;
+use crate::ui::Screen;
 use crate::{
-    GUID_COMPARTMENT_MODE, GUID_DISPLAY_ATTRIBUTE_FOCUSED, GUID_DISPLAY_ATTRIBUTE_INPUT, debug_enabled,
-    debug_log, display,
+    GUID_COMPARTMENT_MODE, GUID_DISPLAY_ATTRIBUTE_FOCUSED, GUID_DISPLAY_ATTRIBUTE_INPUT, debug_log, display,
+    read_debug_flag,
 };
 
 // 입력기 안에서는 CoCreateInstance 대신 이것으로 카테고리 관리자를 얻는다(COMLESS). windows 크레이트 바인딩에 없다.
@@ -74,6 +76,8 @@ pub struct TextService {
     clock: RefCell<Clock>,
     /// 조합이 밖에서 끝났는데 그때 엔진을 빌릴 수 없었다(재진입). 다음 키 앞에서 엔진 조합을 버린다.
     terminated: Cell<bool>,
+    /// 후보창과 모드 HUD(편집 세션이 자리를 잰 뒤 맞춘다).
+    screen: Rc<RefCell<Screen>>,
 }
 
 /// Activate부터 Deactivate까지.
@@ -113,6 +117,7 @@ impl TextService {
             seen: RefCell::new(None),
             clock: RefCell::new(Clock::default()),
             terminated: Cell::new(false),
+            screen: Rc::new(RefCell::new(Screen::default())),
         }
     }
 }
@@ -178,11 +183,11 @@ impl TextService_Impl {
                 }
             }
         };
-        let log = debug_enabled();
+        let log = read_debug_flag();
         *self.state.try_borrow_mut().map_err(|_| E_UNEXPECTED)? = Some(Active {
             thread_mgr: thread_mgr.clone(),
             client_id,
-            engine: Engine::new(Config::default()),
+            engine: Engine::new(Config::windows_default()),
             attrs,
             button: None,
             thread_cookie: None,
@@ -293,6 +298,9 @@ impl TextService_Impl {
                 let _ = a.engine.reset();
             }
             let out = a.engine.handle_key(&ev, &Context::default());
+            if let Ok(mut screen) = self.screen.try_borrow_mut() {
+                screen.queue(out.candidates.clone(), out.mode, a.engine.mode() == Mode::Ja);
+            }
             if a.log {
                 debug_log(&format!(
                     "key {:?} down={} mods={:?} repeat={} -> eat={} commit={} preedit={:?} mode={:?}",
@@ -329,6 +337,8 @@ impl TextService_Impl {
         let edits = !applied && has_edits(&out);
         if !edits {
             self.mark_applied();
+            // 문서는 그대로인데 화면만 바뀌었다(모드 HUD, 후보 페이지): 실제 쪽이 안 올 수 있으니 지금 맞춘다.
+            self.refresh_screen(context);
         }
         (down && out.consumed) || edits
     }
@@ -337,13 +347,46 @@ impl TextService_Impl {
     fn key(&self, down: bool, context: Option<&ITfContext>, wparam: WPARAM, lparam: LPARAM) -> bool {
         let Some((out, applied)) = self.process(down, context, wparam, lparam) else { return false };
         if !applied {
-            if let Some(context) = context {
+            match context {
                 // 키를 앱에 넘기면 그 키보다 먼저 고쳐야 한다(조합 중 Ctrl, 기호 키).
-                self.apply(context, &out, !(down && out.consumed));
+                Some(context) => {
+                    self.apply(context, &out, !(down && out.consumed));
+                }
+                None => self.refresh_screen(None),
             }
             self.mark_applied();
         }
         down && out.consumed
+    }
+
+    /// 편집 세션이 잰 자리로 후보창·HUD를 맞추는 고리.
+    fn ui_hook(&self) -> UiHook {
+        let screen = self.screen.clone();
+        Rc::new(move |rect| {
+            if let Ok(mut s) = screen.try_borrow_mut() {
+                s.flush(rect);
+            }
+        })
+    }
+
+    /// 문서는 고치지 않고 화면만 맞춘다. 자리는 읽기 세션으로 재고, 못 재면 마지막 자리(없으면 마우스 옆).
+    fn refresh_screen(&self, context: Option<&ITfContext>) {
+        if !self.screen.try_borrow().is_ok_and(|s| s.pending()) {
+            return;
+        }
+        let client_id = self.state.try_borrow().ok().and_then(|s| s.as_ref().map(|a| a.client_id));
+        if let (Some(context), Some(client_id)) = (context, client_id) {
+            let session: ITfEditSession =
+                Measure::new(context.clone(), self.slot.clone(), self.ui_hook()).into();
+            match unsafe { context.RequestEditSession(client_id, &session, TF_ES_ASYNCDONTCARE | TF_ES_READ) }
+            {
+                Ok(hr) if hr.is_ok() => return,
+                other => debug_log(&format!("measure session: {other:?}")),
+            }
+        }
+        if let Ok(mut s) = self.screen.try_borrow_mut() {
+            s.flush(None);
+        }
     }
 
     /// 모드가 바뀌었으면 전역 칸·입력 모드 칸·아이콘에 알린다. 일본어를 나가면 Caps Lock을 끈다.
@@ -365,6 +408,7 @@ impl TextService_Impl {
     fn apply(&self, context: &ITfContext, out: &Output, before_key: bool) -> bool {
         let ops = plan(out);
         if ops.is_empty() {
+            self.refresh_screen(Some(context));
             return true;
         }
         let Some((client_id, attrs)) =
@@ -378,6 +422,7 @@ impl TextService_Impl {
             self.slot.clone(),
             self.to_interface::<ITfCompositionSink>(),
             attrs,
+            Some(self.ui_hook()),
         );
         let ran = session.ran();
         let session: ITfEditSession = session.into();
@@ -431,6 +476,11 @@ impl TextService_Impl {
                 debug_log(&format!("end composition: {e:?}"));
             }
         }
+        self.drop_engine_composition();
+    }
+
+    /// 엔진의 조합을 버리고 후보창을 닫는다(문서의 조합은 이미 끝났다). 엔진을 빌릴 수 없으면(재진입) 다음 키 앞에서.
+    fn drop_engine_composition(&self) {
         match self.state.try_borrow_mut() {
             Ok(mut s) => {
                 if let Some(a) = s.as_mut() {
@@ -438,6 +488,9 @@ impl TextService_Impl {
                 }
             }
             Err(_) => self.terminated.set(true),
+        }
+        if let Ok(mut screen) = self.screen.try_borrow_mut() {
+            screen.close_candidates();
         }
     }
 
@@ -580,14 +633,7 @@ impl ITfCompositionSink_Impl for TextService_Impl {
                     _ => false,
                 };
                 if ours {
-                    match self.state.try_borrow_mut() {
-                        Ok(mut s) => {
-                            if let Some(a) = s.as_mut() {
-                                let _ = a.engine.reset();
-                            }
-                        }
-                        Err(_) => self.terminated.set(true),
-                    }
+                    self.drop_engine_composition();
                 }
                 Ok(())
             },

@@ -371,11 +371,12 @@ impl Engine {
             && !ev.repeat
             && matches!(ev.key, Key::META_LEFT | Key::META_RIGHT | Key::CONTROL_LEFT | Key::CONTROL_RIGHT)
         {
-            // 한자 단축키가 이 Control을 쓰면(예: 왼쪽 Control+Return) 조합을 남겨 둔다. 여기서 확정하면 단축키가 올 때
-            // 바꿀 글자가 없어서 Return이 앱으로 간다(Discord에서 전송, 0.5.0). Control+키는 Chrome도 입력기에 보낸다.
+            // 한자 단축키가 이 Control을 쓰면(예: 왼쪽 Control+Return, 윈도우 기본 오른쪽 Control 탭) 조합을 남겨 둔다.
+            // 여기서 확정하면 단축키가 올 때 바꿀 글자가 없어서 Return이 앱으로 간다(Discord에서 전송, 0.5.0).
+            // Control+키는 Chrome도 입력기에 보낸다. 그 Control로 다른 단축키(Control+C)를 치면 그 키에서 확정한다.
             if self.mode == Mode::Ko
                 && !ctx.secure_field
-                && self.config.shortcuts.hanja.combo_uses(ev.key)
+                && self.config.shortcuts.hanja.starts_with(ev.key)
                 && (self.hanja.is_some() || !self.ko.preedit().is_empty())
             {
                 return Output::pass();

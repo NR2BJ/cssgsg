@@ -4,7 +4,7 @@
 //! 키열 문법
 //! - 보통 글자: 쿼티 자리의 키. 대문자와 Shift 기호(!@# …)는 Shift를 누른 것으로 본다.
 //! - `{이름}`: 특수 키. sp bs ent esc tab left right up down pgup pgdn del
-//!   rs(오른쪽 Shift 탭) ls(왼쪽 Shift 탭) caps(Caps Lock 토글) click(마우스 클릭)
+//!   rs(오른쪽 Shift 탭) ls(왼쪽 Shift 탭) rc(오른쪽 Control 탭) caps(Caps Lock 토글) click(마우스 클릭)
 //! - `{S-이름}`: Shift+특수 키. `{M-x}` ⌘/Win+x, `{C-x}` Ctrl+x, `{A-x}` Option/Alt+x(모두 왼쪽). 한자 키는 `{A-ent}`.
 //!   입력기가 실제로 받는 순서대로 수식키 누름 → 키 → 수식키 뗌을 보낸다(Shift 대문자도 같다).
 //!   0.5.0은 키 하나만 보내서, ⌘/Control을 누르는 순간의 확정을 시험하지 못했다.
@@ -109,6 +109,7 @@ impl Sim {
         match name {
             "rs" => self.tap(Key::SHIFT_RIGHT, Mods::SHIFT_R),
             "ls" => self.tap(Key::SHIFT_LEFT, Mods::SHIFT_L),
+            "rc" => self.tap(Key::CONTROL_RIGHT, Mods::CTRL_R),
             "caps" => {
                 self.caps = !self.caps;
                 self.press(Key::CAPS_LOCK, 0);

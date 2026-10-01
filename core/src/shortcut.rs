@@ -148,6 +148,14 @@ impl Shortcut {
     pub fn combo_uses(self, modifier: Key) -> bool {
         matches!(self, Shortcut::Combo(mods, _) if mods.uses(modifier))
     }
+
+    /// 이 수식키(좌우를 가린 키)를 누르는 것으로 시작하는지: 그 키의 탭이거나, 그 키를 쓰는 조합.
+    pub fn starts_with(self, modifier: Key) -> bool {
+        match self {
+            Shortcut::Tap(key) => key == modifier,
+            _ => self.combo_uses(modifier),
+        }
+    }
 }
 
 impl fmt::Display for Shortcut {

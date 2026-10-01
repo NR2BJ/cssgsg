@@ -40,7 +40,9 @@
     등록·해제(`tools/win/tip-dev.ps1`). 패닉·FP 환경(MXCSR)이 앱으로 새지 않게 막는다. 실제 확인은 [확인 목록](docs/win-checklist.md)
   - [~] M3b 코어 엔진 연결: 맥과 같은 코어로 참신·Graphite·新月을 친다. 조합 밑줄(TSF 조합·표시 속성), Shift 톡 전환,
     작업 표시줄 모드 아이콘(G/ㅊ/月, 밝은·어두운 작업 표시줄), 앱 사이에서 같은 모드(TSF 전역 칸). 개발자 기록은 HKCU\Software\cssgsg `DebugLog`=1
-  - [ ] M3c 후보창·모드 HUD·게임 모드·UILess·비밀번호 칸 → M3d Mozc 변환·한국어 한자 → M3e 설치기·설정 앱(WinUI 3)
+  - [~] M3c: 후보창(맥과 같은 목록 9개·격자 5×6·뜻·페이지)과 모드 HUD(모드를 바꿀 때 커서 위 G/ㅊ/月)를 앱 안에서 그린다.
+    한국어 한자는 오른쪽 Ctrl 톡(윈도우 기본, 한국 키보드의 한자 키 자리). 남은 것: UILess(게임), 비밀번호 칸, 게임 모드, 콘솔
+  - [ ] M3d Mozc 일본어 변환 → M3e 설치기·설정 앱(WinUI 3)
 
 ## 구조
 
@@ -141,11 +143,16 @@ C 런타임은 정적으로 링크해서(`.cargo/config.toml`) 입력기 DLL은 
 powershell -ExecutionPolicy Bypass -File tools\win\tip-dev.ps1 install     # 빌드 → Program Files\cssgsg → 등록(관리자 창) → 내 입력 목록(en-US)에 추가
 powershell -ExecutionPolicy Bypass -File tools\win\tip-dev.ps1 uninstall   # 목록에서 빼기 → 등록 해제 → 파일·흔적 지우기(쓰는 중인 DLL은 다시 시작 때)
 powershell -ExecutionPolicy Bypass -File tools\win\tip-dev.ps1 status
+powershell -ExecutionPolicy Bypass -File tools\win\tip-dev.ps1 debuglog-on  # 개발자 기록 %LOCALAPPDATA%\cssgsg\tip-debug.log(키 코드·길이만), debuglog-off로 끔
 ```
 
 입력기는 en-US 프로필 하나로 등록한다(기반 배치는 US 그대로, [CONCEPT.md](CONCEPT.md) §10.2). 고르는 곳은 Win+Space다.
-영어(미국) 언어 기능이 설치되지 않은 한국어 윈도우에서는 윈도우 설정의 언어 목록에 영어(미국)도 cssgsg도 보이지 않는다(입력 전환에는 보인다).
-그래서 넣고 빼기는 이 스크립트가 한다(나중에는 설치기와 설정 앱).
+윈도우 설정에서는 시간 및 언어 → 언어 및 지역 → 영어(미국) → 언어 옵션 → 키보드에 cssgsg로 보인다(언어 팩은 받지 않는다).
+그 언어의 키보드가 cssgsg 하나뿐이면 윈도우가 키보드 제거를 막으므로 영어(미국) 언어째 지운다. 한자 단축키는 윈도우 기본이 오른쪽 Ctrl 톡이다
+(Alt 조합은 앱 메뉴가 먼저 가져가서 쓸 수 없다).
+
+이 스크립트의 사용자 단계(입력 목록, HKCU 정리, 개발자 기록 설정)는 WMI로 띄운 프로세스에서 한다. MSIX 패키지 앱(Claude 데스크톱 앱 등) 안의 셸은
+HKCU·%LOCALAPPDATA% 쓰기가 그 앱의 칸으로 옮겨져서 다른 앱의 입력기가 보지 못한다.
 
 ### 키열 문법
 

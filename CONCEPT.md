@@ -718,8 +718,14 @@ k     = { cho = "ㄱ" }
 - **M3a에서 확인한 것(2026-10-01, 윈도우 11 25H2 VM, `win/tip`)**
   - 등록은 관리자(regsvr32 → `DllRegisterServer`: CLSID InprocServer32 Apartment → `RegisterProfile` → `RegisterCategory`)와 사용자(`InstallLayoutOrTip("0x0409:{CLSID}{PROFILE}")`)로 나뉜다.
     해제 API는 값만 지우고 흔적을 남긴다: HKLM `CTF\TIP\{CLSID}` 빈 뼈대, HKCU `CTF\TIP\{CLSID}`(Enable=0), HKCU `CTF\SortOrder\AssemblyItem\0x00000409`. 모두 우리 CLSID 것만 골라 지운다.
-  - 영어(미국) 언어 기능이 설치되지 않은 한국어 윈도우에서는 윈도우 설정의 언어 목록에 영어(미국)도 cssgsg도 나오지 않는다(사용자 언어 목록과 Win+Space에는 있다).
-    그래서 입력 목록에 넣고 빼기는 설치기와 설정 앱이 맡는다. 한국어 프로필로 바꾸면 설정에는 보이지만 기반 배치가 한국어라 오른쪽 Alt·Ctrl이 한/영·한자 키가 된다(위 en-US를 고른 까닭).
+  - 윈도우 설정에는 언어 및 지역 → 영어(미국) → 키보드에 cssgsg로 나온다(언어 팩은 받지 않는다). 그 언어의 키보드가 하나뿐이면 윈도우가
+    키보드 제거를 막아서 언어째 지워야 하므로, 넣고 빼기는 설치기·제거기와 설정 앱이 맡는다. 한국어 프로필로 바꾸면 한국어 아래에 붙지만
+    기반 배치가 한국어라 오른쪽 Alt·Ctrl이 한/영·한자 키가 된다(위 en-US를 고른 까닭).
+    (처음에 설정에 안 보였던 것은 개발 셸이 MSIX 앱 안에서 돌아 InstallLayoutOrTip이 가상 칸에 적혔기 때문이었다. 2026-10-02 바로잡음.)
+  - 한자 단축키: 윈도우 기본은 오른쪽 Control 탭(한국 키보드의 한자 키 자리, `Shortcuts::windows`). 맥 기본인 왼쪽 Option(Alt)+Return은
+    쓸 수 없다: Alt 조합은 시스템 키 메시지라 앱 메뉴가 먼저 가져가서 입력기에 Alt 눌림이 오지 않고, 앱이 메뉴로 포커스를 옮기며 조합을
+    끝낸다(VS Code에서 확인). Alt·Win 탭도 뗄 때 앱 메뉴·시작 메뉴가 열린다. Control을 누르는 순간 조합을 확정하는 규칙은 한자 단축키가
+    그 Control을 쓰면(조합이든 탭이든) 건너뛴다.
   - 키: OnTestKeyDown은 상태를 바꾸지 않는 판정만, OnKeyDown은 다시 판정한다(새 메모장은 OnTest 없이 OnKeyDown을 보낸다, mozc #1415). 키 뗌과 Shift는 먹지 않는다(chewing #681·#708). 스캔 코드가 0인 키는 가상 키로 찾는다.
   - 안전: 진입점마다 `catch_unwind` + MXCSR 표준값(extern "system" 밖으로 패닉이 풀리면 abort다), DllMain은 모듈 핸들만, C 런타임은 정적 링크(시스템 DLL에만 기댄다). DLL은 Program Files(앱 컨테이너 읽기 권한 상속).
 
@@ -886,6 +892,9 @@ k     = { cho = "ㄱ" }
   문서 고치기는 실제 쪽에서 한다(키를 앱에 넘길 때는 동기 편집으로 먼저). 조합 밑줄은 표시 속성 둘(입력, 포커스 문절).
   모드는 작업 표시줄 아이콘(GUID_LBI_INPUTMODE)으로 보이고, 입력기가 앱마다 따로 떠도 TSF 전역 칸으로 같은 모드를 쓴다
   (코어 `Engine::follow_mode`, 맥에서는 쓰지 않는다). 설정 앱은 WinUI 3로 만든다(사용자 결정, M3e).
+- M3c 1차(2026-10-02): 후보창과 모드 HUD를 앱 프로세스 안에서 GDI로 그린다(맥 후보창과 같은 모양, 윈도우 11 둥근 모서리·그림자,
+  앱 테마·강조색). 자리는 편집 세션 끝에서 ITfContextView::GetTextExt로 잰다(조합의 포커스 문절, 없으면 커서). 한자 단축키는
+  윈도우 기본 오른쪽 Control 탭(§10.2). 남은 것: UILess(ITfCandidateListUIElement, 게임), 비밀번호 칸(InputScope), 게임 모드, 콘솔.
 - 다음: 입력 소스 복구는 문제가 생기면. 비밀번호 칸 Graphite, ABC 전환 막기(비밀번호 칸)는 나중에(§13). 윈도우(3단계, M3b부터).
 
 ---

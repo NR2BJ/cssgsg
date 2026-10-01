@@ -153,6 +153,13 @@ impl Default for Shortcuts {
 }
 
 impl Shortcuts {
+    /// 윈도우 기본값: 한자는 오른쪽 Control 탭(한국 키보드의 한자 키 자리). 맥 기본값인 왼쪽 Option(Alt)+Return은
+    /// 윈도우에서 쓸 수 없다: Alt 조합은 시스템 키 메시지라 앱 메뉴가 먼저 가져가서 입력기에 Alt 눌림이 오지 않고,
+    /// 앱은 메뉴로 포커스를 옮기며 조합을 끝낸다(2026-10-02 VS Code에서 확인). Alt 탭도 뗄 때 앱 메뉴가 열린다.
+    pub fn windows() -> Self {
+        Self { hanja: Shortcut::Tap(Key::CONTROL_RIGHT), ..Self::default() }
+    }
+
     fn all(&self) -> [(ShortcutAction, Shortcut); 3] {
         [
             (ShortcutAction::ToggleEnglish, self.toggle_english),
@@ -229,6 +236,11 @@ impl Default for Config {
 }
 
 impl Config {
+    /// 윈도우 입력기의 기본 설정: 한자 단축키만 다르다([`Shortcuts::windows`]).
+    pub fn windows_default() -> Self {
+        Self { shortcuts: Shortcuts::windows(), ..Self::default() }
+    }
+
     pub fn from_toml(src: &str) -> Result<Self, String> {
         let table: toml::Table = src.parse().map_err(|e: toml::de::Error| e.to_string())?;
         let has_shortcuts = table.contains_key("shortcuts");

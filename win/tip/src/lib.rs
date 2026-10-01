@@ -21,11 +21,12 @@ mod langbar;
 mod plan;
 mod register;
 mod service;
+mod ui;
 
 use std::ffi::c_void;
 use std::io::Write;
-use std::sync::atomic::{AtomicPtr, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 
 use windows::Win32::Foundation::{
     CLASS_E_CLASSNOTAVAILABLE, E_POINTER, E_UNEXPECTED, HINSTANCE, HMODULE, S_FALSE, S_OK,
@@ -58,29 +59,29 @@ pub fn braced(guid: &GUID) -> String {
     format!("{{{guid:?}}}")
 }
 
-/// 디버거 출력(DebugView 등)에 남긴다. 파일에는 쓰지 않는다(앱 컨테이너 프로세스는 쓸 곳이 없다).
+/// 개발자 기록을 켰는지(마지막으로 [`read_debug_flag`]가 읽은 값).
+static DEBUG: AtomicBool = AtomicBool::new(false);
+
+/// 디버거 출력(DebugView 등)에 남기고, 개발자 기록을 켰으면 %LOCALAPPDATA%\cssgsg\tip-debug.log에도 쓴다
+/// (앱 컨테이너 프로세스는 쓸 곳이 없어 건너뛴다). 친 글자는 남기지 않는다(키 코드·길이만).
 pub(crate) fn debug_log(message: &str) {
     let wide: Vec<u16> = format!("[cssgsg] {message}\n").encode_utf16().chain(Some(0)).collect();
     unsafe {
         windows::Win32::System::Diagnostics::Debug::OutputDebugStringW(windows::core::PCWSTR(wide.as_ptr()))
     };
-    static FILE: OnceLock<Option<Mutex<std::fs::File>>> = OnceLock::new();
-    let file = FILE.get_or_init(|| {
-        if !debug_enabled() {
-            return None;
-        }
-        let dir = std::path::Path::new(&std::env::var_os("LOCALAPPDATA")?).join("cssgsg");
-        std::fs::create_dir_all(&dir).ok()?;
-        std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(dir.join("tip-debug.log"))
-            .ok()
-            .map(Mutex::new)
-    });
-    if let Some(file) = file
-        && let Ok(mut f) = file.lock()
-    {
+    // 시험은 개발자의 진짜 기록 파일에 쓰지 않는다.
+    if cfg!(test) || !DEBUG.load(Ordering::Relaxed) {
+        return;
+    }
+    static FILE: Mutex<Option<std::fs::File>> = Mutex::new(None);
+    let Ok(mut file) = FILE.lock() else { return };
+    if file.is_none() {
+        let Some(base) = std::env::var_os("LOCALAPPDATA") else { return };
+        let dir = std::path::Path::new(&base).join("cssgsg");
+        let _ = std::fs::create_dir_all(&dir);
+        *file = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("tip-debug.log")).ok();
+    }
+    if let Some(f) = file.as_mut() {
         let t = unsafe { windows::Win32::System::SystemInformation::GetLocalTime() };
         let exe = std::env::current_exe()
             .ok()
@@ -98,17 +99,15 @@ pub(crate) fn debug_log(message: &str) {
     }
 }
 
-/// 개발자 기록을 켰는지(HKCU\Software\cssgsg 의 DebugLog=1). 프로세스마다 한 번 읽는다.
-/// 켜면 debug_log가 %LOCALAPPDATA%\cssgsg\tip-debug.log에도 쓰고(앱 컨테이너 프로세스는 쓸 곳이 없어 건너뛴다),
-/// 텍스트 서비스가 키마다 한 줄씩 남긴다. 친 글자는 남기지 않는다(키 코드·길이만).
-pub(crate) fn debug_enabled() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| {
-        windows_registry::CURRENT_USER
-            .open("Software\\cssgsg")
-            .and_then(|k| k.get_u32("DebugLog"))
-            .is_ok_and(|v| v != 0)
-    })
+/// 개발자 기록 설정(HKCU\Software\cssgsg 의 DebugLog=1)을 읽는다. 입력기가 켜질 때마다 다시 읽어서, 켜고 끄면
+/// 앱을 다시 띄우지 않아도 다음 입력칸부터 따른다. 켜면 debug_log가 파일에도 쓰고 텍스트 서비스가 키마다 한 줄씩 남긴다.
+pub(crate) fn read_debug_flag() -> bool {
+    let on = windows_registry::CURRENT_USER
+        .open("Software\\cssgsg")
+        .and_then(|k| k.get_u32("DebugLog"))
+        .is_ok_and(|v| v != 0);
+    DEBUG.store(on, Ordering::Relaxed);
+    on
 }
 
 #[unsafe(no_mangle)]

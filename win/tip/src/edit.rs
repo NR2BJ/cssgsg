@@ -1,18 +1,18 @@
 //! 편집 세션: 앱 문서를 바꾸는 일은 TSF가 허락한 세션(편집 쿠키 `ec`) 안에서만 한다.
 //!
 //! 조합은 TSF 조합(ITfComposition)이다. 지금 조합은 텍스트 서비스와 편집 세션이 같이 쥐는 칸([`Slot`])에 둔다:
-//! 비동기로 늦게 도는 세션도 그때의 조합을 이어서 쓴다.
+//! 비동기로 늦게 도는 세션도 그때의 조합을 이어서 쓴다. 세션 끝에서 후보창·HUD를 붙일 자리를 재서 [`UiHook`]에 준다.
 
 use std::cell::{Cell, RefCell};
 use std::mem::ManuallyDrop;
 use std::rc::Rc;
 
-use windows::Win32::Foundation::E_UNEXPECTED;
+use windows::Win32::Foundation::{E_UNEXPECTED, RECT};
 use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::TextServices::{
     GUID_PROP_ATTRIBUTE, INSERT_TEXT_AT_SELECTION_FLAGS, ITfComposition, ITfCompositionSink, ITfContext,
     ITfContextComposition, ITfEditSession, ITfEditSession_Impl, ITfInsertAtSelection, ITfRange, TF_AE_END,
-    TF_ANCHOR_END, TF_ANCHOR_START, TF_IAS_QUERYONLY, TF_SELECTION, TF_SELECTIONSTYLE,
+    TF_ANCHOR_END, TF_ANCHOR_START, TF_DEFAULT_SELECTION, TF_IAS_QUERYONLY, TF_SELECTION, TF_SELECTIONSTYLE,
 };
 use windows::core::{BOOL, Interface, Result, implement};
 
@@ -35,6 +35,10 @@ pub struct Attrs {
     pub focused: i32,
 }
 
+/// 문서를 고친 뒤(또는 읽기만 하는 세션 끝에) 화면을 맞추라고 부른다. 인자는 후보창·HUD를 붙일 사각형(화면 좌표):
+/// 조합이 있으면 포커스된 문절(없으면 조합 전체), 없으면 커서. 모르면 None.
+pub type UiHook = Rc<dyn Fn(Option<RECT>)>;
+
 /// [`Op`] 목록을 차례로 문서에 적용한다.
 #[implement(ITfEditSession)]
 pub struct ApplyOps {
@@ -43,6 +47,9 @@ pub struct ApplyOps {
     slot: Slot,
     sink: ITfCompositionSink,
     attrs: Attrs,
+    hook: Option<UiHook>,
+    /// 마지막 조합의 포커스된 문절(UTF-16 시작, 길이). 후보창을 그 아래에 붙인다.
+    focus: Cell<Option<(usize, usize)>>,
     /// 세션이 돌았으면 true(RequestEditSession 안에서 바로 돌았는지 보는 데 쓴다).
     ran: Rc<Cell<bool>>,
 }
@@ -54,8 +61,9 @@ impl ApplyOps {
         slot: Slot,
         sink: ITfCompositionSink,
         attrs: Attrs,
+        hook: Option<UiHook>,
     ) -> Self {
-        Self { context, ops, slot, sink, attrs, ran: Rc::default() }
+        Self { context, ops, slot, sink, attrs, hook, focus: Cell::new(None), ran: Rc::default() }
     }
 
     pub fn ran(&self) -> Rc<Cell<bool>> {
@@ -71,6 +79,9 @@ impl ITfEditSession_Impl for ApplyOps_Impl {
             || {
                 for op in &self.ops {
                     self.apply(ec, op)?;
+                }
+                if let Some(hook) = &self.hook {
+                    hook(unsafe { anchor(ec, &self.context, &self.slot, self.focus.get()) });
                 }
                 Ok(())
             },
@@ -101,6 +112,7 @@ impl ApplyOps {
                 let range = composing.composition.GetRange()?;
                 range.SetText(ec, 0, text)?;
                 self.mark(ec, &composing.context, &range, segments)?;
+                self.focus.set(segments.iter().find(|s| s.focused).map(|s| (s.start, s.len)));
                 caret_at_end(ec, &composing.context, &range)
             },
             Op::Clear => match self.take() {
@@ -153,16 +165,24 @@ impl ApplyOps {
             property.SetValue(ec, range, &VARIANT::from(self.attrs.input))?;
             if self.attrs.focused != 0 {
                 for s in segments.iter().filter(|s| s.focused && s.len > 0) {
-                    let part = range.Clone()?;
-                    part.Collapse(ec, TF_ANCHOR_START)?;
-                    let mut moved = 0;
-                    part.ShiftEnd(ec, (s.start + s.len) as i32, &mut moved, std::ptr::null())?;
-                    part.ShiftStart(ec, s.start as i32, &mut moved, std::ptr::null())?;
+                    let part = sub_range(ec, range, s.start, s.len)?;
                     property.SetValue(ec, &part, &VARIANT::from(self.attrs.focused))?;
                 }
             }
         }
         Ok(())
+    }
+}
+
+/// `range` 안의 [start, start+len) 부분(UTF-16 단위).
+unsafe fn sub_range(ec: u32, range: &ITfRange, start: usize, len: usize) -> Result<ITfRange> {
+    unsafe {
+        let part = range.Clone()?;
+        part.Collapse(ec, TF_ANCHOR_START)?;
+        let mut moved = 0;
+        part.ShiftEnd(ec, (start + len) as i32, &mut moved, std::ptr::null())?;
+        part.ShiftStart(ec, start as i32, &mut moved, std::ptr::null())?;
+        Ok(part)
     }
 }
 
@@ -188,6 +208,65 @@ unsafe fn caret_at_end(ec: u32, context: &ITfContext, range: &ITfRange) -> Resul
         let result = context.SetSelection(ec, std::slice::from_ref(&selection));
         drop(ManuallyDrop::into_inner(selection.range));
         result
+    }
+}
+
+/// 후보창·HUD를 붙일 사각형을 잰다(편집 쿠키가 있어야 한다): 조합이 있으면 포커스된 문절(없으면 조합 전체),
+/// 없으면 커서(선택 영역).
+unsafe fn anchor(ec: u32, context: &ITfContext, slot: &Slot, focus: Option<(usize, usize)>) -> Option<RECT> {
+    unsafe {
+        let composing = slot.try_borrow().ok().and_then(|s| s.clone());
+        let (context, range) = match composing {
+            Some(c) => {
+                let whole = c.composition.GetRange().ok()?;
+                let range = match focus {
+                    Some((start, len)) if len > 0 => sub_range(ec, &whole, start, len).ok()?,
+                    _ => whole,
+                };
+                (c.context, range)
+            }
+            None => {
+                let mut selection = [TF_SELECTION::default()];
+                let mut fetched = 0;
+                context.GetSelection(ec, TF_DEFAULT_SELECTION, &mut selection, &mut fetched).ok()?;
+                if fetched == 0 {
+                    return None;
+                }
+                let range = ManuallyDrop::into_inner(std::mem::take(&mut selection[0].range))?;
+                (context.clone(), range)
+            }
+        };
+        let view = context.GetActiveView().ok()?;
+        let mut rect = RECT::default();
+        let mut clipped = BOOL::default();
+        view.GetTextExt(ec, &range, &mut rect, &mut clipped).ok()?;
+        (rect != RECT::default()).then_some(rect)
+    }
+}
+
+/// 문서는 고치지 않고 후보창·HUD 자리만 잰다(모드만 바뀌었을 때, 후보 페이지만 바뀌었을 때).
+#[implement(ITfEditSession)]
+pub struct Measure {
+    context: ITfContext,
+    slot: Slot,
+    hook: UiHook,
+}
+
+impl Measure {
+    pub fn new(context: ITfContext, slot: Slot, hook: UiHook) -> Self {
+        Self { context, slot, hook }
+    }
+}
+
+impl ITfEditSession_Impl for Measure_Impl {
+    fn DoEditSession(&self, ec: u32) -> Result<()> {
+        guarded(
+            || Err(E_UNEXPECTED.into()),
+            || {
+                (self.hook)(unsafe { anchor(ec, &self.context, &self.slot, None) });
+                Ok(())
+            },
+        )
     }
 }
 
