@@ -1,7 +1,9 @@
 //! 호스트 실행 파일을 띄워 입력기 쪽 연결(cssgsg_ipc::pipe::Client)로 묻는다. 엔진은 끈다(--no-engine:
-//! 히라가나·가타카나만 내는 변환기)라서 Mozc 없이 돈다. 파이프 이름에 시험마다 다른 꼬리를 붙여 진짜 호스트와 겹치지 않는다.
+//! 히라가나·가타카나만 내는 변환기)라서 Mozc 없이 돈다. 파이프 이름에 시험마다 다른 꼬리를 붙여 진짜 호스트와 겹치지 않고,
+//! 설정·한자 기억 폴더도 시험마다 임시 폴더를 쓴다(진짜 %APPDATA%\cssgsg를 건드리지 않는다).
 #![cfg(windows)]
 
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
@@ -14,20 +16,28 @@ const WAIT: Duration = Duration::from_secs(5);
 struct Host {
     child: Child,
     tag: String,
+    dir: PathBuf,
 }
 
 impl Host {
     /// 호스트를 띄우고 파이프로 답할 때까지 기다린다(시험의 연결은 띄운 호스트를 기다리지 않고 바로 포기한다).
     fn start(test: &str) -> Self {
         let tag = format!("-test-{}-{test}", std::process::id());
-        let host = Self { child: launch(&tag), tag };
+        let dir = std::env::temp_dir().join(format!("cssgsg-host{tag}"));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let host = Self { child: launch(&tag, &dir), tag, dir };
+        host.wait_ready();
+        host
+    }
+
+    fn wait_ready(&self) {
         let began = Instant::now();
-        while host.client().call(&Request::Hello { protocol: PROTOCOL }, Duration::from_millis(200)).is_err()
+        while self.client().call(&Request::Hello { protocol: PROTOCOL }, Duration::from_millis(200)).is_err()
         {
             assert!(began.elapsed() < WAIT, "호스트가 파이프를 만들지 않는다");
             std::thread::sleep(Duration::from_millis(20));
         }
-        host
     }
 
     fn client(&self) -> Client {
@@ -43,15 +53,16 @@ impl Drop for Host {
     }
 }
 
-fn launch(tag: &str) -> Child {
+fn launch(tag: &str, dir: &Path) -> Child {
     Command::new(env!("CARGO_BIN_EXE_cssgsg-host"))
-        .args(["--tag", tag, "--no-engine", "--idle-exit-secs", "60"])
+        .args(["--tag", tag, "--no-engine", "--idle-exit-secs", "60", "--user-dir"])
+        .arg(dir)
         .spawn()
         .unwrap()
 }
 
 fn start(client: &mut Client, reading: &str) -> Vec<String> {
-    match client.call(&Request::Start { reading: reading.into() }, WAIT).unwrap() {
+    match client.call(&Request::Start { reading: reading.into(), learn: true }, WAIT).unwrap() {
         Reply::View { view: Some(view) } => view.candidates,
         other => panic!("{other:?}"),
     }
@@ -89,18 +100,54 @@ fn a_start_elsewhere_takes_over_the_conversion() {
 #[test]
 fn a_restarted_host_is_reached_without_losing_a_call() {
     let first = Host::start("restart");
-    let tag = first.tag.clone();
+    let (tag, dir) = (first.tag.clone(), first.dir.clone());
     let mut c = first.client();
     assert_eq!(start(&mut c, "かな"), ["かな", "カナ"]);
     // 호스트가 다시 뜬다(업데이트 등). 쥐고 있던 연결은 끊겼지만 다음 호출은 새 호스트에 닿는다.
     drop(first);
-    let second = Host { child: launch(&tag), tag };
-    let began = Instant::now();
-    while second.client().call(&Request::Hello { protocol: PROTOCOL }, Duration::from_millis(200)).is_err() {
-        assert!(began.elapsed() < WAIT, "새 호스트가 파이프를 만들지 않는다");
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    let second = Host { child: launch(&tag, &dir), tag, dir };
+    second.wait_ready();
     assert_eq!(start(&mut c, "かな"), ["かな", "カナ"]);
+}
+
+#[test]
+fn hands_out_settings_and_keeps_hanja_picks() {
+    let host = Host::start("files");
+    let mut c = host.client();
+    let mut sync = |config, learning| match c.call(&Request::Sync { config, learning }, WAIT).unwrap() {
+        Reply::Sync { config, learning } => (config, learning),
+        other => panic!("{other:?}"),
+    };
+    // 처음: 설정 파일이 없으면 빈 내용(기본값), 한자 기억도 비었다. 판을 맞추면 더 주지 않는다.
+    let (Some(config), Some(learning)) = sync(0, 0) else { panic!("처음에는 둘 다 준다") };
+    assert_eq!(
+        (config.text.as_str(), learning.text.lines().filter(|l| !l.starts_with('#')).count()),
+        ("", 0)
+    );
+    assert_eq!(sync(config.version, learning.version), (None, None));
+    // 설정 파일을 고치면 새것을 준다. 틀린 파일이면 앞의 것을 그대로 쓴다(아무것도 주지 않는다).
+    std::fs::write(host.dir.join("config.toml"), "tap_threshold_ms = 250\n").unwrap();
+    let (Some(changed), None) = sync(config.version, learning.version) else { panic!("고친 설정") };
+    assert!(changed.text.contains("250"));
+    std::fs::write(host.dir.join("config.toml"), "tap_threshold_ms = 5\n").unwrap();
+    assert_eq!(sync(changed.version, learning.version), (None, None), "범위 밖 값은 받지 않는다");
+    // 한자를 고르면 기억에 더하고, 2초 모았다가 저장한다.
+    assert_eq!(
+        c.call(&Request::HanjaPicked { reading: "한".into(), text: "漢".into() }, WAIT).unwrap(),
+        Reply::Done
+    );
+    let mut sync = |config, learning| match c.call(&Request::Sync { config, learning }, WAIT).unwrap() {
+        Reply::Sync { config, learning } => (config, learning),
+        other => panic!("{other:?}"),
+    };
+    let (None, Some(picked)) = sync(changed.version, learning.version) else { panic!("고른 한자") };
+    assert!(picked.text.contains("한\t漢\t1\t"), "{}", picked.text);
+    let saved = host.dir.join("hanja-learning.tsv");
+    let began = Instant::now();
+    while !std::fs::read_to_string(&saved).is_ok_and(|t| t.contains("한\t漢")) {
+        assert!(began.elapsed() < WAIT, "한자 기억을 저장하지 않는다");
+        std::thread::sleep(Duration::from_millis(100));
+    }
 }
 
 #[test]
@@ -112,7 +159,7 @@ fn one_host_per_pipe_and_a_dead_host_is_noticed() {
         Reply::Hello { protocol: PROTOCOL, .. }
     ));
     // 같은 이름의 두 번째 호스트는 바로 끝난다.
-    let mut second = launch(&host.tag);
+    let mut second = launch(&host.tag, &host.dir);
     let begun = Instant::now();
     loop {
         if let Some(status) = second.try_wait().unwrap() {
@@ -128,5 +175,8 @@ fn one_host_per_pipe_and_a_dead_host_is_noticed() {
     drop(host);
     let quick = Duration::from_millis(300);
     assert!(c.call(&Request::Commit, quick).is_err());
-    assert_eq!(c.call(&Request::Start { reading: "かな".into() }, quick), Err(CallError::NoHost));
+    assert_eq!(
+        c.call(&Request::Start { reading: "かな".into(), learn: true }, quick),
+        Err(CallError::NoHost)
+    );
 }

@@ -12,6 +12,8 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 #[cfg(windows)]
+mod files;
+#[cfg(windows)]
 mod host;
 #[cfg(windows)]
 mod setup;

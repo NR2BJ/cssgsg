@@ -15,8 +15,8 @@ pub mod pipe;
 /// 메시지 판. 입력기와 호스트가 다른 설치본이면(업데이트 중) 서로 맞지 않는다: 입력기는 그 호스트를 쓰지 않는다.
 pub const PROTOCOL: u32 = 1;
 
-/// 메시지 하나의 최대 크기(바이트). 후보가 수백 개여도 넉넉하다.
-pub const MAX_MESSAGE: usize = 256 * 1024;
+/// 메시지 하나의 최대 크기(바이트). 한자 기억 전체(1만 개, 200KB 안팎)도 들어간다. 이보다 크면 연결을 끊는다.
+pub const MAX_MESSAGE: usize = 4 * 1024 * 1024;
 
 /// 입력기 → 호스트.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -24,7 +24,12 @@ pub enum Request {
     /// 연결 처음: 메시지 판을 맞춘다.
     Hello { protocol: u32 },
     /// 읽기로 변환을 시작한다. 다른 입력기의 변환이 남아 있었으면 그것을 버린다(포커스는 한 곳이다).
-    Start { reading: String },
+    /// `learn`이 거짓이면(시크릿 창 같은 개인 입력칸, 입력 범위 IS_PRIVATE) 이 변환은 학습하지 않는다.
+    Start {
+        reading: String,
+        #[serde(default = "yes")]
+        learn: bool,
+    },
     /// 변환 중 명령.
     Command { cmd: ConvCmd },
     /// 지금 결과를 확정한다(Mozc가 학습한다).
@@ -35,6 +40,32 @@ pub enum Request {
     Reload,
     /// 호스트를 끝낸다(엔진을 내려 학습을 마무리한 뒤). 설치기가 파일을 바꾸기 전에 보낸다(cssgsg-host.exe --quit).
     Quit,
+    /// 설정 파일과 한자 기억을 맞춘다(입력기를 켤 때, 입력칸이 바뀔 때). 가진 판(처음은 0)과 다르면 호스트가 새것을 준다.
+    /// 앱 컨테이너 앱은 설정 폴더를 읽을 수 없고 앱마다 엔진이 따로라, 파일은 호스트가 읽고 쓴다.
+    Sync { config: u64, learning: u64 },
+    /// 한자를 하나 골랐다. 호스트가 기억에 더하고 저장한다(다른 앱은 다음 Sync에 받는다).
+    HanjaPicked { reading: String, text: String },
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// 판이 붙은 파일 내용. 판은 내용의 해시라(0이 아니다) 같은 내용이면 같은 판이다.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Versioned {
+    pub version: u64,
+    pub text: String,
+}
+
+/// 내용의 판(FNV-1a 64, 0이 되지 않게).
+pub fn version_of(text: &str) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in text.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash | 1
 }
 
 /// 호스트 → 입력기.
@@ -52,6 +83,8 @@ pub enum Reply {
     Lost,
     /// 요청을 읽지 못했다.
     Error { message: String },
+    /// Sync의 답: 판이 다른 것만 담는다. 설정은 늘 올바른 것만 준다(틀린 파일은 호스트가 기록하고 앞의 것을 쓴다).
+    Sync { config: Option<Versioned>, learning: Option<Versioned> },
 }
 
 /// 메시지를 파이프에 실을 바이트로.
@@ -79,7 +112,10 @@ mod tests {
         };
         let requests = [
             Request::Hello { protocol: PROTOCOL },
-            Request::Start { reading: "にほんご".into() },
+            Request::Start { reading: "にほんご".into(), learn: true },
+            Request::Start { reading: "にほんご".into(), learn: false },
+            Request::Sync { config: 0, learning: 42 },
+            Request::HanjaPicked { reading: "한".into(), text: "韓".into() },
             Request::Command { cmd: ConvCmd::Select(12) },
             Request::Command { cmd: ConvCmd::FocusLeft },
             Request::Commit,
@@ -99,10 +135,23 @@ mod tests {
             Reply::Done,
             Reply::Lost,
             Reply::Error { message: "?".into() },
+            Reply::Sync { config: Some(Versioned { version: 7, text: "a = 1\n".into() }), learning: None },
         ];
         for r in replies {
             assert_eq!(decode::<Reply>(&encode(&r)), Some(r));
         }
         assert_eq!(decode::<Request>(b"{\"Nope\":1}"), None);
+        // 앞 판의 입력기가 보낸 Start(learn 없음)는 학습한다.
+        assert_eq!(
+            decode::<Request>("{\"Start\":{\"reading\":\"かな\"}}".as_bytes()),
+            Some(Request::Start { reading: "かな".into(), learn: true })
+        );
+    }
+
+    #[test]
+    fn versions_follow_the_content() {
+        assert_eq!(version_of("a"), version_of("a"));
+        assert_ne!(version_of("a"), version_of("b"));
+        assert_ne!(version_of(""), 0, "0은 '아직 없음'이다");
     }
 }

@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{
-    CloseHandle, ERROR_IO_PENDING, ERROR_PIPE_BUSY, ERROR_SUCCESS, GENERIC_READ, GENERIC_WRITE, HANDLE,
-    HLOCAL, LocalFree, WAIT_OBJECT_0,
+    CloseHandle, ERROR_IO_PENDING, ERROR_MORE_DATA, ERROR_PIPE_BUSY, ERROR_SUCCESS, GENERIC_READ,
+    GENERIC_WRITE, HANDLE, HLOCAL, LocalFree, WAIT_OBJECT_0,
 };
 use windows::Win32::Security::Authorization::{ConvertSidToStringSidW, GetSecurityInfo, SE_KERNEL_OBJECT};
 use windows::Win32::Security::{
@@ -19,7 +19,7 @@ use windows::Win32::Security::{
     TOKEN_INFORMATION_CLASS, TOKEN_QUERY, TOKEN_USER, TokenElevation, TokenIsAppContainer, TokenUser,
 };
 use windows::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_FLAG_OVERLAPPED, FILE_SHARE_NONE, OPEN_EXISTING, SECURITY_IDENTIFICATION,
+    CreateFileW, FILE_FLAG_OVERLAPPED, FILE_SHARE_NONE, OPEN_EXISTING, ReadFile, SECURITY_IDENTIFICATION,
     SECURITY_SQOS_PRESENT,
 };
 use windows::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
@@ -33,6 +33,9 @@ use windows::Win32::System::Threading::{
 use windows::core::{HSTRING, PWSTR};
 
 use crate::{MAX_MESSAGE, PROTOCOL, Reply, Request, decode, encode};
+
+/// 한 번에 읽는 크기. 답은 보통 이보다 작고, 크면 나머지를 이어 읽는다.
+const CHUNK: usize = 64 * 1024;
 
 /// 이 프로세스 토큰의 정보 하나. 버퍼는 u64로 잡아 구조체 정렬을 맞춘다.
 fn token_info(class: TOKEN_INFORMATION_CLASS) -> Option<Vec<u64>> {
@@ -248,8 +251,8 @@ impl Client {
                 event
             }
         };
-        if self.buffer.len() < MAX_MESSAGE {
-            self.buffer.resize(MAX_MESSAGE, 0);
+        if self.buffer.len() < CHUNK {
+            self.buffer.resize(CHUNK, 0);
         }
         let mut overlapped = OVERLAPPED { hEvent: event, ..Default::default() };
         let mut read = 0u32;
@@ -265,29 +268,70 @@ impl Client {
                 Some(&mut overlapped),
             )
         };
-        if let Err(e) = started
-            && e.code() != ERROR_IO_PENDING.to_hresult()
-        {
-            self.disconnect();
-            return Err(CallError::Broken(format!("transact: {e}")));
+        let mut reply = Vec::new();
+        let mut more = match started {
+            Err(e)
+                if e.code() != ERROR_IO_PENDING.to_hresult() && e.code() != ERROR_MORE_DATA.to_hresult() =>
+            {
+                self.disconnect();
+                return Err(CallError::Broken(format!("transact: {e}")));
+            }
+            _ => self.finish(pipe, event, &overlapped, deadline, &mut reply)?,
+        };
+        // 답이 버퍼보다 크다(한자 기억 전체 등): 같은 메시지의 나머지를 읽는다.
+        while more {
+            if reply.len() > MAX_MESSAGE {
+                self.disconnect();
+                return Err(CallError::Broken("reply is too large".into()));
+            }
+            let mut overlapped = OVERLAPPED { hEvent: event, ..Default::default() };
+            // SAFETY: 위와 같다.
+            let started = unsafe { ReadFile(pipe, Some(&mut self.buffer), None, Some(&mut overlapped)) };
+            more = match started {
+                Err(e)
+                    if e.code() != ERROR_IO_PENDING.to_hresult()
+                        && e.code() != ERROR_MORE_DATA.to_hresult() =>
+                {
+                    self.disconnect();
+                    return Err(CallError::Broken(format!("read: {e}")));
+                }
+                _ => self.finish(pipe, event, &overlapped, deadline, &mut reply)?,
+            };
         }
+        Ok(reply)
+    }
+
+    /// 걸어 둔 겹친 I/O가 끝나기를 `deadline`까지 기다리고, 읽은 것을 `reply`에 붙인다. 답이 남았으면(ERROR_MORE_DATA) true.
+    /// 시간이 다 되면 취소하고, 버퍼를 놓기 전에 취소가 끝나기를 기다린 뒤 끊는다.
+    fn finish(
+        &mut self,
+        pipe: HANDLE,
+        event: HANDLE,
+        overlapped: &OVERLAPPED,
+        deadline: Instant,
+        reply: &mut Vec<u8>,
+    ) -> Result<bool, CallError> {
+        let mut read = 0u32;
         let left = deadline.saturating_duration_since(Instant::now());
         let waited = unsafe { WaitForSingleObject(event, left.as_millis().min(u32::MAX as u128 - 1) as u32) };
         if waited != WAIT_OBJECT_0 {
-            // 시간이 다 됐다: 취소하고, 버퍼를 놓기 전에 취소가 끝나기를 기다린다.
             unsafe {
-                let _ = CancelIoEx(pipe, Some(&overlapped));
-                let _ = GetOverlappedResult(pipe, &overlapped, &mut read, true);
+                let _ = CancelIoEx(pipe, Some(overlapped));
+                let _ = GetOverlappedResult(pipe, overlapped, &mut read, true);
             }
             self.disconnect();
             return Err(CallError::Timeout);
         }
-        if let Err(e) = unsafe { GetOverlappedResult(pipe, &overlapped, &mut read, false) } {
-            // 답이 버퍼보다 크거나(ERROR_MORE_DATA, 메시지 한도를 넘었다) 파이프가 끊겼다.
-            self.disconnect();
-            return Err(CallError::Broken(format!("reply: {e}")));
+        let done = unsafe { GetOverlappedResult(pipe, overlapped, &mut read, false) };
+        reply.extend_from_slice(&self.buffer[..read as usize]);
+        match done {
+            Ok(()) => Ok(false),
+            Err(e) if e.code() == ERROR_MORE_DATA.to_hresult() => Ok(true),
+            Err(e) => {
+                self.disconnect();
+                Err(CallError::Broken(format!("reply: {e}")))
+            }
         }
-        Ok(self.buffer[..read as usize].to_vec())
     }
 
     fn spawn(&mut self) {

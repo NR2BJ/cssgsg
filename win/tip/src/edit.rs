@@ -12,9 +12,10 @@ use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::TextServices::{
     GUID_PROP_ATTRIBUTE, GUID_PROP_INPUTSCOPE, INSERT_TEXT_AT_SELECTION_FLAGS, IS_NUMERIC_PASSWORD,
-    IS_PASSWORD, ITfComposition, ITfCompositionSink, ITfContext, ITfContextComposition, ITfEditSession,
-    ITfEditSession_Impl, ITfInputScope, ITfInsertAtSelection, ITfRange, InputScope, TF_AE_END, TF_ANCHOR_END,
-    TF_ANCHOR_START, TF_DEFAULT_SELECTION, TF_IAS_QUERYONLY, TF_SELECTION, TF_SELECTIONSTYLE,
+    IS_PASSWORD, IS_PRIVATE, ITfComposition, ITfCompositionSink, ITfContext, ITfContextComposition,
+    ITfEditSession, ITfEditSession_Impl, ITfInputScope, ITfInsertAtSelection, ITfRange, InputScope,
+    TF_AE_END, TF_ANCHOR_END, TF_ANCHOR_START, TF_DEFAULT_SELECTION, TF_IAS_QUERYONLY, TF_SELECTION,
+    TF_SELECTIONSTYLE,
 };
 use windows::core::{BOOL, IUnknown, Interface, Result, implement};
 
@@ -298,6 +299,11 @@ impl ScopeRead {
     /// 입력 범위가 비밀번호 칸이다(IS_PASSWORD·IS_NUMERIC_PASSWORD, Firefox 등).
     pub fn is_password(&self) -> bool {
         matches!(self, Self::Scopes(s) if s.iter().any(|&s| s == IS_PASSWORD.0 || s == IS_NUMERIC_PASSWORD.0))
+    }
+
+    /// 개인 입력칸이다(IS_PRIVATE: 시크릿 창 등, Chromium은 비밀번호 칸에도 준다). 이런 칸에서 친 것은 배우지 않는다.
+    pub fn is_private(&self) -> bool {
+        matches!(self, Self::Scopes(s) if s.contains(&IS_PRIVATE.0))
     }
 }
 

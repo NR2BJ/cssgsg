@@ -12,6 +12,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+use cssgsg_core::hanja::Learning;
 use cssgsg_core::{Config, Context, Engine, Mode, Output};
 use windows::Win32::Foundation::{E_UNEXPECTED, LPARAM, WPARAM};
 use windows::Win32::System::Variant::VARIANT;
@@ -99,8 +100,10 @@ struct Active {
     mode_slot: Option<(ITfCompartment, u32)>,
     /// 개발자 기록(HKCU\Software\cssgsg DebugLog=1): 키 코드와 길이만 남긴다(글자는 남기지 않는다).
     log: bool,
-    /// 엔진 호스트 연결(일본어 한자 변환). 엔진의 변환기와 같이 쥔다.
+    /// 엔진 호스트 연결(일본어 한자 변환, 설정 파일, 한자 기억). 엔진의 변환기와 같이 쥔다.
     host: Option<HostLink>,
+    /// 호스트에서 받아 쓰고 있는 (설정 파일, 한자 기억)의 판. 처음은 0(기본 설정, 빈 기억).
+    synced: (u64, u64),
 }
 
 /// 지난 키 메시지와 그 결과.
@@ -282,6 +285,7 @@ impl TextService_Impl {
             mode_slot: None,
             log,
             host,
+            synced: (0, 0),
         });
 
         let keystrokes: ITfKeystrokeMgr = thread_mgr.cast()?;
@@ -325,7 +329,39 @@ impl TextService_Impl {
             }
         }
         self.follow_global_mode(true);
+        self.sync_host();
         Ok(())
+    }
+
+    /// 엔진 호스트와 설정 파일·한자 기억을 맞춘다(켤 때, 입력칸이 바뀔 때: 설정 앱에서 고치고 돌아오면 바로 쓴다).
+    /// 호스트에 닿지 못하면(아직 안 떴다, 띄울 수 없는 앱) 지금 것을 그대로 쓴다.
+    fn sync_host(&self) {
+        let Some((link, known)) = self
+            .state
+            .try_borrow()
+            .ok()
+            .and_then(|s| s.as_ref().and_then(|a| Some((a.host.clone()?, a.synced))))
+        else {
+            return;
+        };
+        let Some((config, learning)) = host::sync(&link, known) else { return };
+        let Ok(mut state) = self.state.try_borrow_mut() else { return };
+        let Some(a) = state.as_mut() else { return };
+        if let Some(c) = config {
+            match Config::from_toml_windows(&c.text) {
+                Ok(parsed) => {
+                    a.engine.set_config(parsed);
+                    a.synced.0 = c.version;
+                    debug_log("settings applied");
+                }
+                // 호스트는 올바른 설정만 주지만, 판이 다른 입력기·호스트가 섞였을 때를 위해.
+                Err(e) => debug_log(&format!("settings: {e}")),
+            }
+        }
+        if let Some(l) = learning {
+            a.engine.set_hanja_learning(Learning::from_tsv(&l.text));
+            a.synced.1 = l.version;
+        }
     }
 
     fn deactivate(&self) {
@@ -416,8 +452,18 @@ impl TextService_Impl {
                     out.mode
                 ));
             }
-            out
+            // 한자를 골랐으면 호스트에 알린다(기억은 호스트가 모아 저장하고 다른 앱에 나눠 준다).
+            let pick = out
+                .learning_changed
+                .then(|| a.engine.hanja_learning().last_pick().map(|(r, t)| (r.to_string(), t.to_string())))
+                .flatten()
+                .zip(a.host.clone());
+            (out, pick)
         };
+        let (out, pick) = out;
+        if let Some(((reading, text), link)) = pick {
+            host::report_pick(&link, &reading, &text);
+        }
         self.after(&out);
         if let Ok(mut seen) = self.seen.try_borrow_mut() {
             *seen = Some(Seen { id, out: out.clone(), applied: false });
@@ -448,6 +494,12 @@ impl TextService_Impl {
         let (disabled, empty) =
             (flag(&GUID_COMPARTMENT_KEYBOARD_DISABLED), flag(&GUID_COMPARTMENT_EMPTYCONTEXT));
         let Ok(scope) = self.scope.try_borrow() else { return (Field::Closed, "busy") };
+        // 개인 입력칸(시크릿 창 등)이면 일본어 변환과 한자 기억이 배우지 않는다(호스트 연결에 적어 둔다).
+        if let Ok(state) = self.state.try_borrow()
+            && let Some(link) = state.as_ref().and_then(|a| a.host.as_ref())
+        {
+            link.private.set(scope.is_private());
+        }
         decide(readonly, &scope, disabled, empty)
     }
 
@@ -834,6 +886,8 @@ impl ITfThreadMgrEventSink_Impl for TextService_Impl {
                 if self.has_composition() {
                     self.end_composition();
                 }
+                // 설정 앱에서 고치고 돌아왔을 수 있다.
+                self.sync_host();
                 Ok(())
             },
         )

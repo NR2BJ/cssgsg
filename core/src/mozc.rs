@@ -275,6 +275,10 @@ impl Converter for MozcConverter {
         // SAFETY: 살아 있는 인스턴스.
         unsafe { (self.api.reload)(self.raw) }
     }
+
+    fn set_learning(&mut self, enabled: bool) {
+        MozcConverter::set_learning(self, enabled);
+    }
 }
 
 impl Drop for MozcConverter {

@@ -13,7 +13,12 @@ use std::time::{Duration, Instant};
 use cssgsg_core::convert::{Converter, EchoConverter};
 use cssgsg_core::mozc::MozcConverter;
 use cssgsg_ipc::pipe::{pipe_name, pipe_sddl, user_sid};
-use cssgsg_ipc::{MAX_MESSAGE, PROTOCOL, Reply, Request, decode, encode};
+use cssgsg_ipc::{PROTOCOL, Reply, Request, decode, encode};
+
+use crate::files::UserFiles;
+
+/// 파이프 인스턴스의 버퍼 크기(요청은 작다). 답은 이보다 커도 된다: 메시지 모드라 입력기가 이어 읽는다.
+const PIPE_BUFFER: u32 = 64 * 1024;
 use windows::Win32::Foundation::{CloseHandle, ERROR_PIPE_CONNECTED, HANDLE, HLOCAL, LocalFree};
 use windows::Win32::Security::Authorization::{
     ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
@@ -35,11 +40,19 @@ struct Options {
     no_engine: bool,
     /// 이어진 입력기가 하나도 없이 이만큼 지나면 끝난다. 보통은 None: 로그인부터 늘 켜 둔다(시험만 준다).
     idle_exit: Option<Duration>,
+    /// 설정·한자 기억 폴더(보통 %APPDATA%\cssgsg, 시험은 따로).
+    user_dir: Option<PathBuf>,
 }
 
 fn options() -> Options {
-    let mut o =
-        Options { tag: String::new(), engine_dir: None, profile: None, no_engine: false, idle_exit: None };
+    let mut o = Options {
+        tag: String::new(),
+        engine_dir: None,
+        profile: None,
+        no_engine: false,
+        idle_exit: None,
+        user_dir: None,
+    };
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -47,6 +60,7 @@ fn options() -> Options {
             "--engine-dir" => o.engine_dir = args.next().map(PathBuf::from),
             "--profile" => o.profile = args.next().map(PathBuf::from),
             "--no-engine" => o.no_engine = true,
+            "--user-dir" => o.user_dir = args.next().map(PathBuf::from),
             "--idle-exit-secs" => {
                 o.idle_exit = args.next().and_then(|s| s.parse().ok()).map(Duration::from_secs);
             }
@@ -156,8 +170,8 @@ fn create_instance(name: &HSTRING, security: &Security, first: bool) -> Option<H
             open,
             PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
             PIPE_UNLIMITED_INSTANCES,
-            MAX_MESSAGE as u32,
-            MAX_MESSAGE as u32,
+            PIPE_BUFFER,
+            PIPE_BUFFER,
             0,
             Some(&attributes),
         )
@@ -184,7 +198,7 @@ enum Job {
 fn serve(pipe: Pipe, client: u64, jobs: &Sender<Job>, clients: &AtomicUsize) {
     let pipe = pipe.0;
     clients.fetch_add(1, Ordering::SeqCst);
-    let mut buffer = vec![0u8; MAX_MESSAGE];
+    let mut buffer = vec![0u8; PIPE_BUFFER as usize];
     loop {
         let mut read = 0u32;
         if unsafe { ReadFile(pipe, Some(&mut buffer), Some(&mut read), None) }.is_err() {
@@ -219,16 +233,18 @@ fn serve(pipe: Pipe, client: u64, jobs: &Sender<Job>, clients: &AtomicUsize) {
 /// 프로세스를 끝낸다.
 fn engine(inbox: Receiver<Job>, options: &Options, clients: &AtomicUsize, idle_exit: Option<Duration>) {
     let (mut converter, version) = load_engine(options);
+    let mut files = UserFiles::open(options.user_dir.clone().unwrap_or_else(default_user_dir));
     let mut owner: Option<u64> = None;
     let mut last = Instant::now();
     loop {
-        match inbox.recv_timeout(Duration::from_secs(5)) {
+        match inbox.recv_timeout(Duration::from_secs(1)) {
             Ok(Job::Call { client, request, reply }) => {
                 last = Instant::now();
                 if request == Request::Quit {
-                    // 설치기가 파일을 바꾸려 한다: 엔진을 내려 학습을 마무리하고, 답이 입력기에 닿을 틈을 두고 끝낸다.
+                    // 설치기가 파일을 바꾸려 한다: 한자 기억을 저장하고 엔진을 내려 학습을 마무리하고, 답이 입력기에 닿을 틈을 두고 끝낸다.
                     let _ = reply.send(Reply::Done);
                     log("asked to quit");
+                    files.save(true);
                     drop(converter);
                     std::thread::sleep(Duration::from_millis(100));
                     std::process::exit(0);
@@ -236,12 +252,18 @@ fn engine(inbox: Receiver<Job>, options: &Options, clients: &AtomicUsize, idle_e
                 let answer = match request {
                     Request::Quit => Reply::Done,
                     Request::Hello { .. } => Reply::Hello { protocol: PROTOCOL, engine: version.clone() },
-                    Request::Start { reading } => {
+                    Request::Start { reading, learn } => {
                         if owner.is_some() {
                             converter.cancel();
                         }
                         owner = Some(client);
+                        converter.set_learning(learn);
                         Reply::View { view: converter.start(&reading) }
+                    }
+                    Request::Sync { config, learning } => files.sync(config, learning),
+                    Request::HanjaPicked { reading, text } => {
+                        files.picked(&reading, &text);
+                        Reply::Done
                     }
                     Request::Command { cmd } if owner == Some(client) => {
                         Reply::View { view: converter.command(cmd) }
@@ -272,12 +294,14 @@ fn engine(inbox: Receiver<Job>, options: &Options, clients: &AtomicUsize, idle_e
                 }
             }
             Err(RecvTimeoutError::Timeout) => {
+                files.save(false);
                 if let Some(limit) = idle_exit
                     && clients.load(Ordering::SeqCst) == 0
                     && last.elapsed() >= limit
                 {
                     log("idle; exiting");
-                    // 엔진을 내려 학습을 마무리한 뒤 끝낸다.
+                    // 한자 기억을 저장하고 엔진을 내려 학습을 마무리한 뒤 끝낸다.
+                    files.save(true);
                     drop(converter);
                     std::process::exit(0);
                 }
@@ -328,6 +352,12 @@ fn default_profile() -> PathBuf {
     let base =
         std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(|| exe_dir().join("profile"));
     base.join("cssgsg").join("mozc")
+}
+
+/// 설정·한자 기억 폴더: %APPDATA%\cssgsg(맥의 ~/Library/Application Support/cssgsg).
+fn default_user_dir() -> PathBuf {
+    let base = std::env::var_os("APPDATA").map(PathBuf::from).unwrap_or_else(|| exe_dir().join("profile"));
+    base.join("cssgsg")
 }
 
 /// 개발자 기록(HKCU\Software\cssgsg DebugLog=1): 입력기와 같은 파일에 남긴다. 읽기·글자는 남기지 않는다.

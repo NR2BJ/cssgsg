@@ -189,6 +189,16 @@ impl Learning {
         self.count -= 1;
     }
 
+    /// 가장 최근에 고른 것(읽기, 글자). 윈도우 입력기가 고른 것을 엔진 호스트에 알릴 때 쓴다(앱마다 엔진이 따로라
+    /// 기억은 호스트가 모아 저장하고 나눠 준다).
+    pub fn last_pick(&self) -> Option<(&str, &str)> {
+        self.picks
+            .iter()
+            .flat_map(|(r, picks)| picks.iter().map(move |p| (p.last, r.as_str(), p.text.as_str())))
+            .max_by_key(|&(last, _, _)| last)
+            .map(|(_, reading, text)| (reading, text))
+    }
+
     /// 한 읽기의 후보를 기억대로 다시 늘어놓는다. 기억에 없는 것은 원래 순서를 지킨다.
     pub fn order(&self, reading: &str, cands: &mut [Cand]) {
         let Some(picks) = self.picks.get(reading) else { return };
@@ -333,6 +343,11 @@ mod tests {
         l.record("ㅁ", "★");
         assert_eq!(texts('ㅁ', &l, 1), ["★"]);
         assert_eq!(texts('국', &l, 1), ["國"]);
+        // 가장 최근에 고른 것(윈도우 입력기가 엔진 호스트에 알린다).
+        assert_eq!(l.last_pick(), Some(("ㅁ", "★")));
+        l.record("한", "漢");
+        assert_eq!(l.last_pick(), Some(("한", "漢")));
+        assert_eq!(Learning::default().last_pick(), None);
     }
 
     #[test]

@@ -3,15 +3,18 @@
 //! 앱의 입력 스레드에서 불리므로 호출마다 시간 제한이 있다. 호스트가 없거나 늦으면 이 앱 안에서 히라가나·가타카나만
 //! 내는 변환기로 대신한다(호스트가 Mozc를 못 읽었을 때와 같다). 변환하는 중에 호스트가 죽거나 다른 앱의 변환이 밀어내면
 //! 보이던 글자를 그대로 확정한다(학습은 없다). 호스트는 일본어 모드로 바꿀 때 미리 띄운다([`prepare`]).
+//!
+//! 설정 파일과 한자 기억도 호스트가 읽고 쓴다: 입력기는 켤 때와 입력칸이 바뀔 때 판을 맞추고([`sync`]),
+//! 한자를 고르면 알린다([`report_pick`]). 시크릿 창 같은 개인 입력칸(입력 범위 IS_PRIVATE)에서는 둘 다 배우지 않는다.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
 use cssgsg_core::convert::{ConvCmd, ConvView, Converter, EchoConverter};
 use cssgsg_ipc::pipe::{CallError, Client, may_spawn_host, pipe_name, user_sid};
-use cssgsg_ipc::{Reply, Request};
+use cssgsg_ipc::{Reply, Request, Versioned};
 use windows::Win32::System::LibraryLoader::GetModuleFileNameW;
 
 use crate::{debug_log, module};
@@ -20,26 +23,61 @@ use crate::{debug_log, module};
 const START_TIMEOUT: Duration = Duration::from_millis(800);
 /// 변환 중 명령·확정. 엔진은 1ms 안쪽이라 넉넉하다.
 const COMMAND_TIMEOUT: Duration = Duration::from_millis(300);
+/// 설정·한자 기억 맞추기(켤 때, 입력칸이 바뀔 때).
+const SYNC_TIMEOUT: Duration = Duration::from_millis(300);
 
-/// 앱의 입력기 하나가 쓰는 호스트 연결(변환기와 텍스트 서비스가 같이 쥔다).
-pub type HostLink = Rc<RefCell<Client>>;
+/// 앱의 입력기 하나가 쓰는 호스트 연결과 지금 입력칸의 사정(변환기와 텍스트 서비스가 같이 쥔다).
+pub struct Link {
+    pub client: RefCell<Client>,
+    /// 지금 입력칸이 개인 입력칸(시크릿 창 등)이다: 학습하지 않는다. 텍스트 서비스가 입력칸을 가릴 때 적는다.
+    pub private: Cell<bool>,
+}
+
+pub type HostLink = Rc<Link>;
 
 /// 호스트 연결을 만든다(아직 잇지는 않는다). 앱 컨테이너·관리자 권한 앱은 호스트를 띄우지 않고, 떠 있는 것만 쓴다.
 pub fn link() -> Option<HostLink> {
     let sid = user_sid()?;
     let host = if may_spawn_host() { host_exe() } else { None };
-    Some(Rc::new(RefCell::new(Client::new(pipe_name(&sid, ""), host))))
+    Some(Rc::new(Link {
+        client: RefCell::new(Client::new(pipe_name(&sid, ""), host)),
+        private: Cell::new(false),
+    }))
 }
 
 /// 미리 잇는다(호스트가 없으면 띄우기만 한다).
 pub fn prepare(link: &HostLink) {
-    if let Ok(mut client) = link.try_borrow_mut()
+    if let Ok(mut client) = link.client.try_borrow_mut()
         && !client.connected()
     {
         client.prepare();
         if client.connected() {
             debug_log(&format!("host connected, engine {:?}", client.engine()));
         }
+    }
+}
+
+/// 호스트와 설정 파일·한자 기억의 판을 맞춘다. 가진 판(설정, 한자 기억)과 다른 것만 돌아온다. 연결이 없으면 잇는다
+/// (호스트가 없으면 띄우기만 하고 기다리지 않는다: 늘 켜 두는 호스트라 보통은 떠 있다).
+pub fn sync(link: &HostLink, known: (u64, u64)) -> Option<(Option<Versioned>, Option<Versioned>)> {
+    let mut client = link.client.try_borrow_mut().ok()?;
+    if !client.connected() {
+        client.prepare();
+    }
+    match client.call_if_connected(&Request::Sync { config: known.0, learning: known.1 }, SYNC_TIMEOUT)? {
+        Reply::Sync { config, learning } => Some((config, learning)),
+        _ => None,
+    }
+}
+
+/// 한자를 하나 골랐다고 호스트에 알린다(호스트가 기억에 더하고 저장한다). 개인 입력칸이면 알리지 않는다.
+pub fn report_pick(link: &HostLink, reading: &str, text: &str) {
+    if link.private.get() {
+        return;
+    }
+    if let Ok(mut client) = link.client.try_borrow_mut() {
+        let request = Request::HanjaPicked { reading: reading.into(), text: text.into() };
+        let _ = client.call_if_connected(&request, COMMAND_TIMEOUT);
     }
 }
 
@@ -63,6 +101,7 @@ fn kind(reply: &Result<Reply, CallError>) -> String {
         Ok(Reply::Done) => "done".into(),
         Ok(Reply::Lost) => "lost".into(),
         Ok(Reply::Error { message }) => format!("error {message}"),
+        Ok(Reply::Sync { .. }) => "sync".into(),
         Err(e) => format!("{e:?}"),
     }
 }
@@ -83,7 +122,7 @@ impl HostConverter {
     }
 
     fn call(&self, request: &Request, timeout: Duration) -> Result<Reply, CallError> {
-        match self.link.try_borrow_mut() {
+        match self.link.client.try_borrow_mut() {
             Ok(mut client) => client.call(request, timeout),
             Err(_) => Err(CallError::Broken("busy".into())),
         }
@@ -92,7 +131,8 @@ impl HostConverter {
 
 impl Converter for HostConverter {
     fn start(&mut self, reading: &str) -> Option<ConvView> {
-        let reply = self.call(&Request::Start { reading: reading.into() }, START_TIMEOUT);
+        let learn = !self.link.private.get();
+        let reply = self.call(&Request::Start { reading: reading.into(), learn }, START_TIMEOUT);
         self.in_local = false;
         let view = match reply {
             Ok(Reply::View { view }) => view,
@@ -152,14 +192,14 @@ impl Converter for HostConverter {
         }
         // 변환 중이 아니면 할 일이 없다(포커스가 바뀔 때마다 불린다: 이것 때문에 잇거나 띄우지 않는다).
         if self.shown.take().is_some()
-            && let Ok(mut client) = self.link.try_borrow_mut()
+            && let Ok(mut client) = self.link.client.try_borrow_mut()
         {
             let _ = client.call_if_connected(&Request::Cancel, COMMAND_TIMEOUT);
         }
     }
 
     fn reload(&mut self) {
-        if let Ok(mut client) = self.link.try_borrow_mut() {
+        if let Ok(mut client) = self.link.client.try_borrow_mut() {
             let _ = client.call_if_connected(&Request::Reload, COMMAND_TIMEOUT);
         }
     }
@@ -174,8 +214,9 @@ mod tests {
     #[test]
     fn without_a_host_kana_conversion_stays_in_the_app() {
         // 띄울 수 없는 앱(앱 컨테이너 등)에서 떠 있는 호스트가 없을 때.
-        let link = Rc::new(RefCell::new(Client::new(r"\.\pipe\cssgsg-engine-test-nobody".into(), None)));
-        let mut c = HostConverter::new(link);
+        let client = Client::new(r"\\.\pipe\cssgsg-engine-test-nobody".into(), None);
+        let link = Rc::new(Link { client: RefCell::new(client), private: Cell::new(false) });
+        let mut c = HostConverter::new(link.clone());
         let began = Instant::now();
         let view = c.start("かな").unwrap();
         assert!(began.elapsed() < Duration::from_millis(200), "키마다 앱을 멈추지 않는다");
@@ -185,5 +226,10 @@ mod tests {
         assert_eq!(c.start("かな").unwrap().segments, ["かな"]);
         c.cancel();
         assert_eq!(c.commit(), "", "취소한 뒤에는 확정할 것이 없다");
+        // 맞추기와 한자 알리기도 기다리지 않고 지나간다.
+        let began = Instant::now();
+        assert_eq!(sync(&link, (0, 0)), None);
+        report_pick(&link, "한", "漢");
+        assert!(began.elapsed() < Duration::from_millis(200));
     }
 }

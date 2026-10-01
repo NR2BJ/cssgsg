@@ -44,6 +44,8 @@ pub trait Converter {
     fn cancel(&mut self);
     /// 사용자 사전을 다시 읽는다(설정 앱이 고친 뒤). 사전이 없는 변환기는 할 일이 없다.
     fn reload(&mut self) {}
+    /// 학습(확정한 후보를 다음에 먼저 내기)을 켜고 끈다. 시크릿 창 같은 개인 입력칸에서는 끈다. 학습이 없는 변환기는 할 일이 없다.
+    fn set_learning(&mut self, _enabled: bool) {}
 }
 
 /// Mozc를 붙이기 전까지 쓰는 변환기: 후보가 [히라가나, 가타카나] 둘뿐이다.

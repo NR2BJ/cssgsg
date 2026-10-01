@@ -241,6 +241,20 @@ impl Config {
         Self { shortcuts: Shortcuts::windows(), ..Self::default() }
     }
 
+    /// 윈도우 입력기가 설정 파일을 읽는다. 적지 않은 한자 단축키는 윈도우 기본값(오른쪽 Control 탭)이다:
+    /// [`Config::from_toml`]의 기본값은 맥 기본값(왼쪽 Option+Return)인데 윈도우에서는 Alt 조합이 입력기에 오지 않는다.
+    pub fn from_toml_windows(src: &str) -> Result<Self, String> {
+        let table: toml::Table = src.parse().map_err(|e: toml::de::Error| e.to_string())?;
+        let mut c = Self::from_toml(src)?;
+        let written = table.contains_key("taps")
+            || table.get("shortcuts").and_then(|s| s.as_table()).is_some_and(|s| s.contains_key("hanja"));
+        if !written {
+            c.shortcuts.hanja = Shortcuts::windows().hanja;
+            c.validate()?;
+        }
+        Ok(c)
+    }
+
     pub fn from_toml(src: &str) -> Result<Self, String> {
         let table: toml::Table = src.parse().map_err(|e: toml::de::Error| e.to_string())?;
         let has_shortcuts = table.contains_key("shortcuts");
@@ -529,6 +543,21 @@ fn hud_position_name(p: HudPosition) -> &'static str {
 mod tests {
     use super::*;
     use crate::key::Mods;
+
+    #[test]
+    fn windows_reads_the_file_with_its_own_hanja_default() {
+        // 한자 단축키를 적지 않은 파일(맥 설정 앱이 쓴 기본값 파일도): 윈도우 기본값(오른쪽 Control 탭).
+        let c = Config::from_toml_windows("tap_threshold_ms = 250").unwrap();
+        assert_eq!((c.tap_threshold_ms, c.shortcuts.hanja), (250, Shortcuts::windows().hanja));
+        assert_eq!(Config::from_toml_windows("").unwrap(), Config::windows_default());
+        // 적었으면 그대로(빈 글자열은 없음).
+        let c = Config::from_toml_windows("[shortcuts]\nhanja = \"tap:alt_right\"").unwrap();
+        assert_eq!(c.shortcuts.hanja.to_string(), "tap:alt_right");
+        let c = Config::from_toml_windows("[shortcuts]\nhanja = \"\"").unwrap();
+        assert_eq!(c.shortcuts.hanja, Shortcut::None);
+        // 다른 단축키가 오른쪽 Control 탭을 쓰면 겹친다고 알린다.
+        assert!(Config::from_toml_windows("[shortcuts]\ntoggle_english = \"tap:control_right\"").is_err());
+    }
 
     #[test]
     fn defaults_match_nrime_usage() {
