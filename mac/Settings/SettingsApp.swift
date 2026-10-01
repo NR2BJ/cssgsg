@@ -23,15 +23,16 @@ struct SettingsApp: App {
 
 final class SettingsAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // 배열 학습 페이지를 미리 읽어 둔다(탭을 누르면 바로 보이게).
+        // 배열 학습·타자 연습 페이지를 미리 읽어 둔다(탭을 누르면 바로 보이게).
         _ = LearnPage.shared
+        _ = PracticePage.shared
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 }
 
 enum SettingsTab: String, CaseIterable {
-    case general, korean, japanese, learn, about
+    case general, korean, japanese, learn, practice, about
 
     /// 처음 띄울 때의 `--tab 이름` 인자(업데이트 뒤에는 about).
     static var fromArguments: SettingsTab {
@@ -92,6 +93,9 @@ struct SettingsView: View {
                 LearnTab()
                     .tabItem { Label(tr("배열 학습", "Layouts", "配列の学習"), systemImage: "graduationcap") }
                     .tag(SettingsTab.learn)
+                PracticeTab()
+                    .tabItem { Label(tr("타자 연습", "Typing Practice", "タイピング練習"), systemImage: "character.cursor.ibeam") }
+                    .tag(SettingsTab.practice)
                 AboutTab(model: model, updater: updater, language: language)
                     .tabItem { Label(tr("정보", "About", "情報"), systemImage: "info.circle") }
                     .tag(SettingsTab.about)

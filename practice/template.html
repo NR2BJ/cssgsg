@@ -46,6 +46,8 @@ button, select { font: inherit; color: inherit; }
 .page { max-width: 1200px; margin: 0 auto; padding-inline: max(16px, 3vw); padding-block: 22px 48px; }
 
 .masthead { display: grid; gap: 4px; }
+[data-host="app"] .masthead { display: none; }
+[data-host="app"] .page { padding-block: 4px 32px; }
 .eyebrow { margin: 0; color: var(--muted); font-size: 0.85rem; letter-spacing: 0.04em; }
 h1 { margin: 0; font-size: 1.8rem; line-height: 1.2; letter-spacing: -0.02em; font-weight: 800; text-wrap: balance; }
 .lede { margin: 2px 0 0; max-width: 70ch; color: var(--muted); }
@@ -233,7 +235,7 @@ kbd { display: inline-block; min-width: 1.75em; padding: 0 6px; text-align: cent
 
   <footer class="foot">
     <p>치는 방법과 한 타씩의 화면은 cssgsg 입력기 엔진으로 만들고, 연습 글은 모두 엔진으로 쳐서 확인했습니다. 권장 입력을 보여 주고, 원작자가 허용하는 다른 입력도 받습니다.</p>
-    <p>기록(끝낸 단계, 자주 틀린 키)은 이 브라우저에만 남습니다.</p>
+    <p id="record-note">기록(끝낸 단계, 자주 틀린 키)은 이 브라우저에만 남습니다.</p>
   </footer>
 </div>
 
@@ -267,11 +269,26 @@ const DATA = /*DATA*/null;
   [["숫자열", "`1234567890-="], ["윗열", "qwertyuiop[]\\"], ["홈열", "asdfghjkl;'"], ["아랫열", "zxcvbnm,./"]].forEach(([r, ks]) => { for (const k of ks) ROW[k] = r; });
   const where = (s) => [FINGER[s.key], ROW[s.key], s.shift ? `${LEFT.has(s.key) ? "오른쪽" : "왼쪽"} Shift와 함께` : ""].filter(Boolean).join(" · ");
 
-  // ---------------------------------------------------------------- 저장(이 브라우저만)
+  // ---------------------------------------------------------------- 기록
+  // 설정 앱 안(타자 연습 탭)에서는 앱이 기록 파일(practice.json)에 읽고 쓴다(cssgsgPractice 메시지, 답이 온다).
+  // 브라우저로 열면 그 브라우저의 localStorage에 남는다.
+  const host = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.cssgsgPractice;
+  if (host) document.documentElement.dataset.host = "app";
   const STORE = "cssgsg-practice-v2";
   const saved = { lang: "ko", lesson: {}, mode: {}, done: {}, hint: "pause", board: true, miss: {} };
-  try { Object.assign(saved, JSON.parse(localStorage.getItem(STORE) || "{}")); } catch (e) {}
-  const save = () => { try { localStorage.setItem(STORE, JSON.stringify(saved)); } catch (e) {} };
+  async function load() {
+    try {
+      const text = host ? await host.postMessage({ op: "load" }) : localStorage.getItem(STORE);
+      if (text) Object.assign(saved, JSON.parse(text));
+    } catch (e) {}
+  }
+  const save = () => {
+    const text = JSON.stringify(saved);
+    try {
+      if (host) host.postMessage({ op: "save", data: text }).catch(() => {});
+      else localStorage.setItem(STORE, text);
+    } catch (e) {}
+  };
 
   // ---------------------------------------------------------------- 언어·단계
   const MODE_NAME = { drill: "자리 익히기", words: "낱말 치기", lines: "줄 치기" };
@@ -849,9 +866,6 @@ const DATA = /*DATA*/null;
   $("focus-note").addEventListener("click", () => { $("focus-note").hidden = true; window.focus(); });
 
   const optHint = $("opt-hint"), optBoard = $("opt-board");
-  optHint.value = ["pause", "always", "miss"].includes(saved.hint) ? saved.hint : "pause";
-  optBoard.checked = saved.board !== false;
-  $("board").hidden = !optBoard.checked;
   optHint.addEventListener("change", () => {
     saved.hint = optHint.value;
     save();
@@ -866,9 +880,15 @@ const DATA = /*DATA*/null;
     $("board").hidden = !optBoard.checked;
   });
 
-  renderHow();
-  if (!document.hasFocus()) $("focus-note").hidden = false;
-  selectLang(saved.lang);
+  if (host) $("record-note").textContent = "기록(끝낸 단계, 자주 틀린 키)은 설정 앱이 practice.json에 남깁니다(정보 탭 → 파일).";
+  load().then(() => {
+    optHint.value = ["pause", "always", "miss"].includes(saved.hint) ? saved.hint : "pause";
+    optBoard.checked = saved.board !== false;
+    $("board").hidden = !optBoard.checked;
+    renderHow();
+    if (!document.hasFocus()) $("focus-note").hidden = false;
+    selectLang(saved.lang);
+  });
 })();
 </script>
 </body>

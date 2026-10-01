@@ -1,11 +1,13 @@
 // 설정 앱 스모크 테스트. 설정 앱 소스(SettingsApp.swift의 @main만 빼고)를 그대로 붙여 빌드한다(run.sh).
 //
-//   settings-smoke                 단축키 녹화(가짜 키 이벤트를 앱에 보낸다)와 화면 글자, 사전 읽기 정리
+//   settings-smoke                 단축키 녹화(가짜 키 이벤트를 앱에 보낸다)와 화면 글자, 사전 읽기 정리,
+//                                  타자 연습 페이지 ↔ 기록 파일(임시 폴더)
 //   settings-smoke --shots <폴더>   위에 더해 탭 × 화면 언어를 창 없이 그려 PNG로 남긴다(눈으로 확인)
 //
 // 설정 파일·사전은 읽기만 한다. 업데이트 확인은 하지 않는다(마지막 확인을 방금으로 둔다, 메모리에만).
 import AppKit
 import SwiftUI
+import WebKit
 
 var failures = 0
 func check(_ ok: Bool, _ what: String) {
@@ -151,6 +153,138 @@ MainActor.assumeIsolated {
     check(MozcPOS.choices.count == 18 && Set(MozcPOS.choices).count == 18, "사전: 고르는 품사 18개(NRIME와 같다)")
 }
 
+// MARK: - 타자 연습: 페이지 ↔ 기록 파일
+
+/// 웹 뷰에서 비동기 JS 함수 본문을 돌리고 결과를 기다린다.
+@MainActor
+func runJS(_ web: WKWebView, _ body: String, timeout: Double = 30) -> Any? {
+    var result: Any?
+    var done = false
+    web.callAsyncJavaScript(body, arguments: [:], in: nil, in: .page) { r in
+        switch r {
+        case .success(let v): result = v
+        case .failure(let e): result = "error: \(e)"
+        }
+        done = true
+    }
+    let end = Date().addingTimeInterval(timeout)
+    while !done && Date() < end { spin(0.02) }
+    return result
+}
+
+/// 페이지가 기록을 읽고 첫 판을 차릴 때까지 기다린다.
+@MainActor
+func waitForRound(_ web: WKWebView) -> Bool {
+    let end = Date().addingTimeInterval(30)
+    while Date() < end {
+        if (runJS(web, "return document.querySelector('#line span') !== null") as? Bool) == true { return true }
+        spin(0.1)
+    }
+    return false
+}
+
+/// 지금 판을 권장 입력으로 끝까지 친다. 키는 물리 자리(code)와 Shift로 보낸다. 끝나면 결과 제목.
+let typeRoundJS = #"""
+const SH = { "!": "1", "?": "/", ":": ";", '"': "'", "<": ",", ">": ".", "_": "-", "{": "[", "}": "]" };
+const NAME = { "-": "Minus", "=": "Equal", "[": "BracketLeft", "]": "BracketRight", ";": "Semicolon", "'": "Quote",
+  ",": "Comma", ".": "Period", "/": "Slash", " ": "Space" };
+const press = (c) => {
+  let shift = false, k = c;
+  if (/[A-Z]/.test(c)) { shift = true; k = c.toLowerCase(); } else if (SH[c]) { shift = true; k = SH[c]; }
+  const code = /[a-z]/.test(k) ? "Key" + k.toUpperCase() : /[0-9]/.test(k) ? "Digit" + k : NAME[k];
+  for (const type of ["keydown", "keyup"]) window.dispatchEvent(new KeyboardEvent(type, { code, key: c, shiftKey: shift }));
+};
+const id = document.querySelector('#langs [aria-selected="true"]').dataset.l;
+const lang = DATA.langs.find((l) => l.id === id);
+for (let n = 0; n < 40 && document.getElementById("result").hidden; n++) {
+  const spans = [...document.querySelectorAll("#line span")];
+  const done = spans.filter((s) => s.classList.contains("done")).length;
+  for (const s of spans.slice(done)) {
+    if (s.classList.contains("gap")) continue;
+    const ch = s.textContent === "␣" ? " " : s.textContent;
+    for (const c of ch === " " ? " " : lang.units[ch][0][0]) press(c);
+  }
+}
+return document.getElementById("result-title").textContent;
+"""#
+
+MainActor.assumeIsolated {
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("cssgsg-practice-smoke-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
+    try? FileManager.default.removeItem(at: dir)
+    let record = dir.appendingPathComponent("practice.json")
+    let pageURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("practice/index.html")
+
+    let first = PracticePage(pageURL: pageURL, recordURL: record)
+    check(waitForRound(first.webView), "타자 연습: 페이지가 기록을 읽고(없음) 첫 판을 차린다")
+    let host = runJS(first.webView, """
+        return document.documentElement.dataset.host + " " + getComputedStyle(document.querySelector(".masthead")).display
+        """) as? String
+    check(host == "app none", "타자 연습: 설정 앱 안에서는 앱에 기록하고 머리말을 뺀다 (\(host ?? "-"))")
+    let title = runJS(first.webView, typeRoundJS) as? String
+    check(title == "오타 없이 끝냈습니다", "타자 연습: 1단계 자리 익히기 한 판을 끝까지 친다 (\(title ?? "-"))")
+    _ = runJS(first.webView, "document.querySelectorAll('.lesson-btn')[2].click(); return true")
+    spin(0.3)
+    first.flush()
+    let saved = (try? Data(contentsOf: record)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+    let done = saved?["done"] as? [String: Bool]
+    let lesson = (saved?["lesson"] as? [String: String])?["ko"]
+    check(done?["ko:home1:drill"] == true && lesson == "top-cho",
+          "타자 연습: 끝낸 판과 고른 단계를 기록 파일에 남긴다 (\(lesson ?? "-"))")
+
+    let second = PracticePage(pageURL: pageURL, recordURL: record)
+    check(waitForRound(second.webView), "타자 연습: 다시 띄운 페이지")
+    let restored = runJS(second.webView, """
+        return document.querySelector('.lesson-btn[aria-current="true"]').dataset.i + " "
+          + document.querySelectorAll('.lesson-btn')[0].querySelectorAll('.dots i.on').length
+        """) as? String
+    check(restored == "2 1", "타자 연습: 다시 띄우면 기록 파일에서 고른 단계와 끝낸 판을 읽는다 (\(restored ?? "-"))")
+
+    // 진짜 키 이벤트(NSEvent)가 웹 뷰를 거쳐 페이지에 물리 자리(code)로 닿는지: 창에 붙여 첫 응답자로 두고 지금 글자를 친다.
+    let window = NSWindow(contentRect: NSRect(x: -20000, y: -20000, width: 1100, height: 800), styleMask: [.titled],
+                          backing: .buffered, defer: false)
+    window.contentView = second.webView
+    window.makeFirstResponder(second.webView)
+    spin(0.3)
+    let before = runJS(second.webView, """
+        const id = document.querySelector('#langs [aria-selected="true"]').dataset.l;
+        const lang = DATA.langs.find((l) => l.id === id);
+        const cur = document.querySelector('#line .cur').textContent;
+        return document.querySelectorAll('#line .done').length + " " + lang.units[cur][0][0];
+        """) as? String
+    let parts = before?.split(separator: " ") ?? []
+    let keyCodes: [Character: UInt16] = [
+        "a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5, "z": 6, "x": 7, "c": 8, "v": 9, "b": 11, "q": 12, "w": 13, "e": 14,
+        "r": 15, "y": 16, "t": 17, "o": 31, "u": 32, "i": 34, "p": 35, "l": 37, "j": 38, "k": 40, ";": 41, "n": 45,
+        "m": 46, ".": 47, "/": 44, ",": 43,
+    ]
+    if parts.count == 2 {
+        for c in parts[1] {
+            guard let code = keyCodes[c] else { continue }
+            for type in [NSEvent.EventType.keyDown, .keyUp] {
+                if let e = NSEvent.keyEvent(
+                    with: type, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                    windowNumber: window.windowNumber, context: nil, characters: String(c),
+                    charactersIgnoringModifiers: String(c), isARepeat: false, keyCode: code)
+                {
+                    window.sendEvent(e)
+                }
+            }
+            spin(0.05)
+        }
+    }
+    spin(0.3)
+    let after = runJS(second.webView, "return document.querySelectorAll('#line .done').length") as? Int
+    check(parts.count == 2 && after == Int(parts[0])! + 1,
+          "타자 연습: 진짜 키 이벤트가 웹 뷰를 거쳐 한 글자를 친다 (\(before ?? "-") → \(after.map(String.init) ?? "-"))")
+    window.contentView = nil
+
+    try? Data("{ 깨진".utf8).write(to: record)
+    let third = PracticePage(pageURL: pageURL, recordURL: record)
+    check(waitForRound(third.webView), "타자 연습: 기록 파일이 깨져 있어도 처음부터 시작한다")
+    try? FileManager.default.removeItem(at: dir)
+}
+
 // MARK: - 화면 스냅숏
 
 @MainActor
@@ -181,10 +315,35 @@ if let i = args.firstIndex(of: "--shots"), i + 1 < args.count {
             render(GeneralTab(model: model), width: 740, height: 1250, name: "general-\(l)", to: out)
             render(KoreanTab(model: model), width: 740, height: 420, name: "korean-\(l)", to: out)
             render(JapaneseTab(model: model, dictionary: dictionary), width: 740, height: 1960, name: "japanese-\(l)", to: out)
-            render(AboutTab(model: model, updater: updater, language: .constant(lang)), width: 740, height: 1000,
+            render(AboutTab(model: model, updater: updater, language: .constant(lang)), width: 740, height: 1120,
                    name: "about-\(l)", to: out)
         }
         print("스냅숏: \(out.path) (탭 4 × 언어 3)")
+
+        // 타자 연습: 기본 창 크기와 큰 창(전체 화면 비슷하게). 웹 뷰는 cacheDisplay로 안 그려져 takeSnapshot을 쓴다.
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("cssgsg-practice-shots", isDirectory: true)
+        let pageURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("practice/index.html")
+        for (w, h) in [(740, 640), (1440, 860)] {
+            try? FileManager.default.removeItem(at: dir)
+            let page = PracticePage(pageURL: pageURL, recordURL: dir.appendingPathComponent("practice.json"))
+            let window = NSWindow(contentRect: NSRect(x: -20000, y: -20000, width: w, height: h), styleMask: [.titled],
+                                  backing: .buffered, defer: false)
+            window.contentView = page.webView
+            guard waitForRound(page.webView) else { continue }
+            spin(1.3)
+            var done = false
+            page.webView.takeSnapshot(with: nil) { image, _ in
+                if let tiff = image?.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) {
+                    try? rep.representation(using: .png, properties: [:])?.write(to: out.appendingPathComponent("practice-\(w).png"))
+                }
+                done = true
+            }
+            let end = Date().addingTimeInterval(10)
+            while !done && Date() < end { spin(0.05) }
+            window.contentView = nil
+        }
+        try? FileManager.default.removeItem(at: dir)
+        print("스냅숏: 타자 연습 2장(740, 1440)")
     }
 }
 print(failures == 0 ? "모두 통과" : "실패 \(failures)개")

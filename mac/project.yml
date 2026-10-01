@@ -93,6 +93,13 @@ targets:
       - path: ../learn/index.html
         buildPhase: resources
         type: file
+      # 타자 연습 페이지(tools/practice/build.mjs). 배열 학습 페이지와 이름이 같아(index.html) practice/ 아래에 둔다.
+      - path: ../practice/index.html
+        buildPhase:
+          copyFiles:
+            destination: resources
+            subpath: practice
+        type: file
       - path: ../THIRD_PARTY_NOTICES.txt
         buildPhase: resources
         type: file

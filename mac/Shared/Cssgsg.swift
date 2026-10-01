@@ -23,6 +23,8 @@ enum Cssgsg {
     /// 입력기가 받은 더 새 Mozc 엔진(<커밋>/ 폴더마다 하나, MozcComponents).
     static var mozcEnginesURL: URL { supportDirectory.appendingPathComponent("mozc-engines", isDirectory: true) }
     static var developerLogURL: URL { supportDirectory.appendingPathComponent("developer.log") }
+    /// 설정 앱 타자 연습 탭의 기록(끝낸 단계, 자주 틀린 키, 고른 단계). 내용은 연습 페이지가 정한다(JSON).
+    static var practiceRecordURL: URL { supportDirectory.appendingPathComponent("practice.json") }
 
     // MARK: - 설정 앱 → 입력기 (Darwin 알림, 내용 없음)
 

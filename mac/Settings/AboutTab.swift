@@ -72,12 +72,18 @@ struct AboutTab: View {
                     }
                     .disabled(!FileManager.default.fileExists(atPath: Cssgsg.developerLogURL.path))
                 }
+                LabeledContent(tr("타자 연습 기록", "Typing Practice Records", "タイピング練習の記録")) {
+                    Button(tr("Finder에서 보기", "Show in Finder", "Finder で表示")) {
+                        NSWorkspace.shared.activateFileViewerSelecting([Cssgsg.practiceRecordURL])
+                    }
+                    .disabled(!FileManager.default.fileExists(atPath: Cssgsg.practiceRecordURL.path))
+                }
             } header: {
                 Text(tr("파일", "Files", "ファイル"))
             } footer: {
-                Text(tr("설정 파일(config.toml)은 직접 고쳐도 됩니다. 개발자 기록에는 키 코드·수식키·시각만 남고, 입력한 글자는 남지 않습니다.",
-                        "You can edit the settings file (config.toml) directly. The developer log records only key codes, modifiers, and times, never the text you type.",
-                        "設定ファイル（config.toml）は直接編集してもかまいません。開発者ログにはキーコード・修飾キー・時刻だけが残り、入力した文字は残りません。"))
+                Text(tr("설정 파일(config.toml)은 직접 고쳐도 됩니다. 개발자 기록에는 키 코드·수식키·시각만 남고, 입력한 글자는 남지 않습니다. 타자 연습 기록(practice.json)에는 끝낸 단계와 자주 틀린 키가 남습니다.",
+                        "You can edit the settings file (config.toml) directly. The developer log records only key codes, modifiers, and times, never the text you type. The typing practice records (practice.json) keep the stages you finished and the keys you often miss.",
+                        "設定ファイル（config.toml）は直接編集してもかまいません。開発者ログにはキーコード・修飾キー・時刻だけが残り、入力した文字は残りません。タイピング練習の記録（practice.json）には終えた段階とよく間違えるキーが残ります。"))
             }
 
             Section(tr("라이선스", "License", "ライセンス")) {

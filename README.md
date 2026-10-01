@@ -25,15 +25,16 @@
       Shift+Enter 줄바꿈 대기(줄바꿈 넣기·⌘ 단축키, Shift+Enter 다시 보내기, 0부터)와 Shift+Enter를 다시 보낼 앱 목록(기본 Codex), HUD
     - 한국어: 배열, 한자 기억. 일본어: 변환 키(Space·Tab), 기호(구두점·공백 전각/반각·・·¥), 가타카나, 개인 사전(Mozc),
       변환 엔진(Mozc 버전·업데이트), 변환 단축키 설명서
-    - 배열 학습(배열마다 따로), 정보(버전, 입력 소스, 입력기 권한, 업데이트, 화면 언어, 파일)
+    - 배열 학습(배열마다 따로), 타자 연습(아래), 정보(버전, 입력 소스, 입력기 권한, 업데이트, 화면 언어, 파일)
     - 바꾸면 입력기가 바로 다시 읽는다(다시 시작 없음). 원본은 늘 `config.toml`이고 직접 고쳐도 된다
 - [x] 일본어 한자 변환: Mozc를 입력기 프로세스 안에서 쓴다(0.2.0, [mozc/README.md](mozc/README.md)).
   0.6.0부터 엔진은 실행 중에 읽는 dylib이고, 입력기와 따로 업데이트된다(아래 "Mozc 엔진 업데이트")
 - [x] 한국어 한자 변환(0.3.1, 왼쪽 Option+Return(설정에서 바꾼다), [CONCEPT.md](CONCEPT.md) §5.4): 조합 중인 글자 하나를 libhangul 사전으로 바꾼다.
   후보창에 뜻(國 나라 국)을 같이 보이고, 자음 하나 + Option+Return은 기호표(ㅁ → ※☆★…). 고른 후보를 기억한다
-- [x] 타자 연습 페이지(`practice/index.html`, HTML 파일 하나라서 브라우저로 열면 된다): 세 배열을 단계별로 익힌다.
+- [x] 타자 연습(0.7.0부터 설정 앱 타자 연습 탭, 창을 키우거나 전체 화면으로 쓴다): 세 배열을 단계별로 익힌다.
   참신은 받침 없이 홈열 → 윗열 → 아랫열 → 겹모음·된소리, 받침도 같은 순서, 그다음 규칙(ㅗ·ㅜ, 문장부호, ❖).
-  단계마다 자리 익히기 → 낱말 치기 → 줄 치기. 틀리면 넘어가지 않고, 모르는 키는 멈추면 보여 준다
+  단계마다 자리 익히기 → 낱말 치기 → 줄 치기. 틀리면 넘어가지 않고, 모르는 키는 멈추면 보여 준다.
+  기록은 `~/Library/Application Support/cssgsg/practice.json`. 같은 페이지(`practice/index.html`)를 브라우저로 열어도 된다(기록은 그 브라우저에)
 - [ ] Windows TSF (나중)
 
 ## 구조
@@ -145,7 +146,7 @@ node tools/learn/build.mjs --check                # 학습 페이지 예시를 �
 node tools/practice/build.mjs --check             # 타자 연습 페이지: 낱말·줄·예시를 모두 엔진으로 쳐 보고, index.html이 최신인지
 bash tools/mac/shell-smoke/run.sh                  # 맥 셸 Swift 계층(진짜 NSEvent) ↔ 러스트 시뮬레이터
 bash tools/mac/update-smoke/run.sh                 # 업데이트 코드: 버전 순서, 채널(정식·베타), GitHub 응답, 해시, 설치 스크립트
-bash tools/mac/settings-smoke/run.sh               # 설정 앱: 단축키 녹화(가짜 키 이벤트, 좌우), 화면 글자, 사전 읽기 정리 (--shots: 화면 스냅숏)
+bash tools/mac/settings-smoke/run.sh               # 설정 앱: 단축키 녹화(가짜 키 이벤트, 좌우), 화면 글자, 사전 읽기 정리, 타자 연습 기록 왕복 (--shots: 화면 스냅숏)
 cargo test -p cssgsg-core --features mozc --test mozc   # 일본어 한자 변환(Mozc, 먼저 bash tools/mozc/build.sh)
 bash tools/mac/mozc-smoke/run.sh                   # Mozc 엔진: 고르기·지키기·업데이트 확인·설치, 엔진 묶음을 받아 읽기
 ```
