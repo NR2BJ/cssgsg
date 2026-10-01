@@ -1,4 +1,5 @@
-# rustup이 이 버전을 자동으로 받아 쓴다(맥북, Codex 등 어디서 빌드해도 같은 컴파일러).
+# rustup이 이 버전을 자동으로 받아 쓴다(맥, 윈도우, GitHub Actions, Codex 등 어디서 빌드해도 같은 컴파일러).
+# 새 정식이 나오면 바로 올린다: 기본·mozc 기능의 test·clippy·fmt를 윈도우·맥 대상으로 확인한 뒤 커밋.
 [toolchain]
-channel = "1.98.1"
+channel = "1.99.0"
 components = ["rustfmt", "clippy"]
