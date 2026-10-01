@@ -4,6 +4,8 @@
 //!   cssgsg-cli type  [--mode en|ko|ja] [--config 파일] 키열...   각 키열의 화면 결과를 한 줄씩
 //!   cssgsg-cli batch [--mode en|ko|ja] [--config 파일]           표준입력 한 줄 = 키열 하나, JSON 문자열로 출력
 //!   cssgsg-cli repl  [--mode en|ko|ja] [--config 파일]           한 줄씩 쳐 가며 상태를 본다
+//!   cssgsg-cli keycodes                                           셸 키 코드 → 물리 키 표를 JSON으로 (교차 검증용)
+//!       {"mac":[[keyCode,HID],…],"windows":[[스캔 코드(확장이면 0xE0xx),HID],…]}
 //!   cssgsg-cli layout-json 배열ID                                  배열 데이터를 JSON으로 (교차 검증·학습 페이지용)
 //!       배열ID: chamshin-v18, chamshin-d-v19, graphite, shingetsu
 //!   cssgsg-cli encode [--ko-layout 배열ID]                          표준입력의 한글 음절마다 치는 방법을 JSON 한 줄로
@@ -126,6 +128,23 @@ fn encode_syllables(opts: &Opts) -> io::Result<()> {
         }
     }
     out.flush()
+}
+
+/// 셸 키 코드 → 물리 키(USB HID) 표: 맥 keyCode, 윈도우 스캔 코드(확장 비트면 0xE0 접두).
+fn keycodes_json() -> String {
+    let mac: Vec<String> = (0..=0x7Fu16)
+        .map(|c| (c, Key::from_mac_keycode(c)))
+        .filter(|(_, k)| *k != Key::UNKNOWN)
+        .map(|(c, k)| format!("[{c},{}]", k.0))
+        .collect();
+    let win: Vec<String> = [false, true]
+        .into_iter()
+        .flat_map(|ext| (0..=0xFFu16).map(move |s| (s, ext)))
+        .map(|(s, ext)| (if ext { 0xE000 | s } else { s }, Key::from_windows_scancode(s, ext)))
+        .filter(|(_, k)| *k != Key::UNKNOWN)
+        .map(|(s, k)| format!("[{s},{}]", k.0))
+        .collect();
+    format!("{{\"mac\":[{}],\"windows\":[{}]}}", mac.join(","), win.join(","))
 }
 
 fn layout_json(id: &str) -> Result<String, String> {
@@ -314,6 +333,10 @@ fn main() -> ExitCode {
         })(),
         "repl" => repl(&opts),
         "encode" => encode_syllables(&opts),
+        "keycodes" => {
+            println!("{}", keycodes_json());
+            Ok(())
+        }
         "layout-json" => match opts.rest.first().map(|id| layout_json(id)) {
             Some(Ok(j)) => {
                 println!("{j}");

@@ -715,6 +715,13 @@ k     = { cho = "ㄱ" }
 - **등록 카테고리:** `IMMERSIVESUPPORT`, `SYSTRAYSUPPORT`, `SECUREMODE`, `UIELEMENTENABLED`, `INPUTMODECOMPARTMENT`, `COMLESS`, `DISPLAYATTRIBUTEPROVIDER`.
   - 런타임에는 `GetActiveFlags`로 분기한다(SECUREMODE / IMMERSIVEMODE / CONSOLE / UIELEMENTENABLEDONLY).
   - 설치는 레지스트리 직접 기록이 아니라 `RegisterProfile` + `InstallLayoutOrTip`으로 한다.
+- **M3a에서 확인한 것(2026-10-01, 윈도우 11 25H2 VM, `win/tip`)**
+  - 등록은 관리자(regsvr32 → `DllRegisterServer`: CLSID InprocServer32 Apartment → `RegisterProfile` → `RegisterCategory`)와 사용자(`InstallLayoutOrTip("0x0409:{CLSID}{PROFILE}")`)로 나뉜다.
+    해제 API는 값만 지우고 흔적을 남긴다: HKLM `CTF\TIP\{CLSID}` 빈 뼈대, HKCU `CTF\TIP\{CLSID}`(Enable=0), HKCU `CTF\SortOrder\AssemblyItem\0x00000409`. 모두 우리 CLSID 것만 골라 지운다.
+  - 영어(미국) 언어 기능이 설치되지 않은 한국어 윈도우에서는 윈도우 설정의 언어 목록에 영어(미국)도 cssgsg도 나오지 않는다(사용자 언어 목록과 Win+Space에는 있다).
+    그래서 입력 목록에 넣고 빼기는 설치기와 설정 앱이 맡는다. 한국어 프로필로 바꾸면 설정에는 보이지만 기반 배치가 한국어라 오른쪽 Alt·Ctrl이 한/영·한자 키가 된다(위 en-US를 고른 까닭).
+  - 키: OnTestKeyDown은 상태를 바꾸지 않는 판정만, OnKeyDown은 다시 판정한다(새 메모장은 OnTest 없이 OnKeyDown을 보낸다, mozc #1415). 키 뗌과 Shift는 먹지 않는다(chewing #681·#708). 스캔 코드가 0인 키는 가상 키로 찾는다.
+  - 안전: 진입점마다 `catch_unwind` + MXCSR 표준값(extern "system" 밖으로 패닉이 풀리면 abort다), DllMain은 모듈 핸들만, C 런타임은 정적 링크(시스템 DLL에만 기댄다). DLL은 Program Files(앱 컨테이너 읽기 권한 상속).
 
 ### 10.3 엔진 호스트와 격리
 
@@ -768,7 +775,7 @@ k     = { cho = "ㄱ" }
   - 서명 없이 개발하고 쓴다.
   - 나중에 공개 릴리스 이력이 쌓이면 무료인 SignPath Foundation(③)을 신청할 수 있다. 선택 사항이다.
   - 서명이 없으면 일부 게임 안티치트가 DLL을 더 쉽게 막을 수 있다(미검증). 막히는 게임이 나오면 그때 판단한다.
-- **TIP 개발은 VM에서 한다.** SAC를 끈 Hyper-V VM을 쓴다. 망가진 TIP은 explorer와 로그인 세션까지 끌고 들어갈 수 있기 때문이다.
+- **TIP 개발은 VM에서 한다.** SAC를 끈 VM(게임용 PC 안 VMware, 윈도우 11 25H2)을 쓴다. 망가진 TIP은 explorer와 로그인 세션까지 끌고 들어갈 수 있기 때문이다.
 - 24H2/25H2에서 서드파티 TIP에 영향을 주는 TSF 변경은 문서상 없다. 다만 PIME에 원인 불명의 로드 실패 사례가 있다.
 
 ---
@@ -871,7 +878,10 @@ k     = { cho = "ㄱ" }
 - 0.7.0(사용자 요청): 설정 앱 타자 연습 탭(§ P1 "타자 연습 페이지"). 세 배열 단계별 연습, 기록은 practice.json.
 - 0.7.1(사용자 확인 "쉬프트 누르면 모드 바뀌긴 하는데", 수정 결정): 타자 연습 탭에서 웹 뷰가 키를 붙잡고 입력 컨텍스트를 갖지 않는다. 다만 0.7.1에서도
   Shift 톡에 모드가 바뀌었고(사용자 확인), 판정과 상관없어서 그대로 둔다(사용자 결정). 0.7.1 릴리스 노트의 "Shift가 모드를 바꾸지 않게 했습니다"는 틀렸다.
-- 다음: 입력 소스 복구는 문제가 생기면. 비밀번호 칸 Graphite, ABC 전환 막기(비밀번호 칸)는 나중에(§13). 윈도우(3단계).
+- 3단계 M3a(2026-10-01, 윈도우 VM): TSF 텍스트 서비스 뼈대 `win/tip`(Rust + windows 0.62, 워크스페이스에 넣고 맥에서는 빈 크레이트).
+  글자 키를 Graphite 글자로 바로 확정, 단축키는 쿼티 자리, 등록·해제(`tools/win/tip-dev.ps1`), 해제 뒤 흔적 없음(§10.2). 코어에 윈도우 스캔 코드 표.
+  다음 M3b: 코어 엔진 연결(조합 밑줄, 세 모드, Shift 톡, 모드 아이콘).
+- 다음: 입력 소스 복구는 문제가 생기면. 비밀번호 칸 Graphite, ABC 전환 막기(비밀번호 칸)는 나중에(§13). 윈도우(3단계, M3b부터).
 
 ---
 
@@ -922,4 +932,4 @@ k     = { cho = "ㄱ" }
   - Caps Lock 가타카나는 변환하지 않으므로 치는 대로 바로 확정한다(2026-09-29 사용자 요청). 뒤치기 ゛가 앞 글자를 바꾸므로 마지막 키가 낸 글자만 조합으로 남긴다. 설정 `ja.katakana_direct`(기본 켬).
 
 **남은 것**
-- 막혀 있는 결정은 없다. 지금은 2단계(맥 셸)를 하고 있다(§12 진행).
+- 막혀 있는 결정은 없다. 맥은 일상에서 쓰며 다듬고, 지금은 3단계(윈도우)를 하고 있다(§12 진행).

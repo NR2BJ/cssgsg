@@ -1,0 +1,32 @@
+[package]
+name = "cssgsg-tip"
+description = "cssgsg 윈도우 입력기: TSF 텍스트 서비스(TIP) DLL"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+# 윈도우 전용이다. 다른 OS에서는 빈 크레이트로 빌드된다(src/lib.rs의 #![cfg(windows)]) — 맥의 cargo test·clippy --workspace를 깨지 않는다.
+[lib]
+name = "cssgsg_tip"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+cssgsg-core = { path = "../../core", default-features = false }
+
+[target.'cfg(windows)'.dependencies]
+windows-core = "0.62"
+windows-registry = "0.6"
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Ole",
+    "Win32_System_SystemServices",
+    "Win32_System_Variant",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_TextServices",
+    "Win32_UI_WindowsAndMessaging",
+] }

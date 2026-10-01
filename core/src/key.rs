@@ -1,7 +1,8 @@
 //! 물리 키 모델.
 //!
 //! 키 코드는 USB HID Usage(키보드 페이지 0x07) 값을 그대로 쓴다. 맥 keyCode와
-//! 윈도우 scan code는 셸 경계에서 이 값으로 바꾼다([`Key::from_mac_keycode`]).
+//! 윈도우 scan code는 셸 경계에서 이 값으로 바꾼다([`Key::from_mac_keycode`],
+//! [`Key::from_windows_scancode`]).
 //! 배열 데이터 파일은 키를 쿼티 자리의 소문자 글자("q", ";", "/")로 적고,
 //! [`Key::from_qwerty`]로 읽는다.
 
@@ -279,6 +280,139 @@ impl Key {
             _ => 0,
         })
     }
+
+    /// 윈도우 스캔 코드(키 메시지 lParam의 16~23비트, set 1)와 확장 비트(lParam 24비트, E0 접두)를
+    /// 물리 키로 바꾼다. NumLock은 확장, Pause는 비확장 0x45로 온다(윈도우 키보드 드라이버 규칙).
+    /// 미디어 키처럼 키보드 페이지에 없는 키는 [`Key::UNKNOWN`]이다.
+    pub fn from_windows_scancode(scan: u16, extended: bool) -> Key {
+        Key(if extended {
+            match scan {
+                0x1C => 0x58, // Keypad Enter
+                0x1D => 0xE4, // Right Control
+                0x35 => 0x54, // Keypad /
+                0x37 => 0x46, // Print Screen
+                0x38 => 0xE6, // Right Alt
+                0x45 => 0x53, // Num Lock
+                0x47 => 0x4A, // Home
+                0x48 => 0x52, // Up
+                0x49 => 0x4B, // Page Up
+                0x4B => 0x50, // Left
+                0x4D => 0x4F, // Right
+                0x4F => 0x4D, // End
+                0x50 => 0x51, // Down
+                0x51 => 0x4E, // Page Down
+                0x52 => 0x49, // Insert
+                0x53 => 0x4C, // Delete
+                0x5B => 0xE3, // Left Windows
+                0x5C => 0xE7, // Right Windows
+                0x5D => 0x65, // Application (메뉴)
+                _ => 0,
+            }
+        } else {
+            match scan {
+                0x01 => 0x29, // Escape
+                0x02 => 0x1E, // 1
+                0x03 => 0x1F, // 2
+                0x04 => 0x20, // 3
+                0x05 => 0x21, // 4
+                0x06 => 0x22, // 5
+                0x07 => 0x23, // 6
+                0x08 => 0x24, // 7
+                0x09 => 0x25, // 8
+                0x0A => 0x26, // 9
+                0x0B => 0x27, // 0
+                0x0C => 0x2D, // -
+                0x0D => 0x2E, // =
+                0x0E => 0x2A, // Backspace
+                0x0F => 0x2B, // Tab
+                0x10 => 0x14, // Q
+                0x11 => 0x1A, // W
+                0x12 => 0x08, // E
+                0x13 => 0x15, // R
+                0x14 => 0x17, // T
+                0x15 => 0x1C, // Y
+                0x16 => 0x18, // U
+                0x17 => 0x0C, // I
+                0x18 => 0x12, // O
+                0x19 => 0x13, // P
+                0x1A => 0x2F, // [
+                0x1B => 0x30, // ]
+                0x1C => 0x28, // Enter
+                0x1D => 0xE0, // Left Control
+                0x1E => 0x04, // A
+                0x1F => 0x16, // S
+                0x20 => 0x07, // D
+                0x21 => 0x09, // F
+                0x22 => 0x0A, // G
+                0x23 => 0x0B, // H
+                0x24 => 0x0D, // J
+                0x25 => 0x0E, // K
+                0x26 => 0x0F, // L
+                0x27 => 0x33, // ;
+                0x28 => 0x34, // '
+                0x29 => 0x35, // `
+                0x2A => 0xE1, // Left Shift
+                0x2B => 0x31, // \
+                0x2C => 0x1D, // Z
+                0x2D => 0x1B, // X
+                0x2E => 0x06, // C
+                0x2F => 0x19, // V
+                0x30 => 0x05, // B
+                0x31 => 0x11, // N
+                0x32 => 0x10, // M
+                0x33 => 0x36, // ,
+                0x34 => 0x37, // .
+                0x35 => 0x38, // /
+                0x36 => 0xE5, // Right Shift
+                0x37 => 0x55, // Keypad *
+                0x38 => 0xE2, // Left Alt
+                0x39 => 0x2C, // Space
+                0x3A => 0x39, // Caps Lock
+                0x3B => 0x3A, // F1
+                0x3C => 0x3B, // F2
+                0x3D => 0x3C, // F3
+                0x3E => 0x3D, // F4
+                0x3F => 0x3E, // F5
+                0x40 => 0x3F, // F6
+                0x41 => 0x40, // F7
+                0x42 => 0x41, // F8
+                0x43 => 0x42, // F9
+                0x44 => 0x43, // F10
+                0x45 => 0x48, // Pause
+                0x46 => 0x47, // Scroll Lock
+                0x47 => 0x5F, // Keypad 7
+                0x48 => 0x60, // Keypad 8
+                0x49 => 0x61, // Keypad 9
+                0x4A => 0x56, // Keypad -
+                0x4B => 0x5C, // Keypad 4
+                0x4C => 0x5D, // Keypad 5
+                0x4D => 0x5E, // Keypad 6
+                0x4E => 0x57, // Keypad +
+                0x4F => 0x59, // Keypad 1
+                0x50 => 0x5A, // Keypad 2
+                0x51 => 0x5B, // Keypad 3
+                0x52 => 0x62, // Keypad 0
+                0x53 => 0x63, // Keypad .
+                0x56 => 0x64, // 102번째 키(ISO \)
+                0x57 => 0x44, // F11
+                0x58 => 0x45, // F12
+                0x59 => 0x67, // Keypad =
+                0x64 => 0x68, // F13
+                0x65 => 0x69, // F14
+                0x66 => 0x6A, // F15
+                0x67 => 0x6B, // F16
+                0x68 => 0x6C, // F17
+                0x69 => 0x6D, // F18
+                0x6A => 0x6E, // F19
+                0x6B => 0x6F, // F20
+                0x6C => 0x70, // F21
+                0x6D => 0x71, // F22
+                0x6E => 0x72, // F23
+                0x76 => 0x73, // F24
+                _ => 0,
+            }
+        })
+    }
 }
 
 impl fmt::Debug for Key {
@@ -437,6 +571,38 @@ mod tests {
         assert_eq!(Key::from_mac_keycode(0x00), Key::A);
         assert_eq!(Key::from_mac_keycode(0x3C), Key::SHIFT_RIGHT);
         assert_eq!(Key::from_mac_keycode(0x33), Key::BACKSPACE);
+    }
+
+    #[test]
+    fn windows_scancodes_cover_every_printable_key() {
+        let mut seen = std::collections::HashSet::new();
+        for extended in [false, true] {
+            for scan in 0..=0xFFu16 {
+                let k = Key::from_windows_scancode(scan, extended);
+                if k.is_printable() {
+                    assert!(!extended, "printable key {k:?} behind the E0 prefix");
+                    assert!(seen.insert(k), "duplicate mapping for {k:?}");
+                }
+            }
+        }
+        assert_eq!(seen.len(), 26 + 21);
+        assert_eq!(Key::from_windows_scancode(0x10, false), Key::Q);
+        assert_eq!(Key::from_windows_scancode(0x0E, false), Key::BACKSPACE);
+    }
+
+    #[test]
+    fn windows_scancodes_tell_left_from_right_and_keypad_from_arrows() {
+        let sc = Key::from_windows_scancode;
+        assert_eq!((sc(0x2A, false), sc(0x36, false)), (Key::SHIFT_LEFT, Key::SHIFT_RIGHT));
+        assert_eq!((sc(0x1D, false), sc(0x1D, true)), (Key::CONTROL_LEFT, Key::CONTROL_RIGHT));
+        assert_eq!((sc(0x38, false), sc(0x38, true)), (Key::ALT_LEFT, Key::ALT_RIGHT));
+        assert_eq!((sc(0x5B, true), sc(0x5C, true)), (Key::META_LEFT, Key::META_RIGHT));
+        assert_eq!((sc(0x1C, false), sc(0x1C, true)), (Key::ENTER, Key::NUMPAD_ENTER));
+        assert_eq!(sc(0x4B, true), Key::ARROW_LEFT);
+        assert_ne!(sc(0x4B, false), Key::ARROW_LEFT); // 숫자패드 4
+        assert_eq!((sc(0x53, true), sc(0x47, true)), (Key::DELETE, Key::HOME));
+        assert_eq!(sc(0x3A, false), Key::CAPS_LOCK);
+        assert_eq!(sc(0x20, true), Key::UNKNOWN); // 음소거(미디어 키)
     }
 
     #[test]

@@ -2,7 +2,7 @@
 미친놈을 위한 정신나간 입력기
 
 **C**ham**S**hin **S**ebeolsik(참신세벌식) + **G**raphite + **S**hin**G**etsu(新月配列).
-세 배열을 입력 소스 하나에서 전환하며 쓰는 한/영/일 올인원 입력기다. macOS를 먼저 만들고 Windows는 나중에 만든다.
+세 배열을 입력 소스 하나에서 전환하며 쓰는 한/영/일 올인원 입력기다. macOS를 먼저 만들었고, 지금 Windows를 만든다.
 설계 문서는 [CONCEPT.md](CONCEPT.md).
 
 ## 상태
@@ -35,7 +35,10 @@
   참신은 받침 없이 홈열 → 윗열 → 아랫열 → 겹모음·된소리, 받침도 같은 순서, 그다음 규칙(ㅗ·ㅜ, 문장부호, ❖).
   단계마다 자리 익히기 → 낱말 치기 → 줄 치기. 틀리면 넘어가지 않고, 모르는 키는 멈추면 보여 준다.
   기록은 `~/Library/Application Support/cssgsg/practice.json`. 같은 페이지(`practice/index.html`)를 브라우저로 열어도 된다(기록은 그 브라우저에)
-- [ ] Windows TSF (나중)
+- [~] Windows TSF 입력기(로드맵 3단계, 윈도우 11 VM에서 개발)
+  - [x] M3a: TSF 텍스트 서비스 뼈대(`win/tip`, Rust + windows 크레이트). 글자 키 → Graphite 글자 바로 확정, 단축키는 쿼티 자리,
+    등록·해제(`tools/win/tip-dev.ps1`). 패닉·FP 환경(MXCSR)이 앱으로 새지 않게 막는다. 실제 확인은 [확인 목록](docs/win-checklist.md)
+  - [ ] M3b 코어 엔진 연결(조합 밑줄, 세 모드, Shift 톡, 모드 아이콘) → M3c 후보창·게임 모드·UILess → M3d Mozc 변환 → M3e 설치기·설정 앱
 
 ## 구조
 
@@ -47,12 +50,13 @@ cli/        cssgsg-cli: 터미널에서 쳐보는 도구
 config-ffi/ 설정 앱용 C ABI: config.toml ↔ JSON(코어 Config를 그대로 쓴다. 설정 앱은 입력기 코어 대신 이것만 링크)
 mac/        macOS 입력기(cssgsg/, Swift + InputMethodKit)와 설정 앱(Settings/, SwiftUI), 둘이 같이 쓰는 Shared/.
             project.yml → xcodegen → cssgsg.xcodeproj(생성물, 커밋 안 함)
+win/        윈도우 입력기: tip/(TSF 텍스트 서비스 DLL, Rust + windows 크레이트). 맥에서는 빈 크레이트로 빌드된다
 mozc/       Mozc C API 래퍼(cssgsg용, libcssgsg_mozc.dylib). 소스·빌드는 build/mozc, build/mozc-out(tools/mozc/build.sh)
 .github/    Mozc 엔진 워크플로(mozc-component.yml): upstream Mozc가 바뀌면 GitHub에서 엔진을 빌드해 낸다
-tools/      ffi-smoke(C 헤더 확인), ohi-oracle(오이 차분 비교), crosscheck(배열 데이터 교차 검증),
+tools/      ffi-smoke(C 헤더 확인), ohi-oracle(오이 차분 비교), crosscheck(배열 데이터·키 코드 표 교차 검증),
             mac(pkg·릴리스·서명 스크립트, 셸·업데이트·설정 앱·Mozc 엔진 스모크 테스트), mozc(엔진 빌드·묶기),
-            learn(학습 페이지 빌드), practice(타자 연습 페이지 빌드·연습 글)
-docs/       verification.md(검증 현황), mac-checklist.md(설치 뒤 확인 목록), releases/(릴리스 노트)
+            win(입력기 개발용 설치·제거), learn(학습 페이지 빌드), practice(타자 연습 페이지 빌드·연습 글)
+docs/       verification.md(검증 현황), mac-checklist.md·win-checklist.md(설치 뒤 확인 목록), releases/(릴리스 노트)
 learn/      배열 학습 페이지(설정 앱 학습 탭). template.html → tools/learn/build.mjs → index.html
 practice/   타자 연습 페이지(세 언어, 단일 HTML). template.html + tools/practice/*.txt → tools/practice/build.mjs → index.html
 ```
@@ -126,6 +130,21 @@ bash tools/mac/release.sh 0.1.1 --notes-file docs/releases/v0.1.1.md    # 검사
 `release.sh`는 커밋·푸시하지 않은 변경이 있거나 검사가 하나라도 실패하면 멈춘다. 설치본을 바꾸는 길은 pkg 하나뿐이다
 (스크립트로 `~/Library`에 따로 깔면 같은 번들 ID가 두 곳에 생겨 입력 소스가 꼬인다).
 
+### 윈도우 입력기(개발)
+
+윈도우 11 VM에서 한다(스마트 앱 컨트롤 끔, 입력기를 처음 등록하기 전에 VM 스냅숏). 도구는 VS 빌드 도구(C++, Windows SDK, ATL), rustup, Node.js, GitHub CLI.
+C 런타임은 정적으로 링크해서(`.cargo/config.toml`) 입력기 DLL은 시스템 DLL에만 기댄다.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\win\tip-dev.ps1 install     # 빌드 → Program Files\cssgsg → 등록(관리자 창) → 내 입력 목록(en-US)에 추가
+powershell -ExecutionPolicy Bypass -File tools\win\tip-dev.ps1 uninstall   # 목록에서 빼기 → 등록 해제 → 파일·흔적 지우기(쓰는 중인 DLL은 다시 시작 때)
+powershell -ExecutionPolicy Bypass -File tools\win\tip-dev.ps1 status
+```
+
+입력기는 en-US 프로필 하나로 등록한다(기반 배치는 US 그대로, [CONCEPT.md](CONCEPT.md) §10.2). 고르는 곳은 Win+Space다.
+영어(미국) 언어 기능이 설치되지 않은 한국어 윈도우에서는 윈도우 설정의 언어 목록에 영어(미국)도 cssgsg도 보이지 않는다(입력 전환에는 보인다).
+그래서 넣고 빼기는 이 스크립트가 한다(나중에는 설치기와 설정 앱).
+
 ### 키열 문법
 
 보통 글자는 쿼티 자리, 대문자와 Shift 기호는 Shift. `{sp}` `{bs}` `{ent}` `{esc}` `{tab}` `{left}` …,
@@ -141,6 +160,8 @@ bash tools/mac/release.sh 0.1.1 --notes-file docs/releases/v0.1.1.md    # 검사
 ```bash
 cargo test                                         # 전수·공식 파일 대조 포함 (참신 11,172 음절, 新月 공식 표, Graphite 공식 keylayout)
 node tools/crosscheck/chamshin.mjs                 # 참신 키 배치 ↔ 타닥 배열도·오이 배열표
+node tools/crosscheck/keycodes.mjs                 # 맥 keyCode·윈도우 스캔 코드 표 ↔ Chromium DOM 코드 표
+cargo test -p cssgsg-tip                           # 윈도우 입력기(윈도우에서만): 팩토리, FP 환경, 패닉, 키 판정
 cd tools/ohi-oracle && npm install && node diff.mjs --count 20000   # 참신 조합 ↔ 오이 (무작위 키열)
 node tools/learn/build.mjs --check                # 학습 페이지 예시를 엔진으로 확인, index.html이 최신인지
 node tools/practice/build.mjs --check             # 타자 연습 페이지: 낱말·줄·예시를 모두 엔진으로 쳐 보고, index.html이 최신인지

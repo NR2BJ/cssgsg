@@ -1,3 +1,8 @@
 # ~/Documents는 Syncthing 동기화 폴더다. 빌드 산출물은 .stignore가 이미 막는 build/ 아래에 둔다.
 [build]
 target-dir = "build/cargo"
+
+# 윈도우: C 런타임을 정적으로 링크한다. 입력기 DLL은 아무 앱에나 올라가는데(시작 메뉴 검색처럼 DLL 검색 순서가 다른
+# 프로세스 포함), VCRUNTIME140.dll이 없거나 못 찾으면 아예 뜨지 않는다(chewing도 같은 까닭으로 정적 링크).
+[target.'cfg(all(windows, target_env = "msvc"))']
+rustflags = ["-C", "target-feature=+crt-static"]
