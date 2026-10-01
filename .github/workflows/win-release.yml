@@ -101,15 +101,14 @@ jobs:
           $setup = 'build/installer/cssgsg-setup.exe'
           $sha = (Get-FileHash $setup -Algorithm SHA256).Hash.ToLowerInvariant()
           $mozc = (Get-Content build/mozc-out/MOZC_VERSION -Raw).Trim()
-          $notes = @"
-          cssgsg for Windows $env:VERSION (x64, Windows 10 1809+ / 11).
-
-          Download cssgsg-setup.exe and run it. It is not code-signed: turn Smart App Control off, and choose More info > Run anyway if SmartScreen stops it. Uninstall from Settings > Apps.
-
-          SHA-256: $sha
-          Mozc: $mozc
-          "@
-          $flags = @('--title', "cssgsg for Windows $env:VERSION", '--notes', $notes, '--latest=false', '--target', $env:GITHUB_SHA)
+          # 릴리스 노트는 docs/releases/win-v<버전>.md(맥 릴리스처럼 한국어)가 있으면 그것, 없으면 짧은 영어 안내.
+          $file = "docs/releases/win-v$env:VERSION.md"
+          $intro = if (Test-Path $file) { (Get-Content $file -Raw -Encoding utf8).Trim() } else {
+            "cssgsg for Windows $env:VERSION (x64, Windows 10 1809+ / 11).`n`nDownload cssgsg-setup.exe and run it. It is not code-signed: turn Smart App Control off, and choose More info > Run anyway if SmartScreen stops it. Uninstall from Settings > Apps."
+          }
+          $notes = Join-Path $env:RUNNER_TEMP 'notes.md'
+          [IO.File]::WriteAllText($notes, "$intro`n`nSHA-256: $sha`nMozc: $mozc`n", (New-Object Text.UTF8Encoding $false))
+          $flags = @('--title', "cssgsg for Windows $env:VERSION", '--notes-file', $notes, '--latest=false', '--target', $env:GITHUB_SHA)
           if ($env:VERSION -match '-') { $flags += '--prerelease' }
           gh release create "win-v$env:VERSION" $setup @flags
           if ($LASTEXITCODE) { exit 1 }

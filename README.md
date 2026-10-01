@@ -179,6 +179,7 @@ Claude 데스크톱 앱(MSIX) 안의 셸에서 띄운 프로그램은 `%APPDATA%
 탐색기로 띄운다(`explorer.exe "…\cssgsg-settings.exe"`).
 
 릴리스는 GitHub Actions `win-release.yml`(손으로, 버전을 넣어)로 낸다: 검사 → Mozc 빌드·시험 → 설정 앱·설치기 → 릴리스 `win-v<버전>`.
+릴리스 노트는 `docs/releases/win-v<버전>.md`가 있으면 그것에 SHA-256·Mozc 판을 붙인다(`gh workflow run win-release.yml -f version=0.1.0`).
 맥 업데이트를 깨지 않게 "최신"으로 두지 않는다(맥은 `/releases/latest`의 `cssgsg.pkg`를 본다).
 C 런타임은 정적으로 링크해서(`.cargo/config.toml`) 입력기 DLL은 시스템 DLL에만 기댄다.
 
