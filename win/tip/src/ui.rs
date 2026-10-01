@@ -11,6 +11,7 @@ use std::rc::Rc;
 use std::sync::Once;
 
 use cssgsg_core::Mode;
+use cssgsg_core::config::{HudPosition, WindowsConfig};
 use cssgsg_core::engine::{CAND_GRID_COLUMNS, CAND_GRID_PAGE, CAND_LIST_PAGE, Candidates};
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
 use windows::Win32::Graphics::Dwm::{DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute};
@@ -335,12 +336,11 @@ impl Drop for Popup {
 
 // ---- 후보창 --------------------------------------------------------------------------------------
 
-/// 맥 후보창의 기본 글꼴 크기(설정 candidate_font_size 기본값, 96 DPI 픽셀로 쓴다).
-const FONT_SIZE: i32 = 15;
-
 struct CandidateView {
     candidates: Candidates,
     japanese: bool,
+    /// 후보 글자 크기(96 DPI 픽셀, 설정 `[windows] candidate_font_size`).
+    font_size: i32,
     theme: Theme,
     dpi: u32,
     /// 그릴 때 쓰는 값(show에서 잰다).
@@ -366,7 +366,7 @@ struct CandidateFonts {
 impl CandidateView {
     fn fonts(&self) -> CandidateFonts {
         let face = if self.japanese { w!("Yu Gothic UI") } else { w!("Malgun Gothic") };
-        let size = px(FONT_SIZE, self.dpi);
+        let size = px(self.font_size, self.dpi);
         let grid = self.candidates.grid;
         CandidateFonts {
             text: Font::new(if grid { size - px(1, self.dpi) } else { size }, false, face),
@@ -413,7 +413,7 @@ impl CandidateView {
                 cell = cell.max(text_width(dc, &f.text, item) + px(16, d));
             }
             let rows = (end - start).div_ceil(CAND_GRID_COLUMNS) as i32;
-            let row = px(26, d).max(px(FONT_SIZE, d) * 185 / 100);
+            let row = px(26, d).max(px(self.font_size, d) * 185 / 100);
             self.layout = Layout {
                 width: cell * CAND_GRID_COLUMNS as i32 + pad * 2,
                 height: pad * 2 + rows * row + footer,
@@ -423,7 +423,7 @@ impl CandidateView {
                 footer,
             };
         } else {
-            let number = px(22, d).max(px(FONT_SIZE - 2, d) * 18 / 10);
+            let number = px(22, d).max(px(self.font_size - 2, d) * 18 / 10);
             let mut width = px(160, d);
             for i in start..end {
                 let mut w = text_width(dc, &f.text, &c.items[i]);
@@ -432,7 +432,7 @@ impl CandidateView {
                 }
                 width = width.max(px(6, d) + number + px(2, d) + w + px(12, d));
             }
-            let row = px(24, d).max(px(FONT_SIZE, d) * 17 / 10);
+            let row = px(24, d).max(px(self.font_size, d) * 17 / 10);
             self.layout = Layout {
                 width,
                 height: pad * 2 + (end - start) as i32 * row + footer,
@@ -550,7 +550,8 @@ fn mouse_anchor(dpi: u32) -> RECT {
 
 impl CandidateWindow {
     /// 후보를 기준 사각형(조합이나 포커스 문절, 화면 좌표) 아래에 보인다. 모르면 마우스 옆.
-    pub fn show(&mut self, candidates: &Candidates, japanese: bool, anchor: Option<RECT>) {
+    /// `font_size`는 후보 글자 크기(96 DPI 픽셀).
+    pub fn show(&mut self, candidates: &Candidates, japanese: bool, anchor: Option<RECT>, font_size: i32) {
         if candidates.items.is_empty() {
             self.hide();
             return;
@@ -562,6 +563,7 @@ impl CandidateWindow {
         let mut view = CandidateView {
             candidates: candidates.clone(),
             japanese,
+            font_size,
             theme: theme(),
             dpi: popup.dpi(),
             layout: Layout::default(),
@@ -684,6 +686,8 @@ impl Hud {
 pub struct Screen {
     candidates: CandidateWindow,
     hud: Hud,
+    /// 설정 파일의 `[windows]`(모드 HUD를 보일지·어디에, 후보 글자 크기).
+    settings: WindowsConfig,
     /// 보일 후보(Some(None)이면 닫기). 다음 [`Screen::flush`]에서 맞춘다.
     pending_candidates: Option<Option<Candidates>>,
     pending_hud: Option<Mode>,
@@ -693,12 +697,16 @@ pub struct Screen {
 }
 
 impl Screen {
+    pub fn set_settings(&mut self, settings: WindowsConfig) {
+        self.settings = settings;
+    }
+
     /// 엔진 출력의 화면 변경을 받아 둔다. `hud`는 이 앱에서 모드를 바꿨을 때만(다른 앱을 따라갈 때는 보이지 않는다).
     pub fn queue(&mut self, candidates: Option<Option<Candidates>>, hud: Option<Mode>, japanese: bool) {
         if candidates.is_some() {
             self.pending_candidates = candidates;
         }
-        if hud.is_some() {
+        if hud.is_some() && self.settings.hud {
             self.pending_hud = hud;
         }
         self.japanese = japanese;
@@ -715,12 +723,18 @@ impl Screen {
         }
         let rect = rect.or(self.last);
         match self.pending_candidates.take() {
-            Some(Some(c)) => self.candidates.show(&c, self.japanese, rect),
+            Some(Some(c)) => {
+                self.candidates.show(&c, self.japanese, rect, self.settings.candidate_font_size as i32)
+            }
             Some(None) => self.candidates.hide(),
             None => {}
         }
         if let Some(mode) = self.pending_hud.take() {
-            self.hud.show(mode, rect);
+            let at = match self.settings.hud_position {
+                HudPosition::Caret => rect,
+                HudPosition::Mouse => None,
+            };
+            self.hud.show(mode, at);
         }
     }
 
@@ -752,7 +766,7 @@ mod tests {
             page: Some((2, 2)),
             grid: false,
         };
-        w.show(&c, true, Some(RECT { left: 200, top: 200, right: 210, bottom: 220 }));
+        w.show(&c, true, Some(RECT { left: 200, top: 200, right: 210, bottom: 220 }), 15);
         assert!(w.visible());
         let view = w.view.borrow();
         let v = view.as_ref().unwrap();
@@ -776,6 +790,7 @@ mod tests {
         let v = CandidateView {
             candidates: c,
             japanese: false,
+            font_size: 15,
             theme: theme(),
             dpi: 96,
             layout: Layout::default(),

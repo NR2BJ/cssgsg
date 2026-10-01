@@ -2,7 +2,8 @@
 #
 # - 맥 업데이트를 깨지 않게 "최신(latest)"으로 두지 않는다: 맥 정식 채널과 README 설치 명령은 /releases/latest의 cssgsg.pkg를 보고,
 #   베타 채널은 pkg가 붙은 릴리스만 본다. 버전에 -가 붙으면(0.2.0-beta.1) prerelease다.
-# - 다 통과해야 낸다: cargo fmt·clippy·test, Mozc 엔진 빌드와 코어 Mozc 시험(LoadLibraryExW), 설치기 빌드.
+# - 다 통과해야 낸다: cargo fmt·clippy·test, Mozc 엔진 빌드와 코어 Mozc 시험(LoadLibraryExW), 설정 앱(.NET)과 설치기 빌드.
+# - 설정 앱의 업데이트는 태그가 win-v로 시작하고 cssgsg-setup.exe가 붙은 릴리스를 본다(GitHub가 매긴 SHA-256과 맞춰 본다).
 #   Mozc 엔진은 tools/mozc/MOZC_COMMIT으로 빌드한다(캐시는 mozc-windows.yml과 같이 쓴다).
 name: Windows release
 
@@ -85,6 +86,12 @@ jobs:
         run: |
           cargo test -q -p cssgsg-core --features mozc --test mozc
           if ($LASTEXITCODE) { exit 1 }
+
+      # 설정 앱(WinUI 3, 네이티브 AOT)은 .NET 10 SDK로 빌드한다. 링커(MSVC)는 러너의 Visual Studio에 있다.
+      - name: .NET SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
 
       - name: Build the installer
         run: ./tools/win/build-installer.ps1 $env:VERSION

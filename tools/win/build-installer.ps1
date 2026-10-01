@@ -3,6 +3,7 @@
 #   powershell -ExecutionPolicy Bypass -File tools\win\build-installer.ps1 0.1.0
 #
 # - 입력기 DLL과 엔진 호스트를 릴리스로 빌드한다(따로: 같이 빌드하면 코어 기능이 합쳐져 호스트의 Mozc 코드가 DLL에도 들어간다).
+# - 설정 앱은 build-settings.ps1이 빌드한다(.NET 10 SDK, MSVC 링커).
 # - Mozc 엔진은 build\mozc-out에 있어야 한다: tools\mozc\build-windows.ps1로 빌드했거나 워크플로(mozc-windows.yml) 묶음을 푼 것.
 # - Inno Setup 6의 ISCC가 필요하다: 환경 변수 ISCC, PATH, 또는 보통 설치 자리(Program Files (x86), %LOCALAPPDATA%\Programs).
 #   winget install JRSoftware.InnoSetup. GitHub windows 러너에는 들어 있다.
@@ -33,6 +34,9 @@ $Iscc = Find-Iscc
 foreach ($f in 'build\mozc-out\lib\cssgsg_mozc.dll', 'build\mozc-out\data\mozc.data', 'build\mozc-out\MOZC_VERSION') {
     if (-not (Test-Path (Join-Path $Root $f))) { throw "missing $f (tools\mozc\build-windows.ps1 or the mozc-windows.yml package)" }
 }
+
+# 설정 앱(WinUI 3, .NET 10 SDK가 필요하다) → build\settings\publish
+& (Join-Path $PSScriptRoot 'build-settings.ps1') $Version
 
 Push-Location $Root
 # cargo는 진행 상황을 표준 오류로 낸다. Windows PowerShell 5.1은 그걸 오류로 바꾸니 잠깐 푼다.

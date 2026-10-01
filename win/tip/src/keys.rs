@@ -3,9 +3,9 @@
 use cssgsg_core::{Key, KeyEvent, Mods};
 use windows::Win32::Foundation::{LPARAM, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetKeyState, MAPVK_VK_TO_VSC, MapVirtualKeyW, VIRTUAL_KEY, VK_CAPITAL, VK_DELETE, VK_DOWN, VK_END,
-    VK_HOME, VK_INSERT, VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_NEXT, VK_PRIOR, VK_RCONTROL,
-    VK_RIGHT, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_UP,
+    GetAsyncKeyState, GetKeyState, MAPVK_VK_TO_VSC, MapVirtualKeyW, VIRTUAL_KEY, VK_CAPITAL, VK_DELETE,
+    VK_DOWN, VK_END, VK_HOME, VK_INSERT, VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_NEXT,
+    VK_PRIOR, VK_RCONTROL, VK_RIGHT, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_UP,
 };
 
 /// lParam의 스캔 코드(16~23비트)와 확장 비트(24비트). 스캔 코드가 0이면(WPF 앱, 가상 키만 준 SendInput) 가상 키로 찾는다.
@@ -68,6 +68,28 @@ pub fn mods(key: Key, down: bool) -> Mods {
             bits |= own;
         } else {
             bits &= !own;
+        }
+    }
+    Mods(bits)
+}
+
+/// 지금 실제로 누르고 있는 수식키(GetAsyncKeyState, 좌우 구분). 빠른 탭 전환 보정의 타이머가 묻는다:
+/// 메시지 큐의 키 상태(GetKeyState)는 아직 오지 않은 뗌을 모른다.
+pub fn physical_mods() -> Mods {
+    const SIDES: [(VIRTUAL_KEY, u32); 8] = [
+        (VK_LSHIFT, Mods::SHIFT_L),
+        (VK_RSHIFT, Mods::SHIFT_R),
+        (VK_LCONTROL, Mods::CTRL_L),
+        (VK_RCONTROL, Mods::CTRL_R),
+        (VK_LMENU, Mods::ALT_L),
+        (VK_RMENU, Mods::ALT_R),
+        (VK_LWIN, Mods::META_L),
+        (VK_RWIN, Mods::META_R),
+    ];
+    let mut bits = 0;
+    for (vk, bit) in SIDES {
+        if unsafe { GetAsyncKeyState(vk.0 as i32) } < 0 {
+            bits |= bit;
         }
     }
     Mods(bits)

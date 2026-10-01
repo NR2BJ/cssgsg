@@ -232,7 +232,7 @@ fn serve(pipe: Pipe, client: u64, jobs: &Sender<Job>, clients: &AtomicUsize) {
 /// 엔진 스레드: 변환 엔진을 만들고 요청을 차례로 처리한다. `idle_exit`을 주면(시험) 이어진 입력기가 없이 그만큼 지났을 때
 /// 프로세스를 끝낸다.
 fn engine(inbox: Receiver<Job>, options: &Options, clients: &AtomicUsize, idle_exit: Option<Duration>) {
-    let (mut converter, version) = load_engine(options);
+    let (mut converter, mut version) = load_engine(options);
     let mut files = UserFiles::open(options.user_dir.clone().unwrap_or_else(default_user_dir));
     let mut owner: Option<u64> = None;
     let mut last = Instant::now();
@@ -284,6 +284,29 @@ fn engine(inbox: Receiver<Job>, options: &Options, clients: &AtomicUsize, idle_e
                         converter.reload();
                         Reply::Done
                     }
+                    Request::ClearHanjaLearning => {
+                        files.clear_learning();
+                        log("hanja learning cleared");
+                        Reply::Done
+                    }
+                    Request::ClearMozcLearning => {
+                        // 엔진이 학습 파일을 열어 두고 있어서(윈도우는 연 파일을 지울 수 없다) 먼저 내린다.
+                        // 하던 변환은 버린다(그 입력기의 다음 명령은 Lost: 보이던 글자를 그대로 확정한다).
+                        owner = None;
+                        drop(std::mem::replace(&mut converter, Box::new(EchoConverter::default())));
+                        let cleared = clear_mozc_learning(&profile_dir(options));
+                        (converter, version) = load_engine(options);
+                        match cleared {
+                            Ok(n) => {
+                                log(&format!("Mozc learning cleared ({n} files)"));
+                                Reply::Done
+                            }
+                            Err(message) => {
+                                log(&format!("Mozc learning: {message}"));
+                                Reply::Error { message }
+                            }
+                        }
+                    }
                 };
                 let _ = reply.send(answer);
             }
@@ -320,7 +343,7 @@ fn load_engine(options: &Options) -> (Box<dyn Converter>, Option<String>) {
         return (Box::new(EchoConverter::default()), None);
     }
     let dir = options.engine_dir.clone().unwrap_or_else(|| exe_dir().join("mozc"));
-    let profile = options.profile.clone().unwrap_or_else(default_profile);
+    let profile = profile_dir(options);
     // Mozc는 프로필 폴더를 만들지 않고, 비우면 upstream Mozc의 폴더(%LOCALAPPDATA%\Mozc)를 쓴다.
     if let Err(e) = std::fs::create_dir_all(&profile) {
         log(&format!("profile folder: {e}"));
@@ -344,8 +367,30 @@ fn load_engine(options: &Options) -> (Box<dyn Converter>, Option<String>) {
     }
 }
 
+/// Mozc가 배운 것을 적는 파일(맥 설정 앱이 지우는 것과 같다): 문절 나누기, 고른 후보, 전각·반각, 추천 기록.
+/// 사용자 사전(user_dictionary.db)과 Mozc 설정(config1.db)은 남긴다.
+const MOZC_LEARNING: [&str; 4] = ["segment.db", "boundary.db", "cform.db", ".history.db"];
+
+/// 학습 파일을 지운다(엔진을 내린 뒤). 지운 수, 못 지운 파일이 있으면 까닭.
+fn clear_mozc_learning(profile: &Path) -> Result<usize, String> {
+    let mut removed = 0;
+    for name in MOZC_LEARNING {
+        match std::fs::remove_file(profile.join(name)) {
+            Ok(()) => removed += 1,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("{name}: {e}")),
+        }
+    }
+    Ok(removed)
+}
+
 fn exe_dir() -> PathBuf {
     std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)).unwrap_or_default()
+}
+
+/// Mozc 학습·사용자 사전 폴더(`--profile`, 보통 %LOCALAPPDATA%\cssgsg\mozc).
+fn profile_dir(options: &Options) -> PathBuf {
+    options.profile.clone().unwrap_or_else(default_profile)
 }
 
 fn default_profile() -> PathBuf {

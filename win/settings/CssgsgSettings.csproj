@@ -1,0 +1,67 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- cssgsg 윈도우 설정 앱(WinUI 3). 맥의 cssgsgSettings.app(SwiftUI)과 같은 탭과 설정이다.
+       패키지 없이(unpackaged) 돌고, .NET과 Windows App SDK를 앱에 같이 넣어(self-contained) 따로 깔 런타임이 없다.
+       설정 파일은 러스트 코어의 config-ffi(cssgsg_config.dll)로 읽고 쓴다(모양과 값 검사는 코어 한 곳).
+       빌드: tools\win\build-settings.ps1(설치기 빌드가 부른다) → build\settings\publish -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RootNamespace>Cssgsg.Settings</RootNamespace>
+    <AssemblyName>cssgsg-settings</AssemblyName>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <SelfContained>true</SelfContained>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\cssgsg.ico</ApplicationIcon>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <Version>0.1.0</Version>
+    <!-- 배포(dotnet publish)는 네이티브 AOT: 다듬지 않은 .NET 런타임과 Windows SDK 투영(25MB)을 넣지 않고 빨리 뜬다.
+         그래서 리플렉션을 쓰지 않는다(JSON은 JsonNode, XAML은 {Binding} 대신 코드). -->
+    <PublishAot>true</PublishAot>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Microsoft.WindowsAppSDK 묶음 패키지는 AI·ML(onnxruntime, DirectML)·검색까지 딸려 와서 앱이 230MB였다.
+         WinUI만 받는다(Base·Foundation·InteractiveExperiences·WebView2가 따라온다). -->
+    <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="2.3.9" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.InteractiveExperiences" Version="2.1.9" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2705" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Assets\cssgsg.ico" CopyToOutputDirectory="PreserveNewest" />
+    <!-- 배열 학습·타자 연습 페이지(맥 설정 앱과 같은 파일, tools/learn·tools/practice가 만든다). -->
+    <Content Include="..\..\learn\index.html" Link="learn\index.html" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\practice\index.html" Link="practice\index.html" CopyToOutputDirectory="PreserveNewest" />
+    <!-- 설정 파일 읽기·쓰기: config-ffi를 릴리스로 빌드한 것(tools\win\build-settings.ps1). -->
+    <Content Include="..\..\build\cargo\release\cssgsg_config.dll" Link="cssgsg_config.dll" CopyToOutputDirectory="PreserveNewest"
+             Condition="Exists('..\..\build\cargo\release\cssgsg_config.dll')" />
+  </ItemGroup>
+
+  <!-- 앱 버전을 코드에 넣는다(-p:Version=…). AOT에서도 리플렉션 없이 읽는다. -->
+  <!-- XAML 컴파일러가 먼저 한 번 컴파일하므로(XamlPreCompile) 빌드 처음에 만든다. -->
+  <Target Name="WriteBuildInfo" BeforeTargets="BeforeBuild">
+    <PropertyGroup>
+      <BuildInfoFile>$(IntermediateOutputPath)BuildInfo.g.cs</BuildInfoFile>
+    </PropertyGroup>
+    <WriteLinesToFile File="$(BuildInfoFile)" Overwrite="true" WriteOnlyWhenDifferent="true"
+                      Lines="namespace Cssgsg.Settings%3B static class BuildInfo { public const string Version = &quot;$(Version)&quot;%3B }" />
+    <ItemGroup>
+      <Compile Include="$(BuildInfoFile)" />
+    </ItemGroup>
+  </Target>
+
+  <!-- 패키지 없는 앱을 publish하면 앱의 리소스 파일(.pri, 컴파일한 XAML이 들어 있다)이 빠져서 XAML을 읽다 죽는다
+       (0xC000027B). 빌드 결과에서 옮겨 온다. -->
+  <Target Name="CopyAppPriToPublish" AfterTargets="Publish">
+    <Copy SourceFiles="$(OutDir)$(TargetName).pri" DestinationFolder="$(PublishDir)" />
+  </Target>
+</Project>

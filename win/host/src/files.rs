@@ -89,6 +89,14 @@ impl UserFiles {
         self.dirty_since.get_or_insert_with(Instant::now);
     }
 
+    /// 한자 기억을 모두 지운다(설정 앱). 빈 기억을 바로 저장하고, 입력기들은 다음 Sync에 받는다.
+    pub fn clear_learning(&mut self) {
+        self.learning = Learning::default();
+        self.learning_version = version_of(&self.learning.to_tsv());
+        self.dirty_since = Some(Instant::now());
+        self.save(true);
+    }
+
     /// 모아 둔 한자 기억을 저장한다(2초 모였거나 `now`). 임시 파일에 쓰고 바꿔 넣는다(쓰다 끊겨도 앞 파일이 남는다).
     pub fn save(&mut self, now: bool) {
         let Some(since) = self.dirty_since else { return };

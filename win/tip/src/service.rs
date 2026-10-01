@@ -14,7 +14,9 @@ use std::rc::Rc;
 
 use cssgsg_core::hanja::Learning;
 use cssgsg_core::{Config, Context, Engine, Mode, Output};
+use windows::Win32::Foundation::HWND;
 use windows::Win32::Foundation::{E_UNEXPECTED, LPARAM, WPARAM};
+use windows::Win32::System::SystemInformation::GetTickCount;
 use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE,
@@ -32,7 +34,7 @@ use windows::Win32::UI::TextServices::{
     ITfThreadMgrEventSink_Impl, TF_E_SYNCHRONOUS, TF_ES_ASYNCDONTCARE, TF_ES_READ, TF_ES_READWRITE,
     TF_ES_SYNC, TF_SD_READONLY,
 };
-use windows::Win32::UI::WindowsAndMessaging::GetMessageTime;
+use windows::Win32::UI::WindowsAndMessaging::{GetMessageTime, KillTimer, SetTimer};
 use windows::core::{
     BOOL, ComObject, GUID, HRESULT, IUnknown, IUnknownImpl, Interface, Ref, Result, implement,
 };
@@ -185,6 +187,37 @@ enum When {
 /// 문서를 고칠 일이 있는지(확정·조합).
 fn has_edits(out: &Output) -> bool {
     !plan(out).is_empty()
+}
+
+thread_local! {
+    /// 엔진이 청한 타이머(빠른 탭 전환 보정이 잡아 둔 글자)와 그것을 부를 텍스트 서비스. 스레드에 하나만 둔다
+    /// (엔진은 늦게 온 타이머를 스스로 걸러 내고 남은 시간을 다시 청한다).
+    static ENGINE_TIMER: RefCell<Option<(usize, ComObject<TextService>)>> = const { RefCell::new(None) };
+}
+
+/// 스레드 타이머(창 없음). 앱의 메시지 루프가 WM_TIMER를 이리로 보낸다.
+unsafe extern "system" fn engine_timer_fired(_hwnd: HWND, _msg: u32, id: usize, _time: u32) {
+    let _ = unsafe { KillTimer(None, id) };
+    let service = ENGINE_TIMER.with(|t| {
+        let mut slot = t.borrow_mut();
+        match slot.take() {
+            Some((pending, service)) if pending == id => Some(service),
+            other => {
+                *slot = other;
+                None
+            }
+        }
+    });
+    if let Some(service) = service {
+        guarded(|| (), || service.timer());
+    }
+}
+
+/// 걸어 둔 엔진 타이머를 거둔다(입력기를 끌 때).
+fn cancel_engine_timer() {
+    if let Some((id, _)) = ENGINE_TIMER.with(|t| t.borrow_mut().take()) {
+        let _ = unsafe { KillTimer(None, id) };
+    }
 }
 
 fn mode_value(mode: Mode, last_non_en: Mode) -> i32 {
@@ -350,6 +383,9 @@ impl TextService_Impl {
         if let Some(c) = config {
             match Config::from_toml_windows(&c.text) {
                 Ok(parsed) => {
+                    if let Ok(mut screen) = self.screen.try_borrow_mut() {
+                        screen.set_settings(parsed.windows.clone());
+                    }
                     a.engine.set_config(parsed);
                     a.synced.0 = c.version;
                     debug_log("settings applied");
@@ -365,6 +401,7 @@ impl TextService_Impl {
     }
 
     fn deactivate(&self) {
+        cancel_engine_timer();
         self.end_composition();
         let Some(a) = self.state.try_borrow_mut().ok().and_then(|mut s| s.take()) else { return };
         unsafe {
@@ -606,8 +643,51 @@ impl TextService_Impl {
         if out.caps_lock_off && keys::caps_on() {
             toggle_caps_lock();
         }
-        if out.timer_ms.is_some() {
-            debug_log("timer requested (quick tap buffering is not wired on Windows yet)");
+        if let Some(ms) = out.timer_ms {
+            self.schedule_timer(ms);
+        }
+    }
+
+    /// 빠른 탭 전환 보정이 글자를 잡아 두었다: `ms` 뒤에 엔진을 부른다(맥 scheduleTimer와 같다).
+    fn schedule_timer(&self, ms: u32) {
+        cancel_engine_timer();
+        let id = unsafe { SetTimer(None, 0, ms.max(1), Some(engine_timer_fired)) };
+        if id == 0 {
+            debug_log("engine timer: SetTimer failed");
+            return;
+        }
+        ENGINE_TIMER.with(|t| *t.borrow_mut() = Some((id, self.to_object())));
+    }
+
+    /// 엔진 타이머: 시간이 다 됐으면 엔진이 잡아 둔 글자를 누른 그대로 친다. 지금 포커스가 있는 문맥에 넣는다
+    /// (글자를 잡은 키와 같은 입력칸이다: 포커스가 옮겨 가면 조합을 끝내며 엔진도 비운다).
+    fn timer(&self) {
+        let now = match self.clock.try_borrow_mut() {
+            Ok(mut clock) => clock.seconds(unsafe { GetTickCount() }),
+            Err(_) => return,
+        };
+        let (out, thread_mgr) = {
+            let Ok(mut state) = self.state.try_borrow_mut() else { return };
+            let Some(a) = state.as_mut() else { return };
+            let out = a.engine.timer(now, keys::physical_mods());
+            if let Ok(mut screen) = self.screen.try_borrow_mut() {
+                screen.queue(out.candidates.clone(), out.mode, a.engine.mode() == Mode::Ja);
+            }
+            (out, a.thread_mgr.clone())
+        };
+        if out == Output::default() {
+            return;
+        }
+        if out.timer_ms.is_none() {
+            debug_log(&format!("engine timer: flushed (commit={})", out.commit.chars().count()));
+        }
+        self.after(&out);
+        let context = unsafe { thread_mgr.GetFocus() }.ok().and_then(|d| unsafe { d.GetTop() }.ok());
+        match context {
+            Some(context) => {
+                self.apply(&context, &out, When::Whenever);
+            }
+            None => self.refresh_screen(None),
         }
     }
 

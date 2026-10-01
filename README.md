@@ -45,8 +45,12 @@
     비밀번호 칸은 모드와 상관없이 Graphite로 친다(단축키는 쿼티 자리, 맥보다 앞섬). 남은 것: UILess(게임), 게임 모드, 콘솔
   - [~] M3d 일본어 한자 변환(1차): 맥과 같은 Mozc를 윈도우용으로 빌드(GitHub Actions `mozc-windows.yml`)하고, 사용자당 하나인
     엔진 호스트(`cssgsg-host.exe`, 로그인부터 늘 켜 둠)에 앱마다의 입력기가 파이프로 묻는다. 호스트에 닿지 못하면 히라가나·가타카나만.
-    남은 것: 맥 엔진과 한 릴리스로 내기, 엔진 업데이트, 사용자 사전
-  - [ ] M3e 설치기·설정 앱(WinUI 3)
+    설정 파일(`%APPDATA%\cssgsg\config.toml`, 맥과 같은 형식)과 고른 한자 기억도 호스트가 읽고 쓰고 입력기에 나눠 준다.
+    남은 것: 맥 엔진과 한 릴리스로 내기, 엔진만 따로 업데이트
+  - [x] M3e 설치기(Inno Setup, 시작 메뉴 "cssgsg 설정")와 설정 앱(`win/settings`, WinUI 3 + .NET 10 네이티브 AOT): 맥과 같은 탭
+    (일반·한국어·일본어·배열 학습·타자 연습·정보), 단축키 녹화(스캔 코드, Alt·Windows 키는 받지 않음), 개인 사전, 한자·Mozc 학습 지우기,
+    화면 언어 한국어·English·日本語, 업데이트(정식·베타, `win-v` 릴리스). 맥의 Shift+Enter 대기와 입력기 권한은 윈도우에 없다.
+    빠른 탭 전환 보정 타이머, 모드 표시 끄기·자리, 후보창 글자 크기(`[windows]`)도 입력기에 들어갔다. 메인 PC 확인 대기
 
 ## 구조
 
@@ -58,14 +62,16 @@ cli/        cssgsg-cli: 터미널에서 쳐보는 도구
 config-ffi/ 설정 앱용 C ABI: config.toml ↔ JSON(코어 Config를 그대로 쓴다. 설정 앱은 입력기 코어 대신 이것만 링크)
 mac/        macOS 입력기(cssgsg/, Swift + InputMethodKit)와 설정 앱(Settings/, SwiftUI), 둘이 같이 쓰는 Shared/.
             project.yml → xcodegen → cssgsg.xcodeproj(생성물, 커밋 안 함)
-win/        윈도우: tip/(TSF 텍스트 서비스 DLL, Rust + windows 크레이트), host/(엔진 호스트 cssgsg-host.exe, 일본어 변환·설치기의 사용자 단계),
-            ipc/(입력기와 호스트 사이의 메시지·파이프), installer/(Inno Setup 설치기). 맥에서는 빈 크레이트로 빌드된다
+win/        윈도우: tip/(TSF 텍스트 서비스 DLL, Rust + windows 크레이트), host/(엔진 호스트 cssgsg-host.exe, 일본어 변환·설정 파일·
+            한자 기억·설치기의 사용자 단계), ipc/(입력기와 호스트 사이의 메시지·파이프), installer/(Inno Setup 설치기),
+            settings/(설정 앱, WinUI 3 + C#, 설정 파일은 config-ffi의 cssgsg_config.dll로). 러스트 크레이트는 맥에서 빈 크레이트로 빌드된다
 mozc/       Mozc C API 래퍼(cssgsg용, libcssgsg_mozc.dylib). 소스·빌드는 build/mozc, build/mozc-out(tools/mozc/build.sh)
 .github/    Mozc 엔진 워크플로(mozc-component.yml: upstream Mozc가 바뀌면 맥 엔진을 빌드해 낸다, mozc-windows.yml: 윈도우 엔진을 손으로),
             윈도우 릴리스(win-release.yml: 설치기를 빌드해 win-v<버전>으로)
 tools/      ffi-smoke(C 헤더 확인), ohi-oracle(오이 차분 비교), crosscheck(배열 데이터·키 코드 표 교차 검증),
             mac(pkg·릴리스·서명 스크립트, 셸·업데이트·설정 앱·Mozc 엔진 스모크 테스트), mozc(엔진 빌드·묶기),
-            win(입력기 개발용 설치·제거, 입력칸 시험 페이지), learn(학습 페이지 빌드), practice(타자 연습 페이지 빌드·연습 글)
+            win(입력기 개발용 설치·제거, 설정 앱·설치기 빌드, 아이콘 만들기, 입력칸 시험 페이지), learn(학습 페이지 빌드),
+            practice(타자 연습 페이지 빌드·연습 글)
 docs/       verification.md(검증 현황), mac-checklist.md·win-checklist.md(설치 뒤 확인 목록), releases/(릴리스 노트)
 learn/      배열 학습 페이지(설정 앱 학습 탭). template.html → tools/learn/build.mjs → index.html
 practice/   타자 연습 페이지(세 언어, 단일 HTML). template.html + tools/practice/*.txt → tools/practice/build.mjs → index.html
@@ -148,21 +154,31 @@ GitHub 릴리스 `win-v<버전>`의 `cssgsg-setup.exe`를 받아 실행한다(x6
   엔진 호스트를 시작 프로그램에 넣어 띄운다. 끝나면 Win+Space로 cssgsg(ENG)를 고른다. 이미 열려 있던 앱은 다시 열면 새 입력기를 쓴다.
 - 서명이 없다: 스마트 앱 컨트롤이 켜져 있으면 입력기가 뜨지 않는다(Windows 보안 → 앱 및 브라우저 컨트롤). SmartScreen이 막으면
   "추가 정보 → 실행"을 누른다.
-- 업데이트는 새 설치기를 받아 실행하면 그대로 덮어 설치된다(다시 시작 필요 없음). 앱 안 업데이트는 설정 앱과 함께 넣는다.
-- 지우기: 설정 → 앱 → 설치된 앱 → cssgsg. 학습·사용자 사전(`%LOCALAPPDATA%\cssgsg`)은 남는다. 쓰는 중이던 DLL은 다시 시작할 때 지워진다.
+- 설정: 시작 메뉴 → **cssgsg 설정**. 바꾼 것은 글자를 치던 앱으로 돌아가면(입력칸을 다시 누르거나 앱을 바꾸면) 적용된다.
+  설정 파일은 `%APPDATA%\cssgsg\config.toml`(맥과 같은 형식, 윈도우 화면 설정은 `[windows]`)로 직접 고쳐도 된다.
+- 업데이트: cssgsg 설정 → 정보 탭. 정식·베타 채널을 고르고(베타는 시험판도 받는다), 탭을 열 때 확인한다. "설치"를 누르면 받아서
+  GitHub가 적은 SHA-256과 맞춰 보고 설치기를 돌린다(관리자 권한 창). 끝나면 설정 앱이 다시 열린다. 새 설치기를 직접 받아 실행해도 된다.
+- 지우기: 설정 → 앱 → 설치된 앱 → cssgsg. 설정·학습·사용자 사전(`%APPDATA%\cssgsg`, `%LOCALAPPDATA%\cssgsg`)은 남는다.
+  쓰는 중이던 DLL은 다시 시작할 때 지워진다.
 - 엄격한 커널 안티치트 게임(발로란트·롤의 뱅가드, FACEIT 등)은 확인되기 전까지 켜기 전에 Win+Space로 기본 한국어 입력기로 바꿔 둔다
   (입력기 DLL이 게임에 들어가지 않는다, [CONCEPT.md](CONCEPT.md) §10.4).
 
 ### 윈도우 입력기(개발)
 
 윈도우 11 VM에서 한다(스마트 앱 컨트롤 끔, 입력기를 처음 등록하기 전에 VM 스냅숏). 도구는 VS 빌드 도구(C++, Windows SDK, ATL), rustup, Node.js, GitHub CLI,
-설치기를 만들 때 Inno Setup 6(`winget install JRSoftware.InnoSetup`).
+설정 앱을 빌드할 때 .NET 10 SDK(`winget install Microsoft.DotNet.SDK.10`), 설치기를 만들 때 Inno Setup 6(`winget install JRSoftware.InnoSetup`).
 
 ```powershell
+powershell -ExecutionPolicy Bypass -File tools\win\build-settings.ps1 0.1.0    # 설정 앱만 → build\settings\publish(cssgsg_config.dll, 고지문 포함)
 powershell -ExecutionPolicy Bypass -File tools\win\build-installer.ps1 0.1.0   # build\installer\cssgsg-setup.exe(엔진은 build\mozc-out에 있어야 한다)
 ```
 
-릴리스는 GitHub Actions `win-release.yml`(손으로, 버전을 넣어)로 낸다: 검사 → Mozc 빌드·시험 → 설치기 → 릴리스 `win-v<버전>`.
+설정 앱은 패키지 없이(unpackaged) 돌고 .NET·Windows App SDK를 앱에 넣는다(네이티브 AOT, 68MB, 설치기 31MB). 맥처럼 설정 파일의 모양과
+값 검사는 코어(config-ffi)에만 있다. 앱 아이콘(`win/settings/Assets/cssgsg.ico`)은 맥 아이콘에서 만든다(`tools\win\make-icon.ps1`).
+Claude 데스크톱 앱(MSIX) 안의 셸에서 띄운 프로그램은 `%APPDATA%`·`%LOCALAPPDATA%`·HKCU에 쓴 것이 가상화되니, 설정 앱을 시험할 때는
+탐색기로 띄운다(`explorer.exe "…\cssgsg-settings.exe"`).
+
+릴리스는 GitHub Actions `win-release.yml`(손으로, 버전을 넣어)로 낸다: 검사 → Mozc 빌드·시험 → 설정 앱·설치기 → 릴리스 `win-v<버전>`.
 맥 업데이트를 깨지 않게 "최신"으로 두지 않는다(맥은 `/releases/latest`의 `cssgsg.pkg`를 본다).
 C 런타임은 정적으로 링크해서(`.cargo/config.toml`) 입력기 DLL은 시스템 DLL에만 기댄다.
 

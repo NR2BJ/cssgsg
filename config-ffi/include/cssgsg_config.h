@@ -27,6 +27,13 @@ unsigned char cssgsg_userdict_save(const char *path, const char *json);
 /* 맥 키코드의 설정 파일 키 이름("enter", "a", "f13" …). 수식키나 모르는 키면 NULL. 단축키 녹화에 쓴다. */
 const char *cssgsg_config_key_name(unsigned short mac_keycode);
 
+/* 윈도우 설정 앱(cssgsg_config.dll, C#이 부른다). 위의 둘과 같고, 기본값이 윈도우 기본값이다
+ * (적지 않은 한자 단축키는 오른쪽 Control 탭, 그 값과 같으면 주석). */
+const char *cssgsg_config_json_windows(const char *toml);
+const char *cssgsg_config_toml_windows(const char *json);
+/* 윈도우 스캔 코드(extended: 확장 키 비트 0/1)의 키 이름. 수식키는 "mod:shift_left" 꼴, 모르는 키는 NULL. */
+const char *cssgsg_config_key_name_windows(unsigned short scan, unsigned char extended);
+
 /* 이 스레드의 마지막 오류(없으면 ""). */
 const char *cssgsg_config_error(void);
 

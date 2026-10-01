@@ -130,6 +130,31 @@ impl Default for MacConfig {
     }
 }
 
+/// 윈도우 셸 설정(`[windows]`): 입력기 화면(모드 HUD, 후보창). 엔진은 쓰지 않는다.
+/// 맥의 `[mac]`과 이름이 같은 설정도 따로 둔다: 글자 크기의 단위(맥은 포인트, 윈도우는 픽셀)와 기본값이 다르다.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WindowsConfig {
+    /// 모드를 바꿀 때 커서 근처에 G / ㅊ / 月을 잠깐 보인다.
+    pub hud: bool,
+    pub hud_position: HudPosition,
+    /// 후보창 글자 크기(픽셀, 화면 배율 100% 기준. 배율을 따라 커진다).
+    pub candidate_font_size: u32,
+}
+
+impl Default for WindowsConfig {
+    fn default() -> Self {
+        Self { hud: true, hud_position: HudPosition::Caret, candidate_font_size: 15 }
+    }
+}
+
+/// 설정 파일을 쓰는 셸([`Config::to_toml`], [`Config::to_toml_windows`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Shell {
+    Mac,
+    Windows,
+}
+
 /// 단축키 셋. 한국어·일본어로 바로 가는 단축키는 두지 않는다(사용자 결정, NRIME에는 있었다).
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
@@ -217,6 +242,7 @@ pub struct Config {
     pub taps: Option<HashMap<String, TapAction>>,
     pub ja: JaConfig,
     pub mac: MacConfig,
+    pub windows: WindowsConfig,
 }
 
 impl Default for Config {
@@ -231,6 +257,7 @@ impl Default for Config {
             taps: None,
             ja: JaConfig::default(),
             mac: MacConfig::default(),
+            windows: WindowsConfig::default(),
         }
     }
 }
@@ -286,6 +313,7 @@ impl Config {
             ("mac.candidate_font_size", self.mac.candidate_font_size, 10, 28),
             ("mac.newline_insert_wait_ms", self.mac.newline_insert_wait_ms, 0, 100),
             ("mac.newline_key_press_wait_ms", self.mac.newline_key_press_wait_ms, 0, 100),
+            ("windows.candidate_font_size", self.windows.candidate_font_size, 10, 28),
         ];
         for (name, value, lo, hi) in ranges {
             if !(lo..=hi).contains(&value) {
@@ -310,19 +338,46 @@ impl Config {
         Ok(())
     }
 
-    /// 설정 파일 내용. 설정마다 설명을 달고, 기본값과 같은 설정은 주석(`# `)으로 둔다.
+    /// 맥 설정 파일 내용. 설정마다 설명을 달고, 기본값과 같은 설정은 주석(`# `)으로 둔다.
     /// 읽으면 같은 설정이 된다(`from_toml(to_toml(c)) == c`, 테스트가 확인한다).
+    /// `[windows]` 표는 기본값과 다를 때만 쓴다(윈도우에서 가져온 파일).
     pub fn to_toml(&self) -> String {
-        let d = Config::default();
+        self.render(Shell::Mac)
+    }
+
+    /// 윈도우 설정 파일 내용([`Config::to_toml`]과 같은 모양). 주석으로 둘 기본값은 윈도우 기본값이고
+    /// ([`Config::windows_default`]), 머리말과 단축키 설명이 윈도우 것이다. `[mac]` 표는 기본값과 다를 때만 쓴다.
+    /// 읽으면 같은 설정이 된다(`from_toml_windows(to_toml_windows(c)) == c`).
+    pub fn to_toml_windows(&self) -> String {
+        self.render(Shell::Windows)
+    }
+
+    fn render(&self, shell: Shell) -> String {
+        let d = match shell {
+            Shell::Mac => Config::default(),
+            Shell::Windows => Config::windows_default(),
+        };
         let mut out = String::new();
         let mut line = |text: &str| {
             out.push_str(text);
             out.push('\n');
         };
-        line("# cssgsg 설정 파일입니다. 설정 앱(메뉴 막대 cssgsg → 설정…)에서 바꾸면 바로 적용됩니다.");
-        line(
-            "# 직접 고쳐도 됩니다. 고친 뒤 설정 앱을 열거나 메뉴의 \"cssgsg 다시 시작\"을 누르면 적용됩니다.",
-        );
+        match shell {
+            Shell::Mac => {
+                line(
+                    "# cssgsg 설정 파일입니다. 설정 앱(메뉴 막대 cssgsg → 설정…)에서 바꾸면 바로 적용됩니다.",
+                );
+                line(
+                    "# 직접 고쳐도 됩니다. 고친 뒤 설정 앱을 열거나 메뉴의 \"cssgsg 다시 시작\"을 누르면 적용됩니다.",
+                );
+            }
+            Shell::Windows => {
+                line(
+                    "# cssgsg 설정 파일입니다. 설정 앱(시작 메뉴 → cssgsg 설정)에서 바꾸면 글자를 치던 앱으로 돌아갈 때 적용됩니다.",
+                );
+                line("# 직접 고쳐도 됩니다. 저장한 뒤 입력칸을 다시 누르거나 앱을 바꾸면 적용됩니다.");
+            }
+        }
         line(
             "# 앞에 #이 붙은 줄은 기본값입니다(기본값이 바뀌면 따라갑니다). #을 지우고 값을 고치면 그 값을 씁니다.",
         );
@@ -360,12 +415,27 @@ impl Config {
         line(
             "# 단축키: \"tap:수식키\"는 수식키만 짧게 누르기, \"수식키+키\"는 같이 누르기, \"\"는 없음입니다.",
         );
-        line(
-            "# 수식키: shift_left, shift_right, control_left, control_right, alt_left, alt_right, meta_left, meta_right",
-        );
-        line(
-            "# 같이 누를 때 좌우를 가리지 않으려면 control, alt, shift를 씁니다. ⌘(meta) 조합은 쓸 수 없습니다. 키: a~z, 0~9, space, enter, tab, f1~f20, left …",
-        );
+        match shell {
+            Shell::Mac => {
+                line(
+                    "# 수식키: shift_left, shift_right, control_left, control_right, alt_left, alt_right, meta_left, meta_right",
+                );
+                line(
+                    "# 같이 누를 때 좌우를 가리지 않으려면 control, alt, shift를 씁니다. ⌘(meta) 조합은 쓸 수 없습니다. 키: a~z, 0~9, space, enter, tab, f1~f20, left …",
+                );
+            }
+            Shell::Windows => {
+                line(
+                    "# 수식키: shift_left, shift_right, control_left, control_right, alt_left, alt_right, meta_left, meta_right(meta는 Windows 키)",
+                );
+                line(
+                    "# 같이 누를 때 좌우를 가리지 않으려면 control, shift를 씁니다. 키: a~z, 0~9, space, enter, tab, f1~f20, left …",
+                );
+                line(
+                    "# Alt는 앱 메뉴가, Windows 키는 시작 메뉴가 먼저 가져가서 윈도우에서는 탭으로도 조합으로도 쓸 수 없습니다",
+                );
+            }
+        }
         line("[shortcuts]");
         let (s, ds) = (&self.shortcuts, &d.shortcuts);
         line(&setting(
@@ -430,54 +500,76 @@ impl Config {
             &ja.katakana_direct.to_string(),
             ja.katakana_direct == dja.katakana_direct,
         ));
-        line("");
+        // 셸 표는 그 셸의 파일에 늘 쓰고, 다른 셸의 표는 기본값과 다를 때만 쓴다(다른 OS에서 가져온 파일의 값을 지킨다).
         let (mac, dmac) = (&self.mac, &d.mac);
-        line("[mac]");
-        line("# 모드를 바꿀 때 G/ㅊ/月을 잠깐 표시");
-        line(&setting("hud", &mac.hud.to_string(), mac.hud == dmac.hud));
-        line("# 모드 표시 위치: \"caret\"(입력 커서 위, 모르면 마우스 옆) 또는 \"mouse\"(마우스 옆)");
-        line(&setting(
-            "hud_position",
-            &quoted(hud_position_name(mac.hud_position)),
-            mac.hud_position == dmac.hud_position,
-        ));
-        line("# 후보창 글자 크기(포인트, 10~28)");
-        line(&setting(
-            "candidate_font_size",
-            &mac.candidate_font_size.to_string(),
-            mac.candidate_font_size == dmac.candidate_font_size,
-        ));
-        line(
-            "# 줄바꿈 넣기·⌘ 단축키 대기(밀리초, 0~100): 웹 기술로 만든 앱(Electron·Chromium)에서 확정한 뒤 줄바꿈을 넣기까지,",
-        );
-        line(
-            "# 그리고 모든 앱에서 조합 중에 누른 ⌘ 단축키를 다시 보내기까지 기다립니다. 조합 중이던 글자가 사라지면 늘려 보세요",
-        );
-        line(&setting(
-            "newline_insert_wait_ms",
-            &mac.newline_insert_wait_ms.to_string(),
-            mac.newline_insert_wait_ms == dmac.newline_insert_wait_ms,
-        ));
-        line(
-            "# Shift+Enter 다시 보내기 대기(밀리초, 0~100): 아래 목록의 앱에서 확정한 뒤 Shift+Enter 키를 다시 보내기까지 기다립니다. 권한이 필요합니다",
-        );
-        line(&setting(
-            "newline_key_press_wait_ms",
-            &mac.newline_key_press_wait_ms.to_string(),
-            mac.newline_key_press_wait_ms == dmac.newline_key_press_wait_ms,
-        ));
-        line(
-            "# Shift+Enter를 다시 보낼 앱(번들 ID): 웹 기술로 만든 앱 가운데 줄바꿈 글자를 넣으면 메시지를 보내 버리는 앱입니다.",
-        );
-        line(
-            "# 이 앱들에는 줄바꿈 글자 대신 Shift+Enter 키를 다시 보냅니다. 빈 목록([])이면 모든 앱에 줄바꿈 글자를 넣습니다",
-        );
-        let apps: Vec<String> = mac.newline_key_press_apps.iter().map(|id| quoted(id)).collect();
-        line(&setting(
-            "newline_key_press_apps",
-            &format!("[{}]", apps.join(", ")),
-            mac.newline_key_press_apps == dmac.newline_key_press_apps,
-        ));
+        if shell == Shell::Mac || mac != dmac {
+            line("");
+            line("[mac]");
+            line("# 모드를 바꿀 때 G/ㅊ/月을 잠깐 표시");
+            line(&setting("hud", &mac.hud.to_string(), mac.hud == dmac.hud));
+            line("# 모드 표시 위치: \"caret\"(입력 커서 위, 모르면 마우스 옆) 또는 \"mouse\"(마우스 옆)");
+            line(&setting(
+                "hud_position",
+                &quoted(hud_position_name(mac.hud_position)),
+                mac.hud_position == dmac.hud_position,
+            ));
+            line("# 후보창 글자 크기(포인트, 10~28)");
+            line(&setting(
+                "candidate_font_size",
+                &mac.candidate_font_size.to_string(),
+                mac.candidate_font_size == dmac.candidate_font_size,
+            ));
+            line(
+                "# 줄바꿈 넣기·⌘ 단축키 대기(밀리초, 0~100): 웹 기술로 만든 앱(Electron·Chromium)에서 확정한 뒤 줄바꿈을 넣기까지,",
+            );
+            line(
+                "# 그리고 모든 앱에서 조합 중에 누른 ⌘ 단축키를 다시 보내기까지 기다립니다. 조합 중이던 글자가 사라지면 늘려 보세요",
+            );
+            line(&setting(
+                "newline_insert_wait_ms",
+                &mac.newline_insert_wait_ms.to_string(),
+                mac.newline_insert_wait_ms == dmac.newline_insert_wait_ms,
+            ));
+            line(
+                "# Shift+Enter 다시 보내기 대기(밀리초, 0~100): 아래 목록의 앱에서 확정한 뒤 Shift+Enter 키를 다시 보내기까지 기다립니다. 권한이 필요합니다",
+            );
+            line(&setting(
+                "newline_key_press_wait_ms",
+                &mac.newline_key_press_wait_ms.to_string(),
+                mac.newline_key_press_wait_ms == dmac.newline_key_press_wait_ms,
+            ));
+            line(
+                "# Shift+Enter를 다시 보낼 앱(번들 ID): 웹 기술로 만든 앱 가운데 줄바꿈 글자를 넣으면 메시지를 보내 버리는 앱입니다.",
+            );
+            line(
+                "# 이 앱들에는 줄바꿈 글자 대신 Shift+Enter 키를 다시 보냅니다. 빈 목록([])이면 모든 앱에 줄바꿈 글자를 넣습니다",
+            );
+            let apps: Vec<String> = mac.newline_key_press_apps.iter().map(|id| quoted(id)).collect();
+            line(&setting(
+                "newline_key_press_apps",
+                &format!("[{}]", apps.join(", ")),
+                mac.newline_key_press_apps == dmac.newline_key_press_apps,
+            ));
+        }
+        let (win, dwin) = (&self.windows, &d.windows);
+        if shell == Shell::Windows || win != dwin {
+            line("");
+            line("[windows]");
+            line("# 모드를 바꿀 때 G/ㅊ/月을 잠깐 표시");
+            line(&setting("hud", &win.hud.to_string(), win.hud == dwin.hud));
+            line("# 모드 표시 위치: \"caret\"(입력 커서 위, 모르면 마우스 옆) 또는 \"mouse\"(마우스 옆)");
+            line(&setting(
+                "hud_position",
+                &quoted(hud_position_name(win.hud_position)),
+                win.hud_position == dwin.hud_position,
+            ));
+            line("# 후보창 글자 크기(픽셀, 화면 배율 100% 기준, 10~28)");
+            line(&setting(
+                "candidate_font_size",
+                &win.candidate_font_size.to_string(),
+                win.candidate_font_size == dwin.candidate_font_size,
+            ));
+        }
         out
     }
 }
@@ -557,6 +649,60 @@ mod tests {
         assert_eq!(c.shortcuts.hanja, Shortcut::None);
         // 다른 단축키가 오른쪽 Control 탭을 쓰면 겹친다고 알린다.
         assert!(Config::from_toml_windows("[shortcuts]\ntoggle_english = \"tap:control_right\"").is_err());
+    }
+
+    /// 윈도우 설정 파일로 쓴 것을 윈도우 입력기가 다시 읽으면 같은 설정이다.
+    fn windows_round_trip(c: &Config) {
+        let text = c.to_toml_windows();
+        let back = Config::from_toml_windows(&text).unwrap_or_else(|e| panic!("{e}\n{text}"));
+        assert_eq!(&back, c, "\n{text}");
+    }
+
+    #[test]
+    fn windows_file_comments_the_windows_defaults() {
+        let d = Config::windows_default();
+        let text = d.to_toml_windows();
+        windows_round_trip(&d);
+        let live: Vec<&str> =
+            text.lines().filter(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with('[')).collect();
+        assert!(live.is_empty(), "{live:?}");
+        assert!(text.contains("\n# hanja = \"tap:control_right\"\n"), "{text}");
+        assert!(text.contains("\n[windows]\n") && text.contains("\n# candidate_font_size = 15\n"), "{text}");
+        assert!(!text.contains("[mac]"), "맥 표는 기본값이면 쓰지 않는다");
+        assert!(text.contains("시작 메뉴") && !text.contains("메뉴 막대"));
+        // 맥 파일은 그대로다(윈도우 표는 기본값이면 쓰지 않는다).
+        assert!(!Config::default().to_toml().contains("[windows]"));
+    }
+
+    #[test]
+    fn windows_settings_are_written_and_kept_across_shells() {
+        let c = Config {
+            windows: WindowsConfig { hud: false, hud_position: HudPosition::Mouse, candidate_font_size: 20 },
+            shortcuts: Shortcuts {
+                hanja: Shortcut::parse("alt_left+enter").unwrap(),
+                ..Shortcuts::windows()
+            },
+            ..Config::windows_default()
+        };
+        windows_round_trip(&c);
+        let text = c.to_toml_windows();
+        assert!(text.contains("\nhud = false\n") && text.contains("\nhud_position = \"mouse\"\n"), "{text}");
+        assert!(text.contains("\ncandidate_font_size = 20\n"));
+        assert!(text.contains("\nhanja = \"alt_left+enter\"\n"), "맥 기본값도 윈도우 파일에는 적는다");
+        // 다른 OS에서 가져온 파일의 값은 그 OS의 표를 지킨다.
+        let mac = Config { windows: c.windows.clone(), ..Config::default() };
+        round_trip(&mac);
+        assert!(mac.to_toml().contains("\n[windows]\n"));
+        let from_mac =
+            Config { mac: MacConfig { hud: false, ..MacConfig::default() }, ..Config::windows_default() };
+        windows_round_trip(&from_mac);
+        assert!(from_mac.to_toml_windows().contains("\n[mac]\n"));
+        let big = Config {
+            windows: WindowsConfig { candidate_font_size: 40, ..WindowsConfig::default() },
+            ..Config::default()
+        };
+        assert!(big.validate().unwrap_err().contains("windows.candidate_font_size"));
+        assert!(Config::from_toml_windows("[windows]\nsurprise = 1").is_err());
     }
 
     #[test]

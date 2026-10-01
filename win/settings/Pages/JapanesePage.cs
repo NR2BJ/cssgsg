@@ -1,0 +1,183 @@
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using static Cssgsg.Settings.Lang;
+
+namespace Cssgsg.Settings.Pages;
+
+sealed partial class JapanesePage : SettingsPage
+{
+    readonly UserDictionaryModel dictionary;
+    readonly UserDictionaryView dictionaryView;
+    readonly TextBlock engineVersion = new() { IsTextSelectionEnabled = true, HorizontalAlignment = HorizontalAlignment.Right };
+    readonly TextBlock engineSource = new() { HorizontalAlignment = HorizontalAlignment.Right };
+
+    public JapanesePage(SettingsModel model, UserDictionaryModel dictionary) : base(model, T("일본어", "Japanese", "日本語"))
+    {
+        this.dictionary = dictionary;
+        var bothOff = Ui.Note(T("둘 다 끄면 한자로 변환하지 않습니다(가나만 입력).", "With both off, there is no kanji conversion (kana only).",
+            "両方オフにすると漢字に変換しません（かなのみ）。"), warning: false);
+        bothOff.Margin = new Thickness(0, 10, 0, 10);
+        OnRefresh(() => bothOff.Visibility = !M.Bool("ja.convert_with_space") && !M.Bool("ja.convert_with_tab")
+            ? Visibility.Visible : Visibility.Collapsed);
+        Add(Ui.Section(T("변환 키", "Conversion Keys", "変換キー"),
+            T("가나를 입력하는 중에 누르면 변환을 시작합니다. 끈 키는 입력한 가나를 그대로 확정하고, Space는 공백을 입력하고 Tab은 앱에 넘깁니다.",
+                "Pressed while typing kana, these start conversion. A key that’s turned off confirms the kana as typed; Space then types a space and Tab goes to the app.",
+                "かなの入力中に押すと変換を始めます。オフにしたキーは入力したかなをそのまま確定し、Space は空白を入力、Tab はアプリに渡します。"),
+            Ui.Row(T("Space로 변환", "Convert with Space", "Space で変換"), Toggle("ja.convert_with_space")),
+            Ui.Row(T("Tab으로 변환", "Convert with Tab", "Tab で変換"), Toggle("ja.convert_with_tab")),
+            bothOff));
+
+        var width = new RadioButtons { MaxColumns = 2 };
+        width.Items.Add(T("반각", "Half-width", "半角"));
+        width.Items.Add(T("전각", "Full-width", "全角"));
+        OnRefresh(() => width.SelectedIndex = M.Bool("ja.full_width_space") ? 1 : 0);
+        width.SelectionChanged += (_, _) =>
+        {
+            if (!Refreshing && width.SelectedIndex >= 0) M.Set("ja.full_width_space", width.SelectedIndex == 1);
+        };
+        Add(Ui.Section(T("구두점 및 기호", "Punctuation and Symbols", "句読点と記号"),
+            T("공백 너비는 입력 중이 아닐 때 누른 Space에 적용됩니다. ¥ 기호를 끄면 \\ 키로 반각 \\를 입력합니다.",
+                "Space width applies when you’re not typing kana. With the yen sign off, the \\ key types a half-width \\.",
+                "スペース幅は、入力中でないときに押した Space に適用されます。円記号をオフにすると \\ キーで半角の \\ を入力します。"),
+            Ui.Row(T("구두점", "Punctuation", "句読点"), Choice("ja.punctuation",
+                ("japanese", T("일본식 (、。「」)", "Japanese (、。「」)", "和文（、。「」）")),
+                ("full_width_western", T("전각 서양식 (，．［］)", "Full-width Western (，．［］)", "全角欧文（，．［］）")),
+                ("half_width_western", T("반각 서양식 (,.[])", "Half-width Western (,.[])", "半角欧文（,.[]）")))),
+            Ui.Row(T("공백 너비", "Space Width", "スペース幅"), width),
+            Ui.Row(T("/ 키 → ・ (나카구로)", "/ Key → ・ (Nakaguro)", "/ キー → ・（中黒）"), Toggle("ja.slash_nakaguro")),
+            Ui.Row(T("\\ 키 → ¥ (엔 기호)", "\\ Key → ¥ (Yen Sign)", "\\ キー → ¥（円記号）"), Toggle("ja.yen_sign"))));
+
+        Add(Ui.Section(T("가타카나 (Caps Lock)", "Katakana (Caps Lock)", "カタカナ（Caps Lock）"), null,
+            Ui.Row(T("입력하는 대로 바로 확정 (마지막 글자만 잠시 밑줄)", "Confirm as You Type (only the last kana stays underlined)",
+                "入力したそばから確定（最後の一文字だけ下線）"), Toggle("ja.katakana_direct")),
+            Ui.Row(T("일본어 모드를 나가면 Caps Lock 끄기", "Turn Off Caps Lock When Leaving Japanese",
+                "日本語モードを抜けたら Caps Lock をオフ"), Toggle("ja.caps_katakana_auto_off"))));
+
+        dictionaryView = new UserDictionaryView(dictionary);
+        Add(Ui.Section(T("개인 사전", "User Dictionary", "ユーザー辞書"), T(
+                "변환 후보에 단어를 추가합니다(Mozc 사용자 사전). 읽기는 히라가나로 입력하세요. 가타카나는 히라가나로 바뀌고, " +
+                "작은 가나(ゃ·っ·ぁ 등)와 장음 부호 ー도 쓸 수 있습니다. 바꾸면 바로 적용되고, 두 번 클릭하면 편집합니다.",
+                "Adds words to the conversion candidates (Mozc user dictionary). Enter readings in hiragana; katakana is converted, " +
+                "and small kana (ゃ·っ·ぁ …) and the long-vowel mark ー work too. Changes apply immediately. Double-click to edit.",
+                "変換候補に単語を追加します（Mozc のユーザー辞書）。読みはひらがなで入力してください。カタカナはひらがなに直り、" +
+                "小さいかな（ゃ・っ・ぁ など）や長音符 ー も使えます。変更はすぐに反映され、ダブルクリックで編集できます。"),
+            dictionaryView));
+
+        var versionBox = new StackPanel { Spacing = 2, Children = { engineVersion, engineSource } };
+        engineSource.Style = Ui.Style("CaptionTextBlockStyle");
+        engineSource.Foreground = Ui.Brush("TextFillColorSecondaryBrush");
+        Add(Ui.Section(T("변환 엔진 (Mozc)", "Conversion Engine (Mozc)", "変換エンジン（Mozc）"),
+            T("Mozc 엔진은 cssgsg에 들어 있어 cssgsg와 함께 업데이트됩니다(정보 탭).",
+                "The Mozc engine ships with cssgsg and updates with it (About tab).",
+                "Mozc エンジンは cssgsg に含まれ、cssgsg と一緒にアップデートされます（情報タブ）。"),
+            Ui.Row(T("버전", "Version", "バージョン"), versionBox)));
+
+        Add(Ui.Section(T("변환 학습", "Conversion History", "変換の学習"),
+            T("Mozc가 기억한 변환(문절 나누기, 고른 후보)을 지웁니다. 개인 사전은 그대로 남습니다.",
+                "Clears what Mozc learned (segmentation and chosen candidates). The user dictionary stays.",
+                "Mozc が覚えた変換（文節の区切り、選んだ候補）を消去します。ユーザー辞書はそのまま残ります。"),
+            Ui.Row(T("Mozc 변환 학습", "Mozc Conversion History", "Mozc の変換学習"),
+                Ui.Button(T("지우기…", "Clear…", "消去…"), () => _ = ClearMozcAsync()))));
+
+        Add(Ui.Section(T("변환 단축키", "Conversion Shortcuts", "変換ショートカット"), null,
+            Ui.CheatSheet(T("입력 중", "While Typing", "入力中"), TypingRows),
+            Ui.CheatSheet(T("변환 중", "While Converting", "変換中"), ConvertingRows)));
+        Shown();
+    }
+
+    public override void Shown()
+    {
+        if (dictionary.ReloadIfChanged()) dictionaryView.Fill();
+        _ = ShowEngineAsync();
+    }
+
+    /// 엔진 호스트가 읽은 Mozc 버전. 호스트가 없으면 설치된 엔진의 MOZC_VERSION("<커밋> <날짜> <버전>").
+    async Task ShowEngineAsync()
+    {
+        var running = await HostClient.EngineVersionAsync();
+        var (installed, date) = InstalledEngine();
+        var datePart = date != null ? $" ({date})" : "";
+        if (running is { Length: > 0 })
+        {
+            engineVersion.Text = $"{running}{datePart}";
+            engineSource.Text = T("엔진 호스트가 쓰는 엔진", "Engine in use by the engine host", "エンジンホストが使っているエンジン");
+        }
+        else if (running != null)
+        {
+            engineVersion.Text = installed != null ? $"{installed}{datePart}" : "—";
+            engineSource.Text = T("엔진을 읽지 못했습니다 (가나만 입력)", "The engine couldn’t be loaded (kana only)",
+                "エンジンを読み込めませんでした（かなのみ）");
+        }
+        else
+        {
+            engineVersion.Text = installed != null ? $"{installed}{datePart}" : "—";
+            engineSource.Text = T("설치된 엔진 (엔진 호스트가 실행 중이 아님)", "Installed engine (the engine host isn’t running)",
+                "インストール済みのエンジン（エンジンホストが起動していません）");
+        }
+    }
+
+    static (string? Version, string? Date) InstalledEngine()
+    {
+        try
+        {
+            var parts = File.ReadAllText(Paths.MozcVersion).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length >= 3) return (parts[2], parts[1]);
+        }
+        catch (Exception) { }
+        return (null, null);
+    }
+
+    /// Mozc 학습 파일을 지운다. 엔진이 파일을 열어 두고 있어서 호스트에 시킨다(엔진을 내리고 지운 뒤 다시 읽는다).
+    async Task ClearMozcAsync()
+    {
+        if (!await Ui.Confirm(XamlRoot, T("Mozc 변환 학습을 지우시겠습니까?", "Clear Mozc’s conversion history?", "Mozc の変換学習を消去しますか？"),
+                T("지우기", "Clear", "消去")))
+            return;
+        var reply = await HostClient.ClearMozcLearningAsync();
+        string? problem = null;
+        if (reply.Status == HostClient.Status.NoHost)
+        {
+            foreach (var name in new[] { "segment.db", "boundary.db", "cform.db", ".history.db" })
+            {
+                try { File.Delete(Path.Combine(Paths.MozcProfile, name)); }
+                catch (Exception e) { problem = e.Message; }
+            }
+        }
+        else if (!reply.Ok)
+        {
+            problem = reply.Message ?? reply.Status.ToString();
+        }
+        if (problem != null)
+            await Ui.Dialog(XamlRoot, T("지우지 못했습니다", "Couldn’t clear", "消去できませんでした"), problem, "", T("닫기", "Close", "閉じる")).ShowAsync();
+    }
+
+    static (string[], string)[] TypingRows =>
+    [
+        (["Space", "Tab"], T("변환 시작 (위 설정에 따름)", "Start conversion (per the settings above)", "変換開始（上の設定に従う）")),
+        (["Enter"], T("입력한 그대로 확정", "Confirm as typed", "入力どおりに確定")),
+        (["Shift + Enter"], T("확정하고 줄바꿈", "Confirm and start a new line", "確定して改行")),
+        (["Backspace"], T("한 글자 지우기", "Delete one character", "1文字削除")),
+        (["Esc"], T("입력 취소", "Cancel input", "入力を取り消し")),
+        (["Caps Lock"], T("가타카나 입력", "Type katakana", "カタカナ入力")),
+        (["Shift"], T("A–Z 자리에서는 무시(로마자 입력 없음), 그 밖의 자리에서는 Shift 기호 입력",
+            "Ignored on the A–Z keys (no romaji input); other keys type their shifted symbol",
+            "A–Z の位置では無視（ローマ字入力なし）、それ以外の位置では Shift の記号を入力")),
+    ];
+
+    static (string[], string)[] ConvertingRows =>
+    [
+        (["Space", "↓"], T("다음 후보", "Next candidate", "次の候補")),
+        (["↑"], T("이전 후보", "Previous candidate", "前の候補")),
+        (["Tab"], T("후보 펼치기 / 접기", "Expand / collapse candidates", "候補の展開 / 折りたたみ")),
+        (["←", "→"], T("문절 이동 (문절이 하나면 후보 페이지 넘김, 펼친 목록에서는 한 칸 이동)",
+            "Move between segments (pages the list when there’s one segment; one cell when expanded)",
+            "文節間を移動（文節が1つなら候補のページ送り、展開中は1マス移動）")),
+        (["Shift + ←", "Shift + →"], T("문절 길이 조절", "Resize segment", "文節の長さを変更")),
+        (["Page Up", "Page Down"], T("후보 페이지 넘김", "Page through candidates", "候補のページ送り")),
+        (["1–9"], T("번호로 후보 확정", "Pick a candidate by number", "番号で候補を確定")),
+        (["Enter"], T("변환 확정", "Confirm conversion", "変換を確定")),
+        (["Shift + Enter"], T("확정하고 줄바꿈", "Confirm and start a new line", "確定して改行")),
+        (["Esc", "Backspace"], T("변환 취소 (입력으로 돌아감)", "Cancel conversion (back to input)", "変換をキャンセル（入力に戻る）")),
+        ([T("다른 키", "Other keys", "その他のキー")], T("확정하고 이어서 입력", "Confirm and keep typing", "確定して入力を続ける")),
+    ];
+}

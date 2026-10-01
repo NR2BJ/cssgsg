@@ -45,6 +45,11 @@ pub enum Request {
     Sync { config: u64, learning: u64 },
     /// 한자를 하나 골랐다. 호스트가 기억에 더하고 저장한다(다른 앱은 다음 Sync에 받는다).
     HanjaPicked { reading: String, text: String },
+    /// 고른 한자 기억을 모두 지운다(설정 앱). 입력기들은 다음 Sync에 빈 기억을 받는다.
+    ClearHanjaLearning,
+    /// Mozc가 배운 변환(문절 나누기, 고른 후보)을 지운다(설정 앱). 사용자 사전은 그대로다.
+    /// 호스트는 엔진을 내리고(학습 파일을 놓게) 파일을 지운 뒤 다시 읽는다.
+    ClearMozcLearning,
 }
 
 fn yes() -> bool {
@@ -77,11 +82,11 @@ pub enum Reply {
     View { view: Option<ConvView> },
     /// 확정한 글자(Commit).
     Text { text: String },
-    /// 했다(Cancel, Reload).
+    /// 했다(Cancel, Reload, 지우기).
     Done,
     /// 이 입력기의 변환이 아니다: 다른 입력기의 Start가 밀어냈다.
     Lost,
-    /// 요청을 읽지 못했다.
+    /// 요청을 읽지 못했거나 하지 못했다(까닭).
     Error { message: String },
     /// Sync의 답: 판이 다른 것만 담는다. 설정은 늘 올바른 것만 준다(틀린 파일은 호스트가 기록하고 앞의 것을 쓴다).
     Sync { config: Option<Versioned>, learning: Option<Versioned> },
@@ -122,6 +127,8 @@ mod tests {
             Request::Cancel,
             Request::Reload,
             Request::Quit,
+            Request::ClearHanjaLearning,
+            Request::ClearMozcLearning,
         ];
         for r in requests {
             assert_eq!(decode::<Request>(&encode(&r)), Some(r));

@@ -57,6 +57,8 @@ fn launch(tag: &str, dir: &Path) -> Child {
     Command::new(env!("CARGO_BIN_EXE_cssgsg-host"))
         .args(["--tag", tag, "--no-engine", "--idle-exit-secs", "60", "--user-dir"])
         .arg(dir)
+        .arg("--profile")
+        .arg(dir.join("mozc"))
         .spawn()
         .unwrap()
 }
@@ -148,6 +150,42 @@ fn hands_out_settings_and_keeps_hanja_picks() {
         assert!(began.elapsed() < WAIT, "한자 기억을 저장하지 않는다");
         std::thread::sleep(Duration::from_millis(100));
     }
+}
+
+#[test]
+fn the_settings_app_clears_what_was_learned() {
+    let host = Host::start("clear");
+    let mut c = host.client();
+    // 한자 기억: 지우면 빈 기억을 바로 저장하고, 입력기들은 다음 Sync에 빈 기억을 받는다.
+    c.call(&Request::HanjaPicked { reading: "한".into(), text: "漢".into() }, WAIT).unwrap();
+    let Reply::Sync { learning: Some(picked), .. } =
+        c.call(&Request::Sync { config: 0, learning: 0 }, WAIT).unwrap()
+    else {
+        panic!("고른 한자")
+    };
+    assert_eq!(c.call(&Request::ClearHanjaLearning, WAIT).unwrap(), Reply::Done);
+    let Reply::Sync { learning: Some(cleared), .. } =
+        c.call(&Request::Sync { config: 0, learning: picked.version }, WAIT).unwrap()
+    else {
+        panic!("지운 기억")
+    };
+    assert!(!cleared.text.contains("漢"), "{}", cleared.text);
+    let saved = std::fs::read_to_string(host.dir.join("hanja-learning.tsv")).unwrap();
+    assert!(!saved.contains("漢"), "{saved}");
+    // Mozc 학습: 학습 파일만 지우고 사용자 사전·Mozc 설정은 남긴다. 엔진을 다시 읽은 뒤에도 변환한다.
+    let profile = host.dir.join("mozc");
+    std::fs::create_dir_all(&profile).unwrap();
+    for name in ["segment.db", "boundary.db", "cform.db", "user_dictionary.db", "config1.db"] {
+        std::fs::write(profile.join(name), "x").unwrap();
+    }
+    assert_eq!(c.call(&Request::ClearMozcLearning, WAIT).unwrap(), Reply::Done);
+    let left: Vec<String> = std::fs::read_dir(&profile)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(left.len(), 2, "{left:?}");
+    assert!(left.contains(&"user_dictionary.db".into()) && left.contains(&"config1.db".into()));
+    assert_eq!(start(&mut c, "かな"), ["かな", "カナ"]);
 }
 
 #[test]

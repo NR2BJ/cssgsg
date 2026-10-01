@@ -9,7 +9,8 @@ license.workspace = true
 
 [lib]
 name = "cssgsg_config"
-crate-type = ["rlib", "staticlib"]
+# staticlib: 맥 설정 앱이 링크한다. cdylib: 윈도우 설정 앱(C#)이 cssgsg_config.dll로 부른다.
+crate-type = ["rlib", "staticlib", "cdylib"]
 
 [dependencies]
 # 입력기 C ABI(ffi)와 Mozc 없이 쓴다: 설정 앱에 엔진·한자 사전·Mozc가 딸려 들어가지 않는다.
