@@ -1,0 +1,4 @@
+# 저장소의 글 파일은 LF다. 윈도우에서 받아도(GitHub 윈도우 러너는 core.autocrlf=true) LF로 풀게 한다:
+# 코어가 include_str!로 실행 파일에 넣는 사전·배열 데이터는 줄로 나눠 읽고 위치로 찾는다. 2026-10-02 첫 윈도우 릴리스
+# 워크플로에서 CRLF로 풀린 한자 사전이 시험(hanja::tests::tables_are_sorted_for_binary_search)에 걸렸다.
+* text=auto eol=lf
