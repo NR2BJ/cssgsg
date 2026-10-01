@@ -33,6 +33,8 @@ pub enum Request {
     Cancel,
     /// 사용자 사전을 다시 읽는다(설정 앱이 고친 뒤).
     Reload,
+    /// 호스트를 끝낸다(엔진을 내려 학습을 마무리한 뒤). 설치기가 파일을 바꾸기 전에 보낸다(cssgsg-host.exe --quit).
+    Quit,
 }
 
 /// 호스트 → 입력기.
@@ -83,6 +85,7 @@ mod tests {
             Request::Commit,
             Request::Cancel,
             Request::Reload,
+            Request::Quit,
         ];
         for r in requests {
             assert_eq!(decode::<Request>(&encode(&r)), Some(r));

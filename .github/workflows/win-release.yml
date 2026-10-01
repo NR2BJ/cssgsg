@@ -1,0 +1,108 @@
+# 윈도우 설치기(cssgsg-setup.exe)를 GitHub 컴퓨터에서 빌드해 릴리스 win-v<버전>으로 낸다. 손으로만 돌린다.
+#
+# - 맥 업데이트를 깨지 않게 "최신(latest)"으로 두지 않는다: 맥 정식 채널과 README 설치 명령은 /releases/latest의 cssgsg.pkg를 보고,
+#   베타 채널은 pkg가 붙은 릴리스만 본다. 버전에 -가 붙으면(0.2.0-beta.1) prerelease다.
+# - 다 통과해야 낸다: cargo fmt·clippy·test, Mozc 엔진 빌드와 코어 Mozc 시험(LoadLibraryExW), 설치기 빌드.
+#   Mozc 엔진은 tools/mozc/MOZC_COMMIT으로 빌드한다(캐시는 mozc-windows.yml과 같이 쓴다).
+name: Windows release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 버전(예 0.1.0, 0.2.0-beta.1). 태그는 win-v<버전>
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: win-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-2025
+    timeout-minutes: 150
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      ANDROID_NDK_HOME: ""
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check the version
+        run: |
+          if ($env:VERSION -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$') { throw "not a version: $env:VERSION" }
+          gh release view "win-v$env:VERSION" *> $null
+          if ($LASTEXITCODE -eq 0) { throw "win-v$env:VERSION is already published; raise the version" }
+          $global:LASTEXITCODE = 0
+
+      - name: Rust checks
+        run: |
+          cargo fmt --all -- --check
+          if ($LASTEXITCODE) { exit 1 }
+          cargo clippy --workspace --all-targets -- -D warnings
+          if ($LASTEXITCODE) { exit 1 }
+          cargo test --workspace
+          if ($LASTEXITCODE) { exit 1 }
+
+      - name: Resolve Mozc commit
+        id: commit
+        run: |
+          "commit=$((Get-Content tools/mozc/MOZC_COMMIT -Raw).Trim())" >> $env:GITHUB_OUTPUT
+
+      - name: Restore Mozc build deps (LLVM, MSYS2)
+        uses: actions/cache@v6
+        with:
+          path: build/mozc/src/third_party_cache
+          key: mozc-win-deps-${{ steps.commit.outputs.commit }}
+          restore-keys: mozc-win-deps-
+
+      - name: Restore Bazel caches
+        uses: actions/cache@v6
+        with:
+          path: |
+            C:\bzl\disk
+            C:\bzl\repos
+          key: mozc-win-bazel-${{ steps.commit.outputs.commit }}
+          restore-keys: mozc-win-bazel-
+
+      - name: Build Mozc
+        env:
+          MOZC_COMMIT: ${{ steps.commit.outputs.commit }}
+          MOZC_BAZEL_FLAGS: --disk_cache=C:/bzl/disk --repository_cache=C:/bzl/repos
+        run: ./tools/mozc/build-windows.ps1
+
+      - name: Test Mozc with cssgsg
+        env:
+          CSSGSG_MOZC_LIB: ${{ github.workspace }}\build\mozc-out\lib\cssgsg_mozc.dll
+          CSSGSG_MOZC_DATA: ${{ github.workspace }}\build\mozc-out\data\mozc.data
+        run: |
+          cargo test -q -p cssgsg-core --features mozc --test mozc
+          if ($LASTEXITCODE) { exit 1 }
+
+      - name: Build the installer
+        run: ./tools/win/build-installer.ps1 $env:VERSION
+
+      - name: Publish
+        run: |
+          $setup = 'build/installer/cssgsg-setup.exe'
+          $sha = (Get-FileHash $setup -Algorithm SHA256).Hash.ToLowerInvariant()
+          $mozc = (Get-Content build/mozc-out/MOZC_VERSION -Raw).Trim()
+          $notes = @"
+          cssgsg for Windows $env:VERSION (x64, Windows 10 1809+ / 11).
+
+          Download cssgsg-setup.exe and run it. It is not code-signed: turn Smart App Control off, and choose More info > Run anyway if SmartScreen stops it. Uninstall from Settings > Apps.
+
+          SHA-256: $sha
+          Mozc: $mozc
+          "@
+          $flags = @('--title', "cssgsg for Windows $env:VERSION", '--notes', $notes, '--latest=false', '--target', $env:GITHUB_SHA)
+          if ($env:VERSION -match '-') { $flags += '--prerelease' }
+          gh release create "win-v$env:VERSION" $setup @flags
+          if ($LASTEXITCODE) { exit 1 }

@@ -132,16 +132,19 @@ public static extern bool InstallLayoutOrTip(string psz, uint dwFlags);
     try {
         switch ($Action) {
             'enable' {
-                Invoke-Tip 0; Write-Host '내 입력 목록에 추가(en-US)'
-                # 엔진 호스트는 로그인부터 늘 켜 둔다(스토어 앱·관리자 앱은 띄울 수 없다). 지금도 띄운다: 이미 떠 있으면
-                # 새것은 바로 끝난다(사용자당 하나).
-                if (Test-Path $HostExe) {
-                    New-ItemProperty -Path $RunKey -Name 'cssgsg' -PropertyType String -Value "`"$HostExe`"" -Force | Out-Null
-                    Start-Process $HostExe
-                    Write-Host '엔진 호스트: 시작 프로그램에 넣고 띄움'
-                }
+                # 설치기와 같은 코드(cssgsg-host.exe --install-user, win/host/src/setup.rs): 내 입력 목록에 넣고, 엔진 호스트를
+                # 시작 프로그램에 넣고 띄운다(스토어 앱·관리자 앱은 호스트를 띄울 수 없어서 로그인부터 늘 켜 둔다).
+                if (-not (Test-Path $HostExe)) { throw "$HostExe 없음" }
+                $p = Start-Process $HostExe -ArgumentList '--install-user' -Wait -PassThru
+                Write-Host "cssgsg-host --install-user(입력 목록, 시작 프로그램, 호스트): 종료 코드 $($p.ExitCode)"
             }
             'disable' {
+                # 설치기와 같은 코드(--uninstall-user). 실행 파일이 없을 때만 아래 PowerShell로 한다.
+                if (Test-Path $HostExe) {
+                    $p = Start-Process $HostExe -ArgumentList '--uninstall-user' -Wait -PassThru
+                    Write-Host "cssgsg-host --uninstall-user(입력 목록, 정렬 캐시, 사용자 TSF 키, 시작 프로그램, 호스트): 종료 코드 $($p.ExitCode)"
+                    break
+                }
                 try { Invoke-Tip 1; Write-Host '내 입력 목록에서 뺌' } catch { Write-Host "$_" }   # ILOT_UNINSTALL
                 Remove-ItemProperty -Path $RunKey -Name 'cssgsg' -ErrorAction SilentlyContinue
                 Get-Process cssgsg-host -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue

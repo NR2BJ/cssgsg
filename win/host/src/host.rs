@@ -57,6 +57,13 @@ fn options() -> Options {
 }
 
 pub fn main() {
+    // 설치기가 부르는 사용자 쪽 일(setup.rs).
+    match std::env::args().nth(1).as_deref() {
+        Some("--install-user") => std::process::exit(crate::setup::install_user()),
+        Some("--uninstall-user") => std::process::exit(crate::setup::uninstall_user()),
+        Some("--quit") => std::process::exit(crate::setup::quit()),
+        _ => {}
+    }
     let options = options();
     let Some(sid) = user_sid() else {
         log("no user SID");
@@ -218,7 +225,16 @@ fn engine(inbox: Receiver<Job>, options: &Options, clients: &AtomicUsize, idle_e
         match inbox.recv_timeout(Duration::from_secs(5)) {
             Ok(Job::Call { client, request, reply }) => {
                 last = Instant::now();
+                if request == Request::Quit {
+                    // 설치기가 파일을 바꾸려 한다: 엔진을 내려 학습을 마무리하고, 답이 입력기에 닿을 틈을 두고 끝낸다.
+                    let _ = reply.send(Reply::Done);
+                    log("asked to quit");
+                    drop(converter);
+                    std::thread::sleep(Duration::from_millis(100));
+                    std::process::exit(0);
+                }
                 let answer = match request {
+                    Request::Quit => Reply::Done,
                     Request::Hello { .. } => Reply::Hello { protocol: PROTOCOL, engine: version.clone() },
                     Request::Start { reading } => {
                         if owner.is_some() {
@@ -315,7 +331,7 @@ fn default_profile() -> PathBuf {
 }
 
 /// 개발자 기록(HKCU\Software\cssgsg DebugLog=1): 입력기와 같은 파일에 남긴다. 읽기·글자는 남기지 않는다.
-fn log(message: &str) {
+pub(crate) fn log(message: &str) {
     use std::io::Write;
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     let on = *ON.get_or_init(|| {

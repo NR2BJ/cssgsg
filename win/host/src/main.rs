@@ -13,6 +13,8 @@
 
 #[cfg(windows)]
 mod host;
+#[cfg(windows)]
+mod setup;
 
 #[cfg(windows)]
 fn main() {

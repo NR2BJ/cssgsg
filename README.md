@@ -58,9 +58,11 @@ cli/        cssgsg-cli: 터미널에서 쳐보는 도구
 config-ffi/ 설정 앱용 C ABI: config.toml ↔ JSON(코어 Config를 그대로 쓴다. 설정 앱은 입력기 코어 대신 이것만 링크)
 mac/        macOS 입력기(cssgsg/, Swift + InputMethodKit)와 설정 앱(Settings/, SwiftUI), 둘이 같이 쓰는 Shared/.
             project.yml → xcodegen → cssgsg.xcodeproj(생성물, 커밋 안 함)
-win/        윈도우 입력기: tip/(TSF 텍스트 서비스 DLL, Rust + windows 크레이트). 맥에서는 빈 크레이트로 빌드된다
+win/        윈도우: tip/(TSF 텍스트 서비스 DLL, Rust + windows 크레이트), host/(엔진 호스트 cssgsg-host.exe, 일본어 변환·설치기의 사용자 단계),
+            ipc/(입력기와 호스트 사이의 메시지·파이프), installer/(Inno Setup 설치기). 맥에서는 빈 크레이트로 빌드된다
 mozc/       Mozc C API 래퍼(cssgsg용, libcssgsg_mozc.dylib). 소스·빌드는 build/mozc, build/mozc-out(tools/mozc/build.sh)
-.github/    Mozc 엔진 워크플로(mozc-component.yml): upstream Mozc가 바뀌면 GitHub에서 엔진을 빌드해 낸다
+.github/    Mozc 엔진 워크플로(mozc-component.yml: upstream Mozc가 바뀌면 맥 엔진을 빌드해 낸다, mozc-windows.yml: 윈도우 엔진을 손으로),
+            윈도우 릴리스(win-release.yml: 설치기를 빌드해 win-v<버전>으로)
 tools/      ffi-smoke(C 헤더 확인), ohi-oracle(오이 차분 비교), crosscheck(배열 데이터·키 코드 표 교차 검증),
             mac(pkg·릴리스·서명 스크립트, 셸·업데이트·설정 앱·Mozc 엔진 스모크 테스트), mozc(엔진 빌드·묶기),
             win(입력기 개발용 설치·제거, 입력칸 시험 페이지), learn(학습 페이지 빌드), practice(타자 연습 페이지 빌드·연습 글)
@@ -138,9 +140,30 @@ bash tools/mac/release.sh 0.1.1 --notes-file docs/releases/v0.1.1.md    # 검사
 `release.sh`는 커밋·푸시하지 않은 변경이 있거나 검사가 하나라도 실패하면 멈춘다. 설치본을 바꾸는 길은 pkg 하나뿐이다
 (스크립트로 `~/Library`에 따로 깔면 같은 번들 ID가 두 곳에 생겨 입력 소스가 꼬인다).
 
+### 윈도우 입력기 설치
+
+GitHub 릴리스 `win-v<버전>`의 `cssgsg-setup.exe`를 받아 실행한다(x64, 윈도우 10 1809 이상·11). 관리자 권한 창이 한 번 뜬다.
+
+- 설치기는 `Program Files\cssgsg`에 입력기 DLL·엔진 호스트·Mozc 엔진을 넣고 등록한 뒤, 설치한 사용자의 입력 목록(en-US)에 cssgsg를 넣고
+  엔진 호스트를 시작 프로그램에 넣어 띄운다. 끝나면 Win+Space로 cssgsg(ENG)를 고른다. 이미 열려 있던 앱은 다시 열면 새 입력기를 쓴다.
+- 서명이 없다: 스마트 앱 컨트롤이 켜져 있으면 입력기가 뜨지 않는다(Windows 보안 → 앱 및 브라우저 컨트롤). SmartScreen이 막으면
+  "추가 정보 → 실행"을 누른다.
+- 업데이트는 새 설치기를 받아 실행하면 그대로 덮어 설치된다(다시 시작 필요 없음). 앱 안 업데이트는 설정 앱과 함께 넣는다.
+- 지우기: 설정 → 앱 → 설치된 앱 → cssgsg. 학습·사용자 사전(`%LOCALAPPDATA%\cssgsg`)은 남는다. 쓰는 중이던 DLL은 다시 시작할 때 지워진다.
+- 엄격한 커널 안티치트 게임(발로란트·롤의 뱅가드, FACEIT 등)은 확인되기 전까지 켜기 전에 Win+Space로 기본 한국어 입력기로 바꿔 둔다
+  (입력기 DLL이 게임에 들어가지 않는다, [CONCEPT.md](CONCEPT.md) §10.4).
+
 ### 윈도우 입력기(개발)
 
-윈도우 11 VM에서 한다(스마트 앱 컨트롤 끔, 입력기를 처음 등록하기 전에 VM 스냅숏). 도구는 VS 빌드 도구(C++, Windows SDK, ATL), rustup, Node.js, GitHub CLI.
+윈도우 11 VM에서 한다(스마트 앱 컨트롤 끔, 입력기를 처음 등록하기 전에 VM 스냅숏). 도구는 VS 빌드 도구(C++, Windows SDK, ATL), rustup, Node.js, GitHub CLI,
+설치기를 만들 때 Inno Setup 6(`winget install JRSoftware.InnoSetup`).
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\win\build-installer.ps1 0.1.0   # build\installer\cssgsg-setup.exe(엔진은 build\mozc-out에 있어야 한다)
+```
+
+릴리스는 GitHub Actions `win-release.yml`(손으로, 버전을 넣어)로 낸다: 검사 → Mozc 빌드·시험 → 설치기 → 릴리스 `win-v<버전>`.
+맥 업데이트를 깨지 않게 "최신"으로 두지 않는다(맥은 `/releases/latest`의 `cssgsg.pkg`를 본다).
 C 런타임은 정적으로 링크해서(`.cargo/config.toml`) 입력기 DLL은 시스템 DLL에만 기댄다.
 
 ```powershell
