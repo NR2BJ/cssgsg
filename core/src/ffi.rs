@@ -295,10 +295,12 @@ pub unsafe extern "C" fn cssgsg_engine_handle_key(
         repeat: ev.is_repeat != 0,
         time: ev.time,
     };
+    // secure_latin은 맥(이 C ABI를 쓰는 셸)에서는 쓰지 않는다: 비밀번호 칸에 글자를 넣을 수 없다.
     let ctx = Context {
         game_mode: ctx.game_mode != 0,
         taps_disabled: ctx.taps_disabled != 0,
         secure_field: ctx.secure_field != 0,
+        secure_latin: false,
     };
     unsafe { run(e, |engine| engine.handle_key(&event, &ctx)) }
 }

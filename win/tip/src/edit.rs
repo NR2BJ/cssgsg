@@ -8,13 +8,15 @@ use std::mem::ManuallyDrop;
 use std::rc::Rc;
 
 use windows::Win32::Foundation::{E_UNEXPECTED, RECT};
+use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::TextServices::{
-    GUID_PROP_ATTRIBUTE, INSERT_TEXT_AT_SELECTION_FLAGS, ITfComposition, ITfCompositionSink, ITfContext,
-    ITfContextComposition, ITfEditSession, ITfEditSession_Impl, ITfInsertAtSelection, ITfRange, TF_AE_END,
-    TF_ANCHOR_END, TF_ANCHOR_START, TF_DEFAULT_SELECTION, TF_IAS_QUERYONLY, TF_SELECTION, TF_SELECTIONSTYLE,
+    GUID_PROP_ATTRIBUTE, GUID_PROP_INPUTSCOPE, INSERT_TEXT_AT_SELECTION_FLAGS, IS_NUMERIC_PASSWORD,
+    IS_PASSWORD, ITfComposition, ITfCompositionSink, ITfContext, ITfContextComposition, ITfEditSession,
+    ITfEditSession_Impl, ITfInputScope, ITfInsertAtSelection, ITfRange, InputScope, TF_AE_END, TF_ANCHOR_END,
+    TF_ANCHOR_START, TF_DEFAULT_SELECTION, TF_IAS_QUERYONLY, TF_SELECTION, TF_SELECTIONSTYLE,
 };
-use windows::core::{BOOL, Interface, Result, implement};
+use windows::core::{BOOL, IUnknown, Interface, Result, implement};
 
 use crate::guard::guarded;
 use crate::plan::{Op, Segment};
@@ -264,6 +266,60 @@ impl ITfEditSession_Impl for Measure_Impl {
             || Err(E_UNEXPECTED.into()),
             || {
                 (self.hook)(unsafe { anchor(ec, &self.context, &self.slot, None) });
+                Ok(())
+            },
+        )
+    }
+}
+
+/// 입력칸이 비밀번호 칸인지 읽는다(앱이 알린 입력 범위 IS_PASSWORD·IS_NUMERIC_PASSWORD, Firefox 등). 못 읽으면 None.
+#[implement(ITfEditSession)]
+pub struct ReadPasswordScope {
+    context: ITfContext,
+    out: Rc<Cell<Option<bool>>>,
+}
+
+impl ReadPasswordScope {
+    pub fn new(context: ITfContext) -> Self {
+        Self { context, out: Rc::default() }
+    }
+
+    pub fn result(&self) -> Rc<Cell<Option<bool>>> {
+        self.out.clone()
+    }
+}
+
+impl ITfEditSession_Impl for ReadPasswordScope_Impl {
+    fn DoEditSession(&self, ec: u32) -> Result<()> {
+        guarded(
+            || Err(E_UNEXPECTED.into()),
+            || unsafe {
+                let mut selection = [TF_SELECTION::default()];
+                let mut fetched = 0;
+                self.context.GetSelection(ec, TF_DEFAULT_SELECTION, &mut selection, &mut fetched)?;
+                let range = ManuallyDrop::into_inner(std::mem::take(&mut selection[0].range));
+                let Some(range) = range.filter(|_| fetched > 0) else {
+                    self.out.set(Some(false));
+                    return Ok(());
+                };
+                let property = self.context.GetAppProperty(&GUID_PROP_INPUTSCOPE)?;
+                let value = property.GetValue(ec, &range)?;
+                let Ok(unknown) = IUnknown::try_from(&value) else {
+                    self.out.set(Some(false));
+                    return Ok(());
+                };
+                let scope: ITfInputScope = unknown.cast()?;
+                let mut scopes: *mut InputScope = std::ptr::null_mut();
+                let mut count = 0u32;
+                scope.GetInputScopes(&mut scopes, &mut count)?;
+                let password = !scopes.is_null()
+                    && std::slice::from_raw_parts(scopes, count as usize)
+                        .iter()
+                        .any(|s| *s == IS_PASSWORD || *s == IS_NUMERIC_PASSWORD);
+                if !scopes.is_null() {
+                    CoTaskMemFree(Some(scopes as *const std::ffi::c_void));
+                }
+                self.out.set(Some(password));
                 Ok(())
             },
         )

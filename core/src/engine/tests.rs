@@ -318,6 +318,23 @@ fn secure_field_passes_keys_but_keeps_taps_consistent() {
 }
 
 #[test]
+fn password_fields_type_graphite_where_the_shell_can_insert() {
+    // 윈도우: 비밀번호 칸에도 글자를 넣을 수 있어서, 모드와 상관없이 Graphite로 바로 확정한다(조합 없음).
+    let mut s = Sim::new(Engine::new(Config::default()));
+    s.ctx = Context { secure_field: true, secure_latin: true, ..Context::default() };
+    assert_eq!(s.engine.mode(), Mode::Ko);
+    s.type_keys("jlwwi").unwrap();
+    assert_eq!((s.text.as_str(), s.preedit.as_str()), ("hello", ""), "한국어 모드여도 Graphite");
+    s.type_keys("{ls}J1").unwrap();
+    assert_eq!(s.text, "helloH1", "일본어 모드여도 Graphite, 쿼티와 같은 숫자는 앱이 친다");
+    // 언어 전환 탭은 그대로 된다.
+    assert_eq!(s.engine.mode(), Mode::Ja);
+    // 단축키는 쿼티 자리 그대로 앱에 간다(Ctrl+A가 Graphite 글자가 되면 안 된다).
+    s.type_keys("{C-a}{C-v}{A-f}").unwrap();
+    assert_eq!(s.text, "helloH1");
+}
+
+#[test]
 fn katakana_direct_can_be_turned_off() {
     let mut s = sim_with("[ja]\nkatakana_direct = false");
     s.type_keys("{ls}{caps}ckeuwl").unwrap();

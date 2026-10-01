@@ -45,6 +45,10 @@ pub struct Context {
     pub taps_disabled: bool,
     /// 비밀번호 칸 등: 조합하지 않고 키를 모두 넘긴다. 언어 전환 탭은 그대로 된다(갇히지 않게).
     pub secure_field: bool,
+    /// 비밀번호 칸인데 셸이 글자를 넣을 수 있다(윈도우): 넘기지 않고 모드와 상관없이 영어(Graphite)로 바로 확정한다.
+    /// 단축키(⌘/Ctrl/Option)는 넘긴다. 사용자 결정 "비밀번호도 Graphite로 친다"(2026-09-29).
+    /// 맥은 아직 비밀번호 칸에 Graphite를 넣는 방법이 없어 쓰지 않는다(키를 넘긴다).
+    pub secure_latin: bool,
 }
 
 /// 조합 중 글자와 밑줄 구간. 구간 위치는 글자(char) 단위다.
@@ -396,8 +400,13 @@ impl Engine {
             }
         }
 
+        // 비밀번호 칸은 조합하지 않는다. 셸이 글자를 넣을 수 있으면(윈도우) Graphite로 바로 친다. 단축키는 쿼티 자리 그대로.
         if ctx.secure_field {
-            return Output::pass();
+            return if ctx.secure_latin && !ev.mods.command_like() {
+                self.en_key(ev, ctx)
+            } else {
+                Output::pass()
+            };
         }
 
         // ⌘/Ctrl/Option 조합: 조합을 확정하고 앱에 넘긴다(단축키는 쿼티 자리 그대로).

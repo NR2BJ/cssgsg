@@ -16,9 +16,11 @@ use cssgsg_core::{Config, Context, Engine, Mode, Output};
 use windows::Win32::Foundation::{E_UNEXPECTED, LPARAM, WPARAM};
 use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VK_CAPITAL,
+    INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE,
+    SendInput, VIRTUAL_KEY, VK_CAPITAL, VK_PACKET,
 };
 use windows::Win32::UI::TextServices::{
+    GUID_COMPARTMENT_EMPTYCONTEXT, GUID_COMPARTMENT_KEYBOARD_DISABLED,
     GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION, GUID_COMPARTMENT_KEYBOARD_OPENCLOSE,
     IEnumTfDisplayAttributeInfo, ITfCategoryMgr, ITfCompartment, ITfCompartmentEventSink,
     ITfCompartmentEventSink_Impl, ITfCompartmentMgr, ITfComposition, ITfCompositionSink,
@@ -27,14 +29,14 @@ use windows::Win32::UI::TextServices::{
     ITfKeystrokeMgr, ITfLangBarItemButton, ITfLangBarItemMgr, ITfSource, ITfTextInputProcessor_Impl,
     ITfTextInputProcessorEx, ITfTextInputProcessorEx_Impl, ITfThreadMgr, ITfThreadMgrEventSink,
     ITfThreadMgrEventSink_Impl, TF_E_SYNCHRONOUS, TF_ES_ASYNCDONTCARE, TF_ES_READ, TF_ES_READWRITE,
-    TF_ES_SYNC,
+    TF_ES_SYNC, TF_SD_READONLY,
 };
 use windows::Win32::UI::WindowsAndMessaging::GetMessageTime;
 use windows::core::{
     BOOL, ComObject, GUID, HRESULT, IUnknown, IUnknownImpl, Interface, Ref, Result, implement,
 };
 
-use crate::edit::{ApplyOps, Attrs, EndComposition, Measure, Slot, UiHook};
+use crate::edit::{ApplyOps, Attrs, EndComposition, Measure, ReadPasswordScope, Slot, UiHook};
 use crate::guard::{guarded, poisoned};
 use crate::keys::{self, Clock};
 use crate::langbar::ModeButton;
@@ -76,6 +78,10 @@ pub struct TextService {
     clock: RefCell<Clock>,
     /// 조합이 밖에서 끝났는데 그때 엔진을 빌릴 수 없었다(재진입). 다음 키 앞에서 엔진 조합을 버린다.
     terminated: Cell<bool>,
+    /// 지난번에 읽은 "비밀번호 칸"(입력 범위). 조합 중에는 입력칸이 그대로라 다시 읽지 않는다.
+    password: Cell<bool>,
+    /// 지난 키의 입력칸 종류(실제 쪽에서 문서를 고칠 때 쓴다).
+    field: Cell<Field>,
     /// 후보창과 모드 HUD(편집 세션이 자리를 잰 뒤 맞춘다).
     screen: Rc<RefCell<Screen>>,
 }
@@ -117,9 +123,32 @@ impl TextService {
             seen: RefCell::new(None),
             clock: RefCell::new(Clock::default()),
             terminated: Cell::new(false),
+            password: Cell::new(false),
+            field: Cell::new(Field::Normal),
             screen: Rc::new(RefCell::new(Screen::default())),
         }
     }
+}
+
+/// 입력칸 종류([`TextService_Impl::classify`]).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Field {
+    Normal,
+    /// 입력기가 글자를 바꾸면 안 되는 곳(읽기 전용, 앱이 입력기를 끈 문맥, 웹 페이지 본문, 문맥 없음): 키를 넘긴다.
+    Closed,
+    /// 비밀번호 칸: 모드와 상관없이 Graphite로 바로 확정한다.
+    Password,
+}
+
+/// 문서를 언제 고치는지([`TextService_Impl::apply`]).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum When {
+    /// 키를 먹었다: 앱이 편할 때(비동기여도 된다).
+    Whenever,
+    /// 키를 앱에 넘기기 전: 동기로 먼저 한다. 거절되면 비동기로라도.
+    BeforeKey,
+    /// 지금 동기로만. 못 하면 false(비밀번호 칸은 유니코드 키 입력으로 넣는다. 비동기로 미루면 두 번 들어갈 수 있다).
+    Now,
 }
 
 /// 문서를 고칠 일이 있는지(확정·조합).
@@ -165,6 +194,31 @@ fn toggle_caps_lock() {
     };
     let inputs = [key(KEYBD_EVENT_FLAGS(0)), key(KEYEVENTF_KEYUP)];
     unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) };
+}
+
+/// 글자를 유니코드 키 입력(VK_PACKET)으로 넣는다. 앱이 문서 고치기를 받지 않을 때만 쓴다: 이미 줄 선 키보다
+/// 뒤에 들어간다. 이 키는 입력기도 다시 받는데, [`TextService_Impl::process`]가 VK_PACKET은 넘긴다.
+fn inject_text(text: &str) {
+    let inputs: Vec<INPUT> = text
+        .encode_utf16()
+        .flat_map(|unit| {
+            [KEYBD_EVENT_FLAGS(0), KEYEVENTF_KEYUP].map(|up| INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: VIRTUAL_KEY(0),
+                        wScan: unit,
+                        dwFlags: KEYEVENTF_UNICODE | up,
+                        time: 0,
+                        dwExtraInfo: 0,
+                    },
+                },
+            })
+        })
+        .collect();
+    if !inputs.is_empty() {
+        unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) };
+    }
 }
 
 impl TextService_Impl {
@@ -271,7 +325,8 @@ impl TextService_Impl {
         wparam: WPARAM,
         lparam: LPARAM,
     ) -> Option<(Output, bool)> {
-        if poisoned() {
+        // 유니코드 키 입력(VK_PACKET)은 글자가 이미 정해져 있다: 화상 키보드, 비밀번호 관리자의 자동 입력, 우리 inject_text.
+        if poisoned() || wparam.0 == VK_PACKET.0 as usize {
             return None;
         }
         let id = KeyId { down, wparam: wparam.0, lparam: lparam.0, time: unsafe { GetMessageTime() } as u32 };
@@ -285,11 +340,19 @@ impl TextService_Impl {
         let left = self.seen.try_borrow_mut().ok().and_then(|mut s| s.take()).filter(|s| !s.applied);
         if let (Some(left), Some(context)) = (left, context) {
             debug_log("key test without the key: applying its edits late");
-            self.apply(context, &left.out, false);
+            self.apply(context, &left.out, When::Whenever);
         }
         if let Some(context) = context {
             self.settle_context(context);
         }
+        // 문맥이 없으면(입력칸이 없는 창, 입력기를 끈 창: 게임, Win32 비밀번호 칸) 글자를 넣을 곳이 없다: 키를 넘긴다.
+        let field = context.map_or(Field::Closed, |c| self.classify(c, down && !self.has_composition()));
+        self.field.set(field);
+        let ctx = Context {
+            secure_field: field != Field::Normal,
+            secure_latin: field == Field::Password,
+            ..Context::default()
+        };
         let ev = keys::event(down, wparam, lparam, self.clock.try_borrow_mut().ok()?.seconds(id.time));
         let out = {
             let mut state = self.state.try_borrow_mut().ok()?;
@@ -297,17 +360,18 @@ impl TextService_Impl {
             if self.terminated.take() {
                 let _ = a.engine.reset();
             }
-            let out = a.engine.handle_key(&ev, &Context::default());
+            let out = a.engine.handle_key(&ev, &ctx);
             if let Ok(mut screen) = self.screen.try_borrow_mut() {
                 screen.queue(out.candidates.clone(), out.mode, a.engine.mode() == Mode::Ja);
             }
             if a.log {
                 debug_log(&format!(
-                    "key {:?} down={} mods={:?} repeat={} -> eat={} commit={} preedit={:?} mode={:?}",
+                    "key {:?} down={} mods={:?} repeat={} field={:?} -> eat={} commit={} preedit={:?} mode={:?}",
                     ev.key,
                     ev.down,
                     ev.mods,
                     ev.repeat,
+                    field,
                     out.consumed,
                     out.commit.chars().count(),
                     out.preedit.as_ref().map(|p| p.text.chars().count()),
@@ -321,6 +385,50 @@ impl TextService_Impl {
             *seen = Some(Seen { id, out: out.clone(), applied: false });
         }
         Some((out, false))
+    }
+
+    /// 이 입력칸이 어떤 칸인지.
+    /// - 입력 범위가 IS_PASSWORD·IS_NUMERIC_PASSWORD면 [`Field::Password`]: 모드와 상관없이 Graphite로 바로 확정한다
+    ///   (사용자 결정 "비밀번호도 Graphite", 윈도우는 비밀번호 칸에도 글자를 넣을 수 있다). Chromium은 비밀번호 칸에
+    ///   입력기 끔·빈 문맥 칸을 켜지만, 입력칸이 아닌 곳(윈도우 11, 페이지 본문)에도 똑같이 켜서 입력 범위로만 가린다.
+    /// - 읽기 전용(TF_SD_READONLY), 입력기 끔(GUID_COMPARTMENT_KEYBOARD_DISABLED), 빈 문맥(GUID_COMPARTMENT_EMPTYCONTEXT)이면
+    ///   [`Field::Closed`]: 키를 모두 앱에 넘긴다(웹 단축키 등). 언어 전환 탭은 된다(갇히지 않게).
+    ///
+    /// 입력 범위는 편집 쿠키가 있어야 읽혀서 `read_scope`일 때만(조합이 없는 키 눌림) 동기 읽기 세션으로 읽고,
+    /// 아니면 지난 값을 쓴다(조합 중에는 입력칸이 그대로다).
+    fn classify(&self, context: &ITfContext, read_scope: bool) -> Field {
+        if unsafe { context.GetStatus() }.is_ok_and(|s| s.dwDynamicFlags & TF_SD_READONLY != 0) {
+            return Field::Closed;
+        }
+        if read_scope && let Some(password) = self.read_password_scope(context) {
+            self.password.set(password);
+        }
+        if self.password.get() {
+            return Field::Password;
+        }
+        let flag = |guid: &GUID| {
+            context
+                .cast::<ITfCompartmentMgr>()
+                .ok()
+                .and_then(|m| unsafe { m.GetCompartment(guid) }.ok())
+                .and_then(|c| get_i32(&c))
+                .is_some_and(|v| v != 0)
+        };
+        if flag(&GUID_COMPARTMENT_KEYBOARD_DISABLED) || flag(&GUID_COMPARTMENT_EMPTYCONTEXT) {
+            return Field::Closed;
+        }
+        Field::Normal
+    }
+
+    fn read_password_scope(&self, context: &ITfContext) -> Option<bool> {
+        let client_id = self.state.try_borrow().ok().and_then(|s| s.as_ref().map(|a| a.client_id))?;
+        let session = ReadPasswordScope::new(context.clone());
+        let result = session.result();
+        let session: ITfEditSession = session.into();
+        match unsafe { context.RequestEditSession(client_id, &session, TF_ES_SYNC | TF_ES_READ) } {
+            Ok(hr) if hr.is_ok() => result.get(),
+            _ => None,
+        }
     }
 
     fn mark_applied(&self) {
@@ -348,9 +456,17 @@ impl TextService_Impl {
         let Some((out, applied)) = self.process(down, context, wparam, lparam) else { return false };
         if !applied {
             match context {
+                // 비밀번호 칸: 앱이 문서 고치기를 바로 받지 않으면(빈 문맥 등) 글자를 유니코드 키 입력으로 넣는다.
+                Some(context) if self.field.get() == Field::Password => {
+                    if !self.apply(context, &out, When::Now) {
+                        debug_log("password field: typing the commit as unicode input");
+                        inject_text(&out.commit);
+                    }
+                }
                 // 키를 앱에 넘기면 그 키보다 먼저 고쳐야 한다(조합 중 Ctrl, 기호 키).
                 Some(context) => {
-                    self.apply(context, &out, !(down && out.consumed));
+                    let when = if down && out.consumed { When::Whenever } else { When::BeforeKey };
+                    self.apply(context, &out, when);
                 }
                 None => self.refresh_screen(None),
             }
@@ -404,8 +520,8 @@ impl TextService_Impl {
 
     // ---- 문서 고치기 ------------------------------------------------------------------------------
 
-    /// 엔진 출력대로 문서를 고친다. `before_key`면 키를 앱에 넘기기 전이라 동기로 먼저 한다.
-    fn apply(&self, context: &ITfContext, out: &Output, before_key: bool) -> bool {
+    /// 엔진 출력대로 문서를 고친다. 고쳤거나 고치기로 했으면(비동기) true.
+    fn apply(&self, context: &ITfContext, out: &Output, when: When) -> bool {
         let ops = plan(out);
         if ops.is_empty() {
             self.refresh_screen(Some(context));
@@ -427,12 +543,15 @@ impl TextService_Impl {
         let ran = session.ran();
         let session: ITfEditSession = session.into();
         let request = |flags| unsafe { context.RequestEditSession(client_id, &session, flags) };
-        let mut result = request(if before_key {
-            TF_ES_SYNC | TF_ES_READWRITE
-        } else {
-            TF_ES_ASYNCDONTCARE | TF_ES_READWRITE
+        let mut result = request(match when {
+            When::Whenever => TF_ES_ASYNCDONTCARE | TF_ES_READWRITE,
+            When::BeforeKey | When::Now => TF_ES_SYNC | TF_ES_READWRITE,
         });
-        if before_key && matches!(result, Ok(hr) if hr == TF_E_SYNCHRONOUS) {
+        if matches!(result, Ok(hr) if hr == TF_E_SYNCHRONOUS) {
+            if when == When::Now {
+                debug_log("synchronous edit refused");
+                return false;
+            }
             debug_log("synchronous edit refused: the commit may land after the key");
             result = request(TF_ES_ASYNCDONTCARE | TF_ES_READWRITE);
         }
@@ -663,11 +782,12 @@ impl ITfThreadMgrEventSink_Impl for TextService_Impl {
         Ok(())
     }
 
-    /// 입력칸이 바뀌었다: 조합을 그 자리에서 끝낸다(맥 deactivate와 같다).
+    /// 입력칸이 바뀌었다: 조합을 그 자리에서 끝낸다(맥 deactivate와 같다). 비밀번호 칸인지는 새 칸에서 다시 읽는다.
     fn OnSetFocus(&self, _focus: Ref<ITfDocumentMgr>, _previous: Ref<ITfDocumentMgr>) -> Result<()> {
         guarded(
             || Ok(()),
             || {
+                self.password.set(false);
                 if self.has_composition() {
                     self.end_composition();
                 }
