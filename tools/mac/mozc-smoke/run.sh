@@ -18,5 +18,5 @@ swiftc -O -module-name mozcsmoke \
   -import-objc-header mac/cssgsg/cssgsg-Bridging-Header.h -I core/include \
   mac/Shared/*.swift mac/cssgsg/Mozc/*.swift mac/cssgsg/Engine/CoreEngine.swift mac/cssgsg/System/DeveloperLogger.swift \
   tools/mac/mozc-smoke/main.swift \
-  -L build/cargo/release -lcssgsg_core -o "$OUT/mozc-smoke"
+  build/cargo/release/libcssgsg_core.a -o "$OUT/mozc-smoke"
 "$OUT/mozc-smoke" "$ROOT"

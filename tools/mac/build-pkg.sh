@@ -33,6 +33,18 @@ for scheme in cssgsg cssgsgSettings; do
 done
 [ -d "$BUILT" ] || { echo "빌드 결과가 없다: $BUILT"; exit 1; }
 [ -d "$BUILT_SETTINGS" ] || { echo "빌드 결과가 없다: $BUILT_SETTINGS"; exit 1; }
+# 두 앱이 앱 밖의 라이브러리(빌드 폴더 등)를 가리키지 않는지. 그러면 빌드한 맥에서만 뜬다(0.7.2 설정 앱).
+# 시스템 라이브러리와 앱 안(@rpath, @executable_path, @loader_path)만 된다.
+for binary in "$BUILT/Contents/MacOS/"* "$BUILT_SETTINGS/Contents/MacOS/"* "$BUILT/Contents/Frameworks/"*.dylib; do
+  [ -f "$binary" ] || continue
+  OUTSIDE="$(otool -L "$binary" | tail -n +2 | awk '{print $1}' \
+    | grep -vE '^(/System/Library/|/usr/lib/|@rpath/|@executable_path/|@loader_path/)' || true)"
+  if [ -n "$OUTSIDE" ]; then
+    echo "$(basename "$binary")이 앱 밖의 라이브러리를 가리킨다(다른 맥에서 뜨지 않는다):"
+    echo "$OUTSIDE" | sed 's/^/  /'
+    exit 1
+  fi
+done
 VERSION="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$BUILT/Contents/Info.plist")"
 echo "버전 $VERSION"
 

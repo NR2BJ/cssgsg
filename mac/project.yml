@@ -60,8 +60,10 @@ targets:
         SWIFT_OBJC_BRIDGING_HEADER: cssgsg/cssgsg-Bridging-Header.h
         HEADER_SEARCH_PATHS: $(SRCROOT)/../core/include
         LIBRARY_SEARCH_PATHS: $(SRCROOT)/../build/cargo/release
-        # 코어. Mozc는 링크하지 않는다(엔진 dylib를 실행 중에 읽는다)
-        OTHER_LDFLAGS: -lcssgsg_core
+        # 코어. Mozc는 링크하지 않는다(엔진 dylib를 실행 중에 읽는다).
+        # 정적 라이브러리를 경로로 준다: -l이면 같은 폴더에 .dylib가 있을 때 링커가 그것을 고르고, 앱은 빌드 폴더를 가리켜
+        # 빌드한 맥에서만 뜬다(0.7.2 설정 앱, config-ffi에 윈도우용 cdylib가 생긴 뒤).
+        OTHER_LDFLAGS: $(SRCROOT)/../build/cargo/release/libcssgsg_core.a
         COMBINE_HIDPI_IMAGES: true
         # 입력기는 서명 없이(ad-hoc) 쓴다
         CODE_SIGN_IDENTITY: "-"
@@ -111,7 +113,9 @@ targets:
         SWIFT_OBJC_BRIDGING_HEADER: Settings/Settings-Bridging-Header.h
         HEADER_SEARCH_PATHS: $(SRCROOT)/../config-ffi/include
         LIBRARY_SEARCH_PATHS: $(SRCROOT)/../build/cargo/release
-        OTHER_LDFLAGS: -lcssgsg_config
+        # 정적 라이브러리를 경로로(위 입력기와 같은 까닭). config-ffi는 윈도우 설정 앱용 cdylib도 만들어 같은 폴더에
+        # libcssgsg_config.dylib가 있다. 0.7.2는 -lcssgsg_config로 그것에 링크되어 다른 맥에서 뜨자마자 죽었다.
+        OTHER_LDFLAGS: $(SRCROOT)/../build/cargo/release/libcssgsg_config.a
         # 러스트 정적 라이브러리에서 설정 변환에 쓰지 않는 코드(엔진, 한자 사전 6MB)를 버린다.
         DEAD_CODE_STRIPPING: YES
         CODE_SIGN_IDENTITY: "-"

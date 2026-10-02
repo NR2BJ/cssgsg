@@ -71,6 +71,7 @@
 | 56 | 설정 앱 → 일본어 → 변환 엔진 | 볼 것만 | "3.34.6239.101 (2026-09-28, 래퍼 1)", "앱에 들어 있는 엔진" | — (mozc-smoke) |
 | 57 | `~/Library/Application Support/cssgsg/config.toml`에 `[windows]` 표를 넣는다(`hud = false`). 윈도우에서 쓴 파일을 가져와도 된다 | 설정 앱을 열고 맥 설정 하나를 바꿨다가 되돌린다 | 오류 안내 없이 읽고, 바꾼 뒤에도 파일에 `[windows]`의 `hud = false`가 남는다(0.7.1은 설정 전체를 기본값으로 읽었고, 쓰면 지웠다) | — (settings-smoke) |
 | 58 | 설정 앱 → 일반 → 한자 단축키를 왼쪽 Control 탭으로 녹화. ㅊ | `k r e` 후 왼쪽 Control 톡 | 國. Control을 누르는 순간 국이 확정되지 않는다(0.7.1은 확정됐다). 끝나면 단축키를 되돌린다 | — (`cargo test windows_hanja_is_a_right_control_tap`) |
+| 59 | 개발하지 않는 맥(맥북)에서 0.7.3 설치(0.7.2 설정 앱이 안 뜨면 릴리스 노트의 curl 명령으로) | 메뉴 막대 cssgsg → 설정… | 설정 앱이 뜬다(0.7.2는 dyld "Library not loaded …libcssgsg_config.dylib"로 바로 꺼졌다) | — (build-pkg.sh의 `otool -L` 확인) |
 
 틀린 항목이 있으면 번호를 알려 준다. 재현이 필요하면 개발자 기록을 켠다(키 코드·수식키·시각만 남고 글자 내용은 남지 않는다).
 

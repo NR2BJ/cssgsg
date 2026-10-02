@@ -21,7 +21,7 @@ swiftc -O -module-name shellsmoke \
   mac/Shared/Cssgsg.swift mac/cssgsg/Engine/CoreEngine.swift mac/cssgsg/Engine/KeyTranslation.swift mac/cssgsg/Engine/TextApplier.swift \
   mac/cssgsg/System/TextInputGeometry.swift mac/cssgsg/System/DeveloperLogger.swift \
   tools/mac/shell-smoke/Typist.swift tools/mac/shell-smoke/main.swift \
-  -L build/cargo/release -lcssgsg_core -o "$OUT/shell-smoke"
+  build/cargo/release/libcssgsg_core.a -o "$OUT/shell-smoke"
 
 echo "=== 자체 점검 ==="
 "$OUT/shell-smoke" --self-test
