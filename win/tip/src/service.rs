@@ -39,7 +39,9 @@ use windows::core::{
     BOOL, ComObject, GUID, HRESULT, IUnknown, IUnknownImpl, Interface, Ref, Result, implement,
 };
 
-use crate::edit::{ApplyOps, Attrs, EndComposition, Measure, ReadInputScope, ScopeRead, Slot, UiHook};
+use crate::edit::{
+    ApplyOps, Attrs, EndComposition, GameEdit, Measure, ReadInputScope, ScopeRead, Slot, UiHook,
+};
 use crate::guard::{guarded, poisoned};
 use crate::host::{self, HostConverter, HostLink};
 use crate::keys::{self, Clock};
@@ -792,9 +794,12 @@ impl TextService_Impl {
             self.refresh_screen(Some(context));
             return true;
         }
-        let Some((client_id, attrs, game)) =
-            self.state.try_borrow().ok().and_then(|s| s.as_ref().map(|a| (a.client_id, a.attrs, a.game)))
-        else {
+        let Some((client_id, attrs, game)) = self.state.try_borrow().ok().and_then(|s| {
+            s.as_ref().map(|a| {
+                let game = GameEdit { game: a.game, interim: a.game && a.engine.mode() == Mode::Ko };
+                (a.client_id, a.attrs, game)
+            })
+        }) else {
             return false;
         };
         let session = ApplyOps::new(

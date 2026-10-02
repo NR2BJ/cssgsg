@@ -14,8 +14,8 @@ use windows::Win32::UI::TextServices::{
     GUID_PROP_ATTRIBUTE, GUID_PROP_INPUTSCOPE, INSERT_TEXT_AT_SELECTION_FLAGS, IS_NUMERIC_PASSWORD,
     IS_PASSWORD, IS_PRIVATE, ITfComposition, ITfCompositionSink, ITfContext, ITfContextComposition,
     ITfEditSession, ITfEditSession_Impl, ITfInputScope, ITfInsertAtSelection, ITfRange, ITfRangeACP,
-    InputScope, TF_AE_END, TF_ANCHOR_END, TF_ANCHOR_START, TF_DEFAULT_SELECTION, TF_IAS_QUERYONLY,
-    TF_SELECTION, TF_SELECTIONSTYLE,
+    InputScope, TF_AE_END, TF_AE_NONE, TF_ANCHOR_END, TF_ANCHOR_START, TF_DEFAULT_SELECTION,
+    TF_IAS_QUERYONLY, TF_SELECTION, TF_SELECTIONSTYLE,
 };
 use windows::core::{BOOL, IUnknown, Interface, Result, implement};
 
@@ -56,8 +56,17 @@ pub struct ApplyOps {
     focus: Cell<Option<(usize, usize)>>,
     /// 세션이 돌았으면 true(RequestEditSession 안에서 바로 돌았는지 보는 데 쓴다).
     ran: Rc<Cell<bool>>,
-    /// 게임 스레드(UILess 전용): 조합을 GetSelection의 커서 자리에서 시작한다(아래 start).
-    game: bool,
+    game: GameEdit,
+}
+
+/// 게임 스레드(UILess 전용)에서 고치는 방식.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct GameEdit {
+    /// 게임 스레드다: 조합을 GetSelection의 커서 자리에서 시작한다(아래 start).
+    pub game: bool,
+    /// 한글 조합 글자를 MS 한국어 입력기처럼 중간 글자(interim char: 그 글자를 덮는 선택)로 둔다. IMM32로는 CS_INSERTCHAR가 되어,
+    /// 한글을 지원하는 게임이 커서 자리에 끼워 그린다. 보통 조합(커서를 뒤에 둔다)은 오버워치가 입력칸 맨 앞에 그렸다(2026-10-03).
+    pub interim: bool,
 }
 
 impl ApplyOps {
@@ -68,7 +77,7 @@ impl ApplyOps {
         sink: ITfCompositionSink,
         attrs: Attrs,
         hook: Option<UiHook>,
-        game: bool,
+        game: GameEdit,
     ) -> Self {
         Self { context, ops, slot, sink, attrs, hook, focus: Cell::new(None), ran: Rc::default(), game }
     }
@@ -120,7 +129,12 @@ impl ApplyOps {
                 range.SetText(ec, 0, text)?;
                 self.mark(ec, &composing.context, &range, segments)?;
                 self.focus.set(segments.iter().find(|s| s.focused).map(|s| (s.start, s.len)));
-                caret_at_end(ec, &composing.context, &range)
+                // 중간 글자는 한 글자일 때만(TSF 규칙).
+                if self.game.interim && text.len() == 1 {
+                    select_interim(ec, &composing.context, &range)
+                } else {
+                    caret_at_end(ec, &composing.context, &range)
+                }
             },
             Op::Clear => match self.take() {
                 Some(c) => unsafe {
@@ -154,10 +168,10 @@ impl ApplyOps {
                 extent(ec, &at_insert),
                 selection.as_ref().and_then(|s| extent(ec, s)),
                 self.context.GetEnd(ec).ok().and_then(|end| extent(ec, &end)).map(|(start, _)| start),
-                if self.game { " (game: starting at the selection)" } else { "" }
+                if self.game.game { " (game: starting at the selection)" } else { "" }
             ));
             let range = match selection {
-                Some(s) if self.game => s,
+                Some(s) if self.game.game => s,
                 _ => at_insert,
             };
             let compositions: ITfContextComposition = self.context.cast()?;
@@ -248,6 +262,19 @@ unsafe fn caret_at_end(ec: u32, context: &ITfContext, range: &ITfRange) -> Resul
         let selection = TF_SELECTION {
             range: ManuallyDrop::new(Some(caret)),
             style: TF_SELECTIONSTYLE { ase: TF_AE_END, fInterimChar: BOOL::from(false) },
+        };
+        let result = context.SetSelection(ec, std::slice::from_ref(&selection));
+        drop(ManuallyDrop::into_inner(selection.range));
+        result
+    }
+}
+
+/// 조합 글자를 중간 글자로 고른다(그 글자를 덮는 선택, fInterimChar). MS 한국어 입력기가 한글 조합에 쓰는 모양이다.
+unsafe fn select_interim(ec: u32, context: &ITfContext, range: &ITfRange) -> Result<()> {
+    unsafe {
+        let selection = TF_SELECTION {
+            range: ManuallyDrop::new(Some(range.Clone()?)),
+            style: TF_SELECTIONSTYLE { ase: TF_AE_NONE, fInterimChar: BOOL::from(true) },
         };
         let result = context.SetSelection(ec, std::slice::from_ref(&selection));
         drop(ManuallyDrop::into_inner(selection.range));

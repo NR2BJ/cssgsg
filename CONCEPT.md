@@ -774,6 +774,13 @@ k     = { cho = "ㄱ" }
     (`win/tip/src/uiless.rs`, ITfCandidateListUIElement: 목록, 고른 것, 페이지(목록 9·격자 30), 한자는 뜻을 붙여 "國 나라 국"). 바뀌면
     UpdateUIElement, 닫히면 EndUIElement. 보통 앱은 지금처럼 우리 창. ①은 원인을 모른다: 게임 스레드에서는 조합을 GetSelection 자리에서
     시작하게 바꾸고(QUERYONLY가 0을 준다는 가정), 모든 앱에서 조합 시작 때 자리(삽입점·커서·문서 끝, 숫자만)를 기록한다.
+  - 0.2.4 후기(2026-10-03): 후보는 게임이 그린다("the app draws it true"). 그런데 처음 띄우면 앞 글자의 후보가 보이고 방향키를 누르면
+    바뀐다(게임이 BeginUIElement에서는 다시 읽지 않는다). 조합 글자는 여전히 맨 앞. 기록의 조합 시작은 늘 (0, 0)·문서 끝 0(드물게 1) —
+    오버워치 문서는 조합만 담는 빈 CUAS 문서라 자리 숫자 문제가 아니다(QUERYONLY 가정은 틀렸다). HUD는 모니터 오른쪽 아래(커서 자리를
+    모를 때 마우스 옆인데 게임이 커서를 구석에 숨긴다).
+  - 0.2.5: 시작 알림 바로 뒤 UpdateUIElement도 보낸다. 게임 스레드의 한국어 조합은 MS 한국어 입력기처럼 중간 글자(그 한 글자를 덮는 선택,
+    fInterimChar, `GameEdit::interim`): IMM32로는 CS_INSERTCHAR가 되어 한글을 지원하는 게임이 커서 자리에 끼워 그리리라 본다(일본어식
+    보통 조합은 맨 앞에 그렸다). 게임 스레드에서는 HUD를 마우스 옆에 띄우지 않고 커서 자리를 알 때만 보이며, 그 자리를 기록한다.
   - 런타임에는 `GetActiveFlags`로 분기한다(SECUREMODE / IMMERSIVEMODE / CONSOLE / UIELEMENTENABLEDONLY).
   - 설치는 레지스트리 직접 기록이 아니라 `RegisterProfile` + `InstallLayoutOrTip`으로 한다.
 - **M3a에서 확인한 것(2026-10-01, 윈도우 11 25H2 VM, `win/tip`)**

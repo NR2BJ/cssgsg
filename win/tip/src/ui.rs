@@ -34,7 +34,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{PCWSTR, w};
 
-use crate::module;
+use crate::{debug_log, module};
 
 // ---- 색과 글꼴 -----------------------------------------------------------------------------------
 
@@ -750,6 +750,14 @@ impl Screen {
                 HudPosition::Caret => rect,
                 HudPosition::Mouse => None,
             };
+            // 게임은 마우스 커서를 화면 구석에 숨겨 두어서(오버워치: 모니터 오른쪽 아래) 마우스 옆에는 띄우지 않는다. 커서 자리를
+            // 알 때만 보인다. 그 자리가 쓸 만한지 보려고 기록에 남긴다.
+            if self.game.is_some() {
+                debug_log(&format!("game mode HUD at {:?}", at.map(|r| (r.left, r.top, r.right, r.bottom))));
+                if at.is_none() {
+                    return;
+                }
+            }
             self.hud.show(mode, at);
         }
     }

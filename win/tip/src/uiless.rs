@@ -189,6 +189,11 @@ impl GameCandidates {
                                 "candidate UI element {id}: the app draws it {}",
                                 self.app_draws
                             ));
+                            // 시작 알림만으로는 목록을 다시 읽지 않는 앱이 있다(오버워치: 새 후보창에 앞 글자의 후보가 보이다가
+                            // 방향키를 누르면 바뀌었다, 2026-10-03). 바로 갱신도 알린다.
+                            if self.app_draws {
+                                let _ = self.manager.UpdateUIElement(id);
+                            }
                         }
                         Err(e) => {
                             debug_log(&format!("BeginUIElement: {e:?}"));
