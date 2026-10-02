@@ -760,6 +760,13 @@ k     = { cho = "ㄱ" }
 - **등록 카테고리:** `IMMERSIVESUPPORT`, `SYSTRAYSUPPORT`, `SECUREMODE`, `UIELEMENTENABLED`, `INPUTMODECOMPARTMENT`, `COMLESS`, `DISPLAYATTRIBUTEPROVIDER`.
   - 지금(M3c) 등록한 것: `TIP_KEYBOARD`, `IMMERSIVESUPPORT`, `SYSTRAYSUPPORT`, `COMLESS`, `DISPLAYATTRIBUTEPROVIDER`. `UIELEMENTENABLED`는 UILess와,
     `SECUREMODE`·`INPUTMODECOMPARTMENT`는 그 동작을 확인할 때 넣는다.
+  - `UIELEMENTENABLED`(0.2.3, 2026-10-02): 후보창을 직접 그리는 게임은 TSF를 `TF_TMAE_UIELEMENTENABLEDONLY`로 켜고, 그러면 TSF가 이
+    카테고리의 입력기만 켠다. 없던 0.2.2까지는 오버워치에서 cssgsg를 골라도 DLL이 게임에 들어가지 않아(`tasklist /m`, 개발자 기록에 켜짐 없음)
+    "EN" 쿼티만 나왔다. MS 한국어·일본어 입력기는 됐고 일본어 후보창은 게임이 그렸다. `win/tip/examples/uiless_host.rs`가 게임처럼
+    (창보다 먼저 UILess 전용으로 켜고, 키를 ITfKeystrokeMgr로 넘긴다) 켜서 0.2.1은 DLL이 안 들어오고 고친 판은 "activated (flags 0x4)"인
+    것을 VM에서 확인했다. 그런 스레드(`Active::game`)에서 입력칸이 꺼져 있으면 수식키 탭 전환을 하지 않는다. TSF는 문맥(입력칸) 없이는 키를
+    입력기에 넘기지 않아서(지금까지 기록에 문맥 없는 키 0번) 플레이 화면의 Shift는 원래 입력기에 오지 않는다. 남은 것: 게임이 우리 후보를
+    그리게 하는 ITfUIElementMgr·ITfCandidateListUIElement(지금은 우리 창).
   - 런타임에는 `GetActiveFlags`로 분기한다(SECUREMODE / IMMERSIVEMODE / CONSOLE / UIELEMENTENABLEDONLY).
   - 설치는 레지스트리 직접 기록이 아니라 `RegisterProfile` + `InstallLayoutOrTip`으로 한다.
 - **M3a에서 확인한 것(2026-10-01, 윈도우 11 25H2 VM, `win/tip`)**

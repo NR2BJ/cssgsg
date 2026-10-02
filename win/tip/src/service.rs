@@ -32,7 +32,7 @@ use windows::Win32::UI::TextServices::{
     ITfKeystrokeMgr, ITfLangBarItemButton, ITfLangBarItemMgr, ITfSource, ITfTextInputProcessor_Impl,
     ITfTextInputProcessorEx, ITfTextInputProcessorEx_Impl, ITfThreadMgr, ITfThreadMgrEventSink,
     ITfThreadMgrEventSink_Impl, TF_E_SYNCHRONOUS, TF_ES_ASYNCDONTCARE, TF_ES_READ, TF_ES_READWRITE,
-    TF_ES_SYNC, TF_SD_READONLY, TS_SS_TRANSITORY,
+    TF_ES_SYNC, TF_SD_READONLY, TF_TMAE_UIELEMENTENABLEDONLY, TS_SS_TRANSITORY,
 };
 use windows::Win32::UI::WindowsAndMessaging::{GetMessageTime, KillTimer, SetTimer};
 use windows::core::{
@@ -106,6 +106,9 @@ struct Active {
     host: Option<HostLink>,
     /// 호스트에서 받아 쓰고 있는 (설정 파일, 한자 기억)의 판. 처음은 0(기본 설정, 빈 기억).
     synced: (u64, u64),
+    /// 앱이 TSF를 UILess 전용으로 켰다(TF_TMAE_UIELEMENTENABLEDONLY): 후보창을 직접 그리는 게임(오버워치 등).
+    /// 입력칸(채팅)이 없을 때는 Shift 톡 전환을 하지 않는다: 플레이 중 Shift는 스킬·달리기 키다(CONCEPT §4.3 게임 모드).
+    game: bool,
 }
 
 /// 지난 키 메시지와 그 결과.
@@ -320,7 +323,7 @@ fn inject_text(text: &str) {
 impl TextService_Impl {
     // ---- 켜기·끄기 -------------------------------------------------------------------------------
 
-    fn activate(&self, thread_mgr: &ITfThreadMgr, client_id: u32) -> Result<()> {
+    fn activate(&self, thread_mgr: &ITfThreadMgr, client_id: u32, flags: u32) -> Result<()> {
         let attrs = unsafe {
             match category_mgr() {
                 Ok(categories) => Attrs {
@@ -351,6 +354,7 @@ impl TextService_Impl {
             log,
             host,
             synced: (0, 0),
+            game: flags & TF_TMAE_UIELEMENTENABLEDONLY != 0,
         });
 
         let keystrokes: ITfKeystrokeMgr = thread_mgr.cast()?;
@@ -528,9 +532,12 @@ impl TextService_Impl {
         let (field, why) = context
             .map_or((Field::Closed, "no context"), |c| self.classify(c, down && !self.has_composition()));
         self.field.set(field);
+        // 게임(UILess 전용 스레드)에서 입력칸이 없으면(플레이 화면) 수식키 탭으로 모드를 바꾸지 않는다. 채팅을 열면 그대로 된다.
+        let game = self.state.try_borrow().ok().and_then(|s| s.as_ref().map(|a| a.game)).unwrap_or(false);
         let ctx = Context {
             secure_field: field != Field::Normal,
             secure_latin: field == Field::Password,
+            taps_disabled: game && field == Field::Closed,
             ..Context::default()
         };
         // 엔진에 줄 키 시각(탭 판정). IMM32 앱(CUAS)의 시험은 GetMessage 안에서 불려 GetMessageTime이 앞 메시지(앞 키를 뗀 때 등)의
@@ -947,7 +954,7 @@ impl ITfTextInputProcessorEx_Impl for TextService_Impl {
             || {
                 match ptim.ok() {
                     Ok(thread_mgr) => {
-                        if let Err(e) = self.activate(thread_mgr, tid) {
+                        if let Err(e) = self.activate(thread_mgr, tid, flags) {
                             debug_log(&format!("activate failed: {e:?}"));
                         } else {
                             // 게임처럼 입력기가 안 도는 것 같은 앱에서, 이 프로세스에 들어와 켜지기는 했는지 가린다.

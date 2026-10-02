@@ -13,7 +13,8 @@ use windows::Win32::UI::Input::KeyboardAndMouse::HKL;
 use windows::Win32::UI::TextServices::{
     CLSID_TF_CategoryMgr, CLSID_TF_InputProcessorProfiles, GUID_TFCAT_DISPLAYATTRIBUTEPROVIDER,
     GUID_TFCAT_TIP_KEYBOARD, GUID_TFCAT_TIPCAP_COMLESS, GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT,
-    GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT, ITfCategoryMgr, ITfInputProcessorProfileMgr,
+    GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT, GUID_TFCAT_TIPCAP_UIELEMENTENABLED, ITfCategoryMgr,
+    ITfInputProcessorProfileMgr,
 };
 use windows::core::{Error, GUID, HRESULT, Result};
 
@@ -27,12 +28,15 @@ const DESCRIPTION: &str = "cssgsg";
 /// - SYSTRAYSUPPORT: 작업 표시줄 입력 표시기에 모드 아이콘(M3b).
 /// - COMLESS: 입력기 안에서 CoCreateInstance를 쓰지 않는다(TF_Create* 사용). 일부 앱(Minecraft)은 이게 있어야 올린다.
 /// - DISPLAYATTRIBUTEPROVIDER: 조합 밑줄 모양을 우리가 준다(앱이 텍스트 서비스에 표시 속성을 묻는다).
-const CATEGORIES: [GUID; 5] = [
+/// - UIELEMENTENABLED: UILess 모드를 받는다. 후보창을 직접 그리는 게임(오버워치 등)은 TSF를 TF_TMAE_UIELEMENTENABLEDONLY로
+///   켜서 이 카테고리의 입력기만 불러들인다. 없으면 게임 안에서 입력기가 아예 안 떠 쿼티만 나온다(2026-10-02, 오버워치).
+const CATEGORIES: [GUID; 6] = [
     GUID_TFCAT_TIP_KEYBOARD,
     GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT,
     GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT,
     GUID_TFCAT_TIPCAP_COMLESS,
     GUID_TFCAT_DISPLAYATTRIBUTEPROVIDER,
+    GUID_TFCAT_TIPCAP_UIELEMENTENABLED,
 ];
 
 fn clsid_key() -> String {
