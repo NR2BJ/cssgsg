@@ -122,3 +122,5 @@ finally {
 }
 $Setup = Join-Path $Root 'build\installer\cssgsg-setup.exe'
 Write-Host ("cssgsg {0} -> {1} ({2:N1} MB)" -f $Version, $Setup, ((Get-Item $Setup).Length / 1MB))
+# 지난 빌드의 옛 판(하루 넘게 안 쓴 것)을 지운다. GitHub 러너는 매번 새 컴퓨터라 지울 것이 없다. 정리가 실패해도 설치기는 그대로다.
+try { & (Join-Path $PSScriptRoot 'prune-build.ps1') } catch { Write-Warning "prune-build: $_" }

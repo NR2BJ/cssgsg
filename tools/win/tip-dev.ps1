@@ -238,6 +238,8 @@ switch ($Action) {
         Write-Step '내 입력 목록에 추가'
         Invoke-Outside 'enable'
         Invoke-Outside 'status'
+        # 지난 빌드의 옛 판(하루 넘게 안 쓴 것)을 지운다. 정리가 실패해도 설치는 그대로다.
+        try { & (Join-Path $PSScriptRoot 'prune-build.ps1') } catch { Write-Warning "prune-build: $_" }
     }
     'uninstall' {
         Write-Step '내 입력 목록에서 빼고 사용자 흔적 지우기'
