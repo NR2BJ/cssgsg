@@ -780,7 +780,9 @@ k     = { cho = "ㄱ" }
     모를 때 마우스 옆인데 게임이 커서를 구석에 숨긴다).
   - 0.2.5: 시작 알림 바로 뒤 UpdateUIElement도 보낸다. 게임 스레드의 한국어 조합은 MS 한국어 입력기처럼 중간 글자(그 한 글자를 덮는 선택,
     fInterimChar, `GameEdit::interim`): IMM32로는 CS_INSERTCHAR가 되어 한글을 지원하는 게임이 커서 자리에 끼워 그리리라 본다(일본어식
-    보통 조합은 맨 앞에 그렸다). 게임 스레드에서는 HUD를 마우스 옆에 띄우지 않고 커서 자리를 알 때만 보이며, 그 자리를 기록한다.
+    보통 조합은 맨 앞에 그렸다. 사용자: MS 일본어 입력기도 오버워치에서 맨 앞에 겹친다 → 일본어 조합 자리는 게임 한계). 게임 스레드의
+    HUD는 입력 자리를 모르면 마우스 커서가 보일 때만 마우스 옆(사용자 제안: "보통 겜들 채팅창 켜지면 마우스가 살아나지 않나?"), 숨어
+    있으면 띄우지 않는다(GetCursorInfo CURSOR_SHOWING). 자리와 커서 상태를 기록한다.
   - 런타임에는 `GetActiveFlags`로 분기한다(SECUREMODE / IMMERSIVEMODE / CONSOLE / UIELEMENTENABLEDONLY).
   - 설치는 레지스트리 직접 기록이 아니라 `RegisterProfile` + `InstallLayoutOrTip`으로 한다.
 - **M3a에서 확인한 것(2026-10-01, 윈도우 11 25H2 VM, `win/tip`)**

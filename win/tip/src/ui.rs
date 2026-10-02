@@ -26,11 +26,12 @@ use windows::Win32::Graphics::Gdi::{
 };
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CS_DROPSHADOW, CS_IME, CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA, GetCursorPos,
-    GetWindowLongPtrW, HWND_TOPMOST, IDC_ARROW, IsWindow, KillTimer, LWA_ALPHA, LoadCursorW, MA_NOACTIVATE,
-    RegisterClassExW, SW_HIDE, SWP_NOACTIVATE, SWP_SHOWWINDOW, SetLayeredWindowAttributes, SetTimer,
-    SetWindowLongPtrW, SetWindowPos, ShowWindow, WM_MOUSEACTIVATE, WM_NCDESTROY, WM_PAINT, WM_TIMER,
-    WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    CS_DROPSHADOW, CS_IME, CURSOR_SHOWING, CURSORINFO, CreateWindowExW, DefWindowProcW, DestroyWindow,
+    GWLP_USERDATA, GetCursorInfo, GetCursorPos, GetWindowLongPtrW, HWND_TOPMOST, IDC_ARROW, IsWindow,
+    KillTimer, LWA_ALPHA, LoadCursorW, MA_NOACTIVATE, RegisterClassExW, SW_HIDE, SWP_NOACTIVATE,
+    SWP_SHOWWINDOW, SetLayeredWindowAttributes, SetTimer, SetWindowLongPtrW, SetWindowPos, ShowWindow,
+    WM_MOUSEACTIVATE, WM_NCDESTROY, WM_PAINT, WM_TIMER, WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE,
+    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{PCWSTR, w};
 
@@ -680,6 +681,14 @@ impl Hud {
     }
 }
 
+/// 마우스 커서가 보이는지(게임이 숨기지 않았는지).
+fn mouse_cursor_visible() -> bool {
+    let mut info = CURSORINFO { cbSize: size_of::<CURSORINFO>() as u32, ..Default::default() };
+    unsafe { GetCursorInfo(&mut info) }.is_ok()
+        && info.flags.0 & CURSOR_SHOWING.0 != 0
+        && !info.hCursor.is_invalid()
+}
+
 // ---- 화면 상태 -----------------------------------------------------------------------------------
 
 /// 엔진 출력이 바꾼 화면(후보창, 모드 HUD)을 편집 세션이 자리를 잰 뒤에 맞춘다.
@@ -750,11 +759,15 @@ impl Screen {
                 HudPosition::Caret => rect,
                 HudPosition::Mouse => None,
             };
-            // 게임은 마우스 커서를 화면 구석에 숨겨 두어서(오버워치: 모니터 오른쪽 아래) 마우스 옆에는 띄우지 않는다. 커서 자리를
-            // 알 때만 보인다. 그 자리가 쓸 만한지 보려고 기록에 남긴다.
+            // 게임에서 입력 자리를 모르면 마우스 옆에 띄우되, 마우스 커서가 보일 때만(채팅을 열면 커서를 살리는 게임). 오버워치는
+            // 커서를 숨긴 채 화면 구석에 두어 0.2.4의 HUD가 모니터 오른쪽 아래에 떴다(2026-10-03). 자리와 커서 상태를 기록에 남긴다.
             if self.game.is_some() {
-                debug_log(&format!("game mode HUD at {:?}", at.map(|r| (r.left, r.top, r.right, r.bottom))));
-                if at.is_none() {
+                let cursor = mouse_cursor_visible();
+                debug_log(&format!(
+                    "game mode HUD at {:?}, mouse cursor visible {cursor}",
+                    at.map(|r| (r.left, r.top, r.right, r.bottom))
+                ));
+                if at.is_none() && !cursor {
                     return;
                 }
             }
