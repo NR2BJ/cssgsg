@@ -19,8 +19,8 @@ use windows::Win32::Foundation::{E_UNEXPECTED, LPARAM, WPARAM};
 use windows::Win32::System::SystemInformation::GetTickCount;
 use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE,
-    SendInput, VIRTUAL_KEY, VK_CAPITAL, VK_PACKET,
+    GetLastInputInfo, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP,
+    KEYEVENTF_UNICODE, LASTINPUTINFO, SendInput, VIRTUAL_KEY, VK_CAPITAL, VK_PACKET,
 };
 use windows::Win32::UI::TextServices::{
     GUID_COMPARTMENT_EMPTYCONTEXT, GUID_COMPARTMENT_KEYBOARD_DISABLED,
@@ -32,7 +32,7 @@ use windows::Win32::UI::TextServices::{
     ITfKeystrokeMgr, ITfLangBarItemButton, ITfLangBarItemMgr, ITfSource, ITfTextInputProcessor_Impl,
     ITfTextInputProcessorEx, ITfTextInputProcessorEx_Impl, ITfThreadMgr, ITfThreadMgrEventSink,
     ITfThreadMgrEventSink_Impl, TF_E_SYNCHRONOUS, TF_ES_ASYNCDONTCARE, TF_ES_READ, TF_ES_READWRITE,
-    TF_ES_SYNC, TF_SD_READONLY,
+    TF_ES_SYNC, TF_SD_READONLY, TS_SS_TRANSITORY,
 };
 use windows::Win32::UI::WindowsAndMessaging::{GetMessageTime, KillTimer, SetTimer};
 use windows::core::{
@@ -113,6 +113,8 @@ struct Seen {
     id: KeyId,
     out: Output,
     applied: bool,
+    /// 실제 쪽(OnKeyDown/OnKeyUp)이 이 메시지를 받았다. 받기 전이면 다음 실제는 시각·lParam이 달라도 이 메시지다([`KeyId::same_key`]).
+    keyed: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -121,6 +123,21 @@ struct KeyId {
     wparam: usize,
     lparam: isize,
     time: u32,
+}
+
+impl KeyId {
+    /// 같은 키(누름/뗌, 가상 키, 스캔 코드·확장 비트). 시각과 lParam의 나머지(반복 수, 앞 상태 등)는 보지 않는다.
+    ///
+    /// 실제 쪽이 아직 받지 않은 시험과 맞출 때만 쓴다. TSF를 쓰는 앱(브라우저, VS Code 등)은 시험과 실제를 같은 메시지 처리 중에
+    /// 불러 모든 값이 같지만, IMM32로 입력기를 쓰는 옛 Win32 앱(CUAS: 옛 메모장, 많은 Win32 앱)은 시험을 GetMessage 안
+    /// (ImeProcessKey)에서, 실제를 TranslateMessage 안(ImeToAsciiEx)에서 불러 GetMessageTime·lParam이 다를 수 있다.
+    /// 전체가 같아야 같은 메시지로 보던 판은 이 앱들에서 키를 엔진에 두 번 넣었다(메모장 "안녕" → "ㅇㄴㄴ…", 2026-10-02).
+    fn same_key(&self, other: &KeyId) -> bool {
+        const SCAN_AND_EXTENDED: isize = 0x01FF_0000;
+        self.down == other.down
+            && self.wparam == other.wparam
+            && self.lparam & SCAN_AND_EXTENDED == other.lparam & SCAN_AND_EXTENDED
+    }
 }
 
 impl TextService {
@@ -187,6 +204,21 @@ enum When {
 /// 문서를 고칠 일이 있는지(확정·조합).
 fn has_edits(out: &Output) -> bool {
     !plan(out).is_empty()
+}
+
+/// IMM32로 입력기를 쓰는 옛 Win32 입력칸인가: CUAS가 만들어 주는 임시 문서(TS_SS_TRANSITORY)다.
+fn transitory(context: &ITfContext) -> bool {
+    unsafe { context.GetStatus() }.is_ok_and(|s| s.dwStaticFlags & TS_SS_TRANSITORY != 0)
+}
+
+/// 마지막 입력(키·마우스) 시각. 메시지 시각보다 앞이면(그럴 일은 없다) 메시지 시각.
+fn latest_input(message_time: u32) -> u32 {
+    let mut info = LASTINPUTINFO { cbSize: size_of::<LASTINPUTINFO>() as u32, dwTime: 0 };
+    if unsafe { GetLastInputInfo(&mut info) }.as_bool() && info.dwTime.wrapping_sub(message_time) as i32 > 0 {
+        info.dwTime
+    } else {
+        message_time
+    }
 }
 
 thread_local! {
@@ -448,9 +480,11 @@ impl TextService_Impl {
     // ---- 키 ------------------------------------------------------------------------------------
 
     /// 키 메시지 하나를 엔진에 (한 번만) 넣고 결과를 돌려준다. 이미 본 메시지면 그때 결과와 적용 여부.
+    /// `actual`: 실제 쪽(OnKeyDown/OnKeyUp)에서 불렀다(아니면 시험 쪽).
     fn process(
         &self,
         down: bool,
+        actual: bool,
         context: Option<&ITfContext>,
         wparam: WPARAM,
         lparam: LPARAM,
@@ -460,16 +494,31 @@ impl TextService_Impl {
             return None;
         }
         let id = KeyId { down, wparam: wparam.0, lparam: lparam.0, time: unsafe { GetMessageTime() } as u32 };
-        if let Ok(seen) = self.seen.try_borrow()
-            && let Some(s) = seen.as_ref()
-            && s.id == id
+        // 같은 메시지: 값이 모두 같거나, 실제 쪽이 아직 받지 않은 시험의 키(IMM32 앱은 시험과 실제의 시각·lParam이 다르다).
+        if let Ok(mut seen) = self.seen.try_borrow_mut()
+            && let Some(s) = seen.as_mut()
+            && (s.id == id || (actual && !s.keyed && s.id.same_key(&id)))
         {
+            if actual {
+                if s.id != id {
+                    debug_log(&format!(
+                        "key matched its test by key only: lparam {:#x} -> {:#x}, time {} -> {}",
+                        s.id.lparam, id.lparam, s.id.time, id.time
+                    ));
+                }
+                s.keyed = true;
+            }
             return Some((s.out.clone(), s.applied));
         }
         // 앞 메시지의 할 일이 남았다(시험만 하고 실제를 부르지 않은 앱): 지금이라도 적용한다.
         let left = self.seen.try_borrow_mut().ok().and_then(|mut s| s.take()).filter(|s| !s.applied);
         if let (Some(left), Some(context)) = (left, context) {
-            debug_log("key test without the key: applying its edits late");
+            debug_log(&format!(
+                "key test without the key: applying its edits late (test {:?}, now {:?} {})",
+                left.id,
+                id,
+                if actual { "key" } else { "test" }
+            ));
             self.apply(context, &left.out, When::Whenever);
         }
         if let Some(context) = context {
@@ -484,7 +533,10 @@ impl TextService_Impl {
             secure_latin: field == Field::Password,
             ..Context::default()
         };
-        let ev = keys::event(down, wparam, lparam, self.clock.try_borrow_mut().ok()?.seconds(id.time));
+        // 엔진에 줄 키 시각(탭 판정). IMM32 앱(CUAS)의 시험은 GetMessage 안에서 불려 GetMessageTime이 앞 메시지(앞 키를 뗀 때 등)의
+        // 시각일 때가 있다(메모장 기록). 그대로 쓰면 쉬었다 톡 친 Shift가 오래 누른 것으로 보여 전환이 안 된다: 마지막 입력 시각을 쓴다.
+        let time = if !actual && context.is_some_and(transitory) { latest_input(id.time) } else { id.time };
+        let ev = keys::event(down, wparam, lparam, self.clock.try_borrow_mut().ok()?.seconds(time));
         let out = {
             let mut state = self.state.try_borrow_mut().ok()?;
             let a = state.as_mut()?;
@@ -525,7 +577,7 @@ impl TextService_Impl {
         }
         self.after(&out);
         if let Ok(mut seen) = self.seen.try_borrow_mut() {
-            *seen = Some(Seen { id, out: out.clone(), applied: false });
+            *seen = Some(Seen { id, out: out.clone(), applied: false, keyed: actual });
         }
         Some((out, false))
     }
@@ -586,7 +638,7 @@ impl TextService_Impl {
 
     /// 시험: 실제 쪽을 불러 달라고 할지(먹거나, 문서를 고칠 일이 있으면).
     fn test(&self, down: bool, context: Option<&ITfContext>, wparam: WPARAM, lparam: LPARAM) -> bool {
-        let Some((out, applied)) = self.process(down, context, wparam, lparam) else { return false };
+        let Some((out, applied)) = self.process(down, false, context, wparam, lparam) else { return false };
         let edits = !applied && has_edits(&out);
         if !edits {
             self.mark_applied();
@@ -598,7 +650,7 @@ impl TextService_Impl {
 
     /// 실제: 문서를 고치고, 먹었는지 돌려준다(뗌은 늘 넘긴다).
     fn key(&self, down: bool, context: Option<&ITfContext>, wparam: WPARAM, lparam: LPARAM) -> bool {
-        let Some((out, applied)) = self.process(down, context, wparam, lparam) else { return false };
+        let Some((out, applied)) = self.process(down, true, context, wparam, lparam) else { return false };
         if !applied {
             match context {
                 // 비밀번호 칸: 앱이 문서 고치기를 바로 받지 않으면(빈 문맥 등) 글자를 유니코드 키 입력으로 넣는다.
@@ -1061,6 +1113,18 @@ mod tests {
         // 보통 칸(입력 범위 IS_DEFAULT).
         assert_eq!(field(false, &ScopeRead::Scopes(vec![0]), false, false), Field::Normal);
         assert_eq!(field(false, &ScopeRead::Failed("value"), false, false), Field::Normal);
+    }
+
+    #[test]
+    fn a_key_matches_its_test_by_the_key_alone() {
+        // IMM32 앱(옛 메모장): 시험은 GetMessage 안, 실제는 TranslateMessage 안에서 불려 시각·lParam의 나머지가 다를 수 있다.
+        let test = KeyId { down: true, wparam: 0x4A, lparam: lparam(0x24, false).0, time: 100 };
+        let key = KeyId { lparam: 0x0024_0000, time: 160, ..test };
+        assert!(test.same_key(&key) && key.same_key(&test));
+        assert!(!test.same_key(&KeyId { down: false, ..key }), "뗌은 다른 키");
+        assert!(!test.same_key(&KeyId { wparam: 0x4B, ..key }), "다른 가상 키");
+        assert!(!test.same_key(&KeyId { lparam: lparam(0x25, false).0, ..key }), "다른 스캔 코드");
+        assert!(!test.same_key(&KeyId { lparam: test.lparam | 1 << 24, ..key }), "확장 키는 다른 키");
     }
 
     #[test]
