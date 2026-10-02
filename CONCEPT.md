@@ -783,6 +783,22 @@ k     = { cho = "ㄱ" }
     보통 조합은 맨 앞에 그렸다. 사용자: MS 일본어 입력기도 오버워치에서 맨 앞에 겹친다 → 일본어 조합 자리는 게임 한계). 게임 스레드의
     HUD는 입력 자리를 모르면 마우스 커서가 보일 때만 마우스 옆(사용자 제안: "보통 겜들 채팅창 켜지면 마우스가 살아나지 않나?"), 숨어
     있으면 띄우지 않는다(GetCursorInfo CURSOR_SHOWING). 자리와 커서 상태를 기록한다.
+  - 0.2.5 후기(2026-10-03): 후보창 첫 표시는 해결. HUD는 여전히 오른쪽 아래 — 기록: 게임이 준 입력 자리가 (3839, 2159, 3840, 2159),
+    4K 화면의 맨 오른쪽 아래 한 점(IME 창을 숨기려고 구석에 박아 둔 것), 마우스는 "보임". 조합 겹침은 그대로. 사용자가 MS 한국어 입력기를
+    오버워치에서 쳐 보니 글자는 제자리에 쓰이지만 조합 표시가 엉뚱한 글자에 붙고 방향키가 5글자씩 건너뛰기도 했다(오버워치 IME 처리 자체가 엉성).
+  - `examples/imm_spy`(새): 오버워치처럼 TSF를 UILess로 켜고 글자는 IMM32로 받는 창에서 WM_IME_*·WM_KEYDOWN·WM_CHAR를 찍는다
+    (MS 한국어 입력기는 ActivateProfile로 고르고 ImmSetConversionStatus로 한글). 견준 것:
+    - MS: 음절 경계 [RESULTSTR "안"] → END → START → [COMPSTR "ㄴ"](글자마다 CS_INSERTCHAR|CS_NOMOVECARET, CURSORPOS 없음). Space·Enter:
+      [RESULTSTR] → END → KEYDOWN(원래 키) → CHAR.
+    - cssgsg 0.2.5: 음절 경계가 한 메시지 [COMPSTR|RESULTSTR] comp="ㄴ" result="안". Space·Enter는 확정만 되고 키가 앱에 가지 않았다
+      (시험에서 키를 잡아 CUAS가 VK_PROCESSKEY로 바꿈) — 메모장에서 "안 + Space + 녕 + Enter + 안" → "안녕안". 옛 Win32 앱 모두(0.1.0부터).
+    - 해 본 것: 확정과 새 조합을 세션 둘로(같은 키 안에서, 또는 비동기로 미뤄서) → 모양은 MS와 같지만 앱이 읽을 때 확정 글자가 비어 있음
+      (result="", 나중에 배달되는 메시지를 읽기 전에 새 조합이 입력 상태를 덮는다) → 되돌림. 시험에서 확정하고 키를 잡지 않기 → 키가 확정보다
+      먼저 와서 메모장에 " 안", 줄바꿈 뒤 "녕" → 버림. CUAS가 조합을 스스로 마무리하게 두기 → 마무리하지 않음.
+  - 0.2.6: CUAS 문맥에서 확정하고 키를 넘길 때(조합 중 Space·Enter·기호)는 키를 먹고 동기로 확정한 뒤 같은 키(가상 키·스캔 코드·확장)를
+    SendInput으로 다시 보낸다(`resend_key`): 다시 보낸 키는 입력 줄 맨 뒤라 확정 메시지 다음에 간다 → MS와 같은 순서, 메모장 "안 녕 / 안".
+    음절 경계는 한 메시지 그대로(글자를 잃지 않게), 오버워치 겹침은 남았다. 게임 HUD: 화면 구석의 입력 자리·마우스는 쓰지 않는다
+    (`at_screen_corner`).
   - 런타임에는 `GetActiveFlags`로 분기한다(SECUREMODE / IMMERSIVEMODE / CONSOLE / UIELEMENTENABLEDONLY).
   - 설치는 레지스트리 직접 기록이 아니라 `RegisterProfile` + `InstallLayoutOrTip`으로 한다.
 - **M3a에서 확인한 것(2026-10-01, 윈도우 11 25H2 VM, `win/tip`)**

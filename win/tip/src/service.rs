@@ -20,7 +20,8 @@ use windows::Win32::System::SystemInformation::GetTickCount;
 use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyboardLayout, GetLastInputInfo, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT,
-    KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, LASTINPUTINFO, SendInput, VIRTUAL_KEY, VK_CAPITAL, VK_PACKET,
+    KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, LASTINPUTINFO, SendInput, VIRTUAL_KEY,
+    VK_CAPITAL, VK_PACKET,
 };
 use windows::Win32::UI::TextServices::{
     GUID_COMPARTMENT_EMPTYCONTEXT, GUID_COMPARTMENT_KEYBOARD_DISABLED,
@@ -46,7 +47,7 @@ use crate::guard::{guarded, poisoned};
 use crate::host::{self, HostConverter, HostLink};
 use crate::keys::{self, Clock};
 use crate::langbar::ModeButton;
-use crate::plan::plan;
+use crate::plan::{Op, plan};
 use crate::ui::Screen;
 use crate::uiless::GameCandidates;
 use crate::{
@@ -296,6 +297,26 @@ fn toggle_caps_lock() {
     };
     let inputs = [key(KEYBD_EVENT_FLAGS(0)), key(KEYEVENTF_KEYUP)];
     unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) };
+}
+
+/// 받은 키(누름)를 다시 보낸다(가상 키와 스캔 코드, 확장 키 그대로). 지금 눌린 수식키(Shift·Ctrl)는 그대로 실린다. 뗌은 사용자가
+/// 실제로 뗄 때 온다. 다시 받은 키는 조합이 없어서 입력기가 그냥 넘긴다.
+fn resend_key(wparam: WPARAM, lparam: LPARAM) {
+    let scan = ((lparam.0 >> 16) & 0xFF) as u16;
+    let extended = lparam.0 & (1 << 24) != 0;
+    let input = INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: VIRTUAL_KEY(wparam.0 as u16),
+                wScan: scan,
+                dwFlags: if extended { KEYEVENTF_EXTENDEDKEY } else { KEYBD_EVENT_FLAGS(0) },
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    };
+    unsafe { SendInput(&[input], std::mem::size_of::<INPUT>() as i32) };
 }
 
 /// 글자를 유니코드 키 입력(VK_PACKET)으로 넣는다. 앱이 문서 고치기를 받지 않을 때만 쓴다: 이미 줄 선 키보다
@@ -680,6 +701,20 @@ impl TextService_Impl {
                         inject_text(&out.commit);
                     }
                 }
+                // CUAS(옛 Win32 앱, 게임 채팅): 확정하고 키를 넘길 때(조합 중 Space·Enter·기호)는 키를 먹고, 확정한 뒤 같은 키를
+                // 다시 보낸다. 시험에서 이미 키를 잡아 CUAS가 그 키를 VK_PROCESSKEY로 바꿨으므로, 넘긴다고 해도 원래 키가 앱에 가지
+                // 않았다(메모장: 안 + Space + 녕 + Enter + 안 → "안녕안", 2026-10-03). 시험에서 확정하고 키를 잡지 않으면 확정 메시지가
+                // 키보다 늦게 배달되어 순서가 바뀌었다(" 안", 줄바꿈 뒤 "녕"). 다시 보낸 키는 입력 줄 맨 뒤에 서서 확정 메시지 다음에
+                // 간다(MS 한국어 입력기와 같은 순서: 확정 → 조합 끝 → 키, examples/imm_spy).
+                Some(context) if down && !out.consumed && has_edits(&out) && transitory(context) => {
+                    if !self.apply(context, &out, When::Now) {
+                        self.apply(context, &out, When::Whenever);
+                    }
+                    self.mark_applied();
+                    debug_log("CUAS: committed and sending the key again");
+                    resend_key(wparam, lparam);
+                    return true;
+                }
                 // 키를 앱에 넘기면 그 키보다 먼저 고쳐야 한다(조합 중 Ctrl, 기호 키).
                 Some(context) => {
                     let when = if down && out.consumed { When::Whenever } else { When::BeforeKey };
@@ -794,7 +829,7 @@ impl TextService_Impl {
             self.refresh_screen(Some(context));
             return true;
         }
-        let Some((client_id, attrs, game)) = self.state.try_borrow().ok().and_then(|s| {
+        let Some(env) = self.state.try_borrow().ok().and_then(|s| {
             s.as_ref().map(|a| {
                 let game = GameEdit { game: a.game, interim: a.game && a.engine.mode() == Mode::Ko };
                 (a.client_id, a.attrs, game)
@@ -802,13 +837,30 @@ impl TextService_Impl {
         }) else {
             return false;
         };
+        // 확정과 새 조합은 한 세션으로 한다. CUAS(옛 Win32 앱)는 이것을 한 메시지(RESULTSTR + COMPSTR)로 옮기고, MS 한국어 입력기는
+        // 확정 → 조합 끝 → 새 조합 시작으로 따로 보낸다(2026-10-03, examples/imm_spy). 세션을 나눠 보았지만(같은 키 안에서, 비동기로
+        // 미뤄서) 앱이 나중에 배달되는 확정 메시지를 읽을 때 확정 글자가 이미 비어 있었다(result="") — 글자를 잃느니 합친 메시지로 둔다.
+        // 오버워치가 이 조합을 입력칸 맨 앞에 그리는 것은 아직 못 고쳤다.
+        self.request_edit(context, env, ops, Some(self.ui_hook()), when)
+    }
+
+    /// 편집 세션 하나를 청한다. `env`: (클라이언트 id, 표시 속성, 게임 편집 방식).
+    fn request_edit(
+        &self,
+        context: &ITfContext,
+        env: (u32, Attrs, GameEdit),
+        ops: Vec<Op>,
+        hook: Option<UiHook>,
+        when: When,
+    ) -> bool {
+        let (client_id, attrs, game) = env;
         let session = ApplyOps::new(
             context.clone(),
             ops,
             self.slot.clone(),
             self.to_interface::<ITfCompositionSink>(),
             attrs,
-            Some(self.ui_hook()),
+            hook,
             game,
         );
         let ran = session.ran();

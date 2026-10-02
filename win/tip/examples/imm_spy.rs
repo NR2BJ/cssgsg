@@ -1,0 +1,263 @@
+//! 게임처럼 글자는 IMM32로 받고 TSF는 UILess 전용으로 켠 창에서, 입력기가 앱에 보내는 조합 메시지를 그대로 찍는다.
+//! 오버워치(2026-10-03)가 이렇다: cssgsg의 조합 글자는 입력칸 맨 앞에 겹쳐 그려지고, MS 한국어 입력기는 제자리에 쓰인다.
+//! 같은 글자를 MS 한국어 입력기와 cssgsg로 쳐서 WM_IME_COMPOSITION의 모양(플래그, 조합 글자, 커서 자리, 확정 글자)을 견준다.
+//!
+//!   cargo run -p cssgsg-tip --example imm_spy -- ms       MS 한국어 입력기(두벌식)로 "안녕"
+//!   cargo run -p cssgsg-tip --example imm_spy -- cssgsg   cssgsg(참신세벌식, 한국어 모드)로 "안녕"
+//!
+//! 창을 띄우고 스스로 키를 보낸다(SendInput). 그동안 다른 창을 누르지 않는다.
+
+fn main() {
+    #[cfg(windows)]
+    {
+        let which = std::env::args().nth(1).unwrap_or_default();
+        if let Err(e) = imp::run(which == "ms") {
+            eprintln!("{e:?}");
+            std::process::exit(1);
+        }
+    }
+}
+
+#[cfg(windows)]
+mod imp {
+    use std::ffi::c_void;
+    use std::time::{Duration, Instant};
+
+    use cssgsg_tip::{CLSID_TEXT_SERVICE, GUID_PROFILE, LANGID_EN_US};
+    use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+    use windows::Win32::System::Com::{
+        CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
+    };
+    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        HKL, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP,
+        KEYEVENTF_SCANCODE, SendInput, SetFocus,
+    };
+    use windows::Win32::UI::TextServices::{
+        CLSID_TF_InputProcessorProfiles, CLSID_TF_ThreadMgr, ITfInputProcessorProfileMgr, ITfThreadMgrEx,
+        TF_IPPMF_FORPROCESS, TF_PROFILETYPE_INPUTPROCESSOR, TF_TMAE_UIELEMENTENABLEDONLY,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, MSG, PM_REMOVE,
+        PeekMessageW, RegisterClassW, SetForegroundWindow, TranslateMessage, WINDOW_EX_STYLE, WNDCLASSW,
+        WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+    };
+    use windows::core::{GUID, Result, w};
+
+    /// MS 한국어 입력기(win/tip 개발 기록: ko 0412:{A028AE76…}{B5FE1F02…}).
+    const CLSID_MS_KOREAN: GUID = GUID::from_u128(0xA028AE76_01B1_46C2_99C4_ACD9858AE02F);
+    const PROFILE_MS_KOREAN: GUID = GUID::from_u128(0xB5FE1F02_D5F2_4445_9C03_C568F23C99A1);
+
+    const WM_KEYDOWN: u32 = 0x0100;
+    const WM_CHAR: u32 = 0x0102;
+    const WM_IME_STARTCOMPOSITION: u32 = 0x010D;
+    const WM_IME_ENDCOMPOSITION: u32 = 0x010E;
+    const WM_IME_COMPOSITION: u32 = 0x010F;
+    const WM_IME_NOTIFY: u32 = 0x0282;
+    const WM_IME_CHAR: u32 = 0x0286;
+    const GCS_COMPSTR: u32 = 0x0008;
+    const GCS_CURSORPOS: u32 = 0x0080;
+    const GCS_DELTASTART: u32 = 0x0100;
+    const GCS_RESULTSTR: u32 = 0x0800;
+    const IME_CMODE_NATIVE: u32 = 0x0001;
+
+    #[link(name = "imm32")]
+    unsafe extern "system" {
+        fn ImmGetContext(hwnd: HWND) -> isize;
+        fn ImmReleaseContext(hwnd: HWND, himc: isize) -> i32;
+        fn ImmGetCompositionStringW(himc: isize, index: u32, buf: *mut c_void, len: u32) -> i32;
+        fn ImmSetOpenStatus(himc: isize, open: i32) -> i32;
+        fn ImmSetConversionStatus(himc: isize, conversion: u32, sentence: u32) -> i32;
+    }
+
+    /// 조합 문자열 하나(글자) 또는 숫자 하나(커서 자리 등).
+    unsafe fn comp_string(hwnd: HWND, index: u32) -> String {
+        unsafe {
+            let himc = ImmGetContext(hwnd);
+            let bytes = ImmGetCompositionStringW(himc, index, std::ptr::null_mut(), 0);
+            let mut buf = vec![0u16; (bytes.max(0) as usize).div_ceil(2)];
+            if bytes > 0 {
+                ImmGetCompositionStringW(himc, index, buf.as_mut_ptr().cast(), bytes as u32);
+            }
+            ImmReleaseContext(hwnd, himc);
+            String::from_utf16_lossy(&buf)
+        }
+    }
+
+    unsafe fn comp_number(hwnd: HWND, index: u32) -> i32 {
+        unsafe {
+            let himc = ImmGetContext(hwnd);
+            let n = ImmGetCompositionStringW(himc, index, std::ptr::null_mut(), 0);
+            ImmReleaseContext(hwnd, himc);
+            n
+        }
+    }
+
+    /// 플래그 이름.
+    fn flags(l: u32) -> String {
+        let names = [
+            (0x0001, "COMPREADSTR"),
+            (0x0002, "COMPREADATTR"),
+            (0x0004, "COMPREADCLAUSE"),
+            (0x0008, "COMPSTR"),
+            (0x0010, "COMPATTR"),
+            (0x0020, "COMPCLAUSE"),
+            (0x0080, "CURSORPOS"),
+            (0x0100, "DELTASTART"),
+            (0x0200, "RESULTREADSTR"),
+            (0x0400, "RESULTREADCLAUSE"),
+            (0x0800, "RESULTSTR"),
+            (0x1000, "RESULTCLAUSE"),
+            (0x2000, "CS_INSERTCHAR"),
+            (0x4000, "CS_NOMOVECARET"),
+        ];
+        names.iter().filter(|(b, _)| l & b != 0).map(|(_, n)| *n).collect::<Vec<_>>().join("|")
+    }
+
+    extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+        unsafe {
+            match msg {
+                WM_IME_STARTCOMPOSITION => {
+                    println!("  STARTCOMPOSITION");
+                    return LRESULT(0);
+                }
+                WM_IME_ENDCOMPOSITION => {
+                    println!("  ENDCOMPOSITION");
+                    return LRESULT(0);
+                }
+                WM_IME_COMPOSITION => {
+                    let l = lparam.0 as u32;
+                    let ch = char::from_u32(wparam.0 as u32).map(|c| c.to_string()).unwrap_or_default();
+                    let mut line = format!("  COMPOSITION wParam={:?} [{}]", ch, flags(l));
+                    if l & GCS_COMPSTR != 0 {
+                        line += &format!(" comp={:?}", comp_string(hwnd, GCS_COMPSTR));
+                    }
+                    if l & GCS_CURSORPOS != 0 {
+                        line += &format!(" cursor={}", comp_number(hwnd, GCS_CURSORPOS));
+                    }
+                    if l & GCS_DELTASTART != 0 {
+                        line += &format!(" delta={}", comp_number(hwnd, GCS_DELTASTART));
+                    }
+                    if l & GCS_RESULTSTR != 0 {
+                        line += &format!(" result={:?}", comp_string(hwnd, GCS_RESULTSTR));
+                    }
+                    println!("{line}");
+                    return LRESULT(0);
+                }
+                WM_IME_NOTIFY => println!("  NOTIFY {:#x}", wparam.0),
+                // 0xE5(VK_PROCESSKEY)면 입력기가 그 키를 가져갔다.
+                WM_KEYDOWN => println!("  KEYDOWN vk={:#04x}", wparam.0),
+                WM_IME_CHAR => println!("  IME_CHAR {:?}", char::from_u32(wparam.0 as u32)),
+                WM_CHAR => println!("  CHAR {:?}", char::from_u32(wparam.0 as u32)),
+                _ => {}
+            }
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
+    }
+
+    unsafe fn pump(ms: u64) {
+        let start = Instant::now();
+        let mut msg = MSG::default();
+        while start.elapsed() < Duration::from_millis(ms) {
+            unsafe {
+                while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                    let _ = TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// 쿼티 자리(스캔 코드)로 한 키씩 친다.
+    unsafe fn type_keys(scans: &[u16]) {
+        let key = |scan: u16, up: bool| INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wScan: scan,
+                    dwFlags: KEYEVENTF_SCANCODE | if up { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) },
+                    ..Default::default()
+                },
+            },
+        };
+        for &scan in scans {
+            println!("key {scan:#04x}");
+            unsafe {
+                SendInput(&[key(scan, false)], size_of::<INPUT>() as i32);
+                pump(60);
+                SendInput(&[key(scan, true)], size_of::<INPUT>() as i32);
+                pump(120);
+            }
+        }
+    }
+
+    pub fn run(ms: bool) -> Result<()> {
+        unsafe {
+            CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok()?;
+            // 게임처럼 창보다 먼저 TSF를 UILess 전용으로 켠다(cssgsg는 이것을 보고 게임 스레드로 다룬다). 키는 TSF에 넘기지 않고
+            // 보통 메시지로 처리한다: 입력기는 IMM32(CUAS)를 거쳐 키를 받는다(오버워치 기록과 같은 길).
+            let threads: ITfThreadMgrEx = CoCreateInstance(&CLSID_TF_ThreadMgr, None, CLSCTX_INPROC_SERVER)?;
+            let mut client = 0;
+            threads.ActivateEx(&mut client, TF_TMAE_UIELEMENTENABLEDONLY)?;
+            let instance = GetModuleHandleW(None)?;
+            let class = w!("cssgsg-imm-spy");
+            RegisterClassW(&WNDCLASSW {
+                lpfnWndProc: Some(window_proc),
+                hInstance: instance.into(),
+                lpszClassName: class,
+                ..Default::default()
+            });
+            let hwnd = CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                class,
+                w!("cssgsg IMM spy"),
+                WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                CW_USEDEFAULT,
+                CW_USEDEFAULT,
+                420,
+                160,
+                None,
+                None,
+                Some(instance.into()),
+                None,
+            )?;
+            let _ = SetForegroundWindow(hwnd);
+            let _ = SetFocus(Some(hwnd));
+            pump(300);
+            let profiles: ITfInputProcessorProfileMgr =
+                CoCreateInstance(&CLSID_TF_InputProcessorProfiles, None, CLSCTX_INPROC_SERVER)?;
+            let (lang, clsid, profile) = if ms {
+                (0x0412, CLSID_MS_KOREAN, PROFILE_MS_KOREAN)
+            } else {
+                (LANGID_EN_US, CLSID_TEXT_SERVICE, GUID_PROFILE)
+            };
+            profiles.ActivateProfile(
+                TF_PROFILETYPE_INPUTPROCESSOR,
+                lang,
+                &clsid,
+                &profile,
+                HKL::default(),
+                TF_IPPMF_FORPROCESS,
+            )?;
+            pump(500);
+            if ms {
+                // MS 한국어 입력기를 한글 상태로.
+                let himc = ImmGetContext(hwnd);
+                ImmSetOpenStatus(himc, 1);
+                ImmSetConversionStatus(himc, IME_CMODE_NATIVE, 0);
+                ImmReleaseContext(hwnd, himc);
+                pump(200);
+                println!("== Microsoft Korean IME (두벌식) 안녕: d k s s u d, Space, d k, Enter");
+                type_keys(&[0x20, 0x25, 0x1F, 0x1F, 0x16, 0x20, 0x39, 0x20, 0x25, 0x1C]);
+            } else {
+                println!("== cssgsg (참신세벌식, 한국어 모드여야 한다) 안녕: j f s m t d, Space, j f, Enter");
+                type_keys(&[0x24, 0x21, 0x1F, 0x32, 0x14, 0x20, 0x39, 0x24, 0x21, 0x1C]);
+            }
+            pump(500);
+            let _ = threads.Deactivate();
+            let _ = DestroyWindow(hwnd);
+        }
+        Ok(())
+    }
+}

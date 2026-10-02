@@ -687,6 +687,25 @@ fn mouse_cursor_visible() -> bool {
     unsafe { GetCursorInfo(&mut info) }.is_ok()
         && info.flags.0 & CURSOR_SHOWING.0 != 0
         && !info.hCursor.is_invalid()
+        && !at_screen_corner(info.ptScreenPos)
+}
+
+/// 화면 구석의 점인지. 게임은 IME 창을 숨기려고 입력 자리를 구석에 박아 두거나(오버워치: 4K 화면의 (3839, 2159)) 마우스 커서를
+/// 구석에 둔다. 그 자리에 HUD를 띄우면 모니터 오른쪽 아래에 뜬다(2026-10-03).
+fn at_screen_corner(p: POINT) -> bool {
+    let monitor = unsafe {
+        MonitorFromRect(
+            &RECT { left: p.x, top: p.y, right: p.x + 1, bottom: p.y + 1 },
+            MONITOR_DEFAULTTONEAREST,
+        )
+    };
+    let mut info = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
+    if !unsafe { GetMonitorInfoW(monitor, &mut info) }.as_bool() {
+        return false;
+    }
+    let r = info.rcMonitor;
+    let near = |a: i32, b: i32| (a - b).abs() <= 2;
+    (near(p.x, r.left) || near(p.x, r.right - 1)) && (near(p.y, r.top) || near(p.y, r.bottom - 1))
 }
 
 // ---- 화면 상태 -----------------------------------------------------------------------------------
@@ -761,16 +780,22 @@ impl Screen {
             };
             // 게임에서 입력 자리를 모르면 마우스 옆에 띄우되, 마우스 커서가 보일 때만(채팅을 열면 커서를 살리는 게임). 오버워치는
             // 커서를 숨긴 채 화면 구석에 두어 0.2.4의 HUD가 모니터 오른쪽 아래에 떴다(2026-10-03). 자리와 커서 상태를 기록에 남긴다.
-            if self.game.is_some() {
+            let at = if self.game.is_some() {
+                let given = at;
+                let at = at.filter(|r| !at_screen_corner(POINT { x: r.left, y: r.top }));
                 let cursor = mouse_cursor_visible();
                 debug_log(&format!(
-                    "game mode HUD at {:?}, mouse cursor visible {cursor}",
-                    at.map(|r| (r.left, r.top, r.right, r.bottom))
+                    "game mode HUD: caret {:?} (usable {}), mouse cursor visible and not in a corner {cursor}",
+                    given.map(|r| (r.left, r.top, r.right, r.bottom)),
+                    at.is_some()
                 ));
                 if at.is_none() && !cursor {
                     return;
                 }
-            }
+                at
+            } else {
+                at
+            };
             self.hud.show(mode, at);
         }
     }
