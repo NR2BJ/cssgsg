@@ -19,8 +19,8 @@ use windows::Win32::Foundation::{E_UNEXPECTED, LPARAM, WPARAM};
 use windows::Win32::System::SystemInformation::GetTickCount;
 use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetLastInputInfo, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP,
-    KEYEVENTF_UNICODE, LASTINPUTINFO, SendInput, VIRTUAL_KEY, VK_CAPITAL, VK_PACKET,
+    GetKeyboardLayout, GetLastInputInfo, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT,
+    KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, LASTINPUTINFO, SendInput, VIRTUAL_KEY, VK_CAPITAL, VK_PACKET,
 };
 use windows::Win32::UI::TextServices::{
     GUID_COMPARTMENT_EMPTYCONTEXT, GUID_COMPARTMENT_KEYBOARD_DISABLED,
@@ -931,6 +931,7 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
         guarded(
             || Ok(()),
             || {
+                debug_log("deactivated");
                 self.deactivate();
                 Ok(())
             },
@@ -940,7 +941,7 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
 
 impl ITfTextInputProcessorEx_Impl for TextService_Impl {
     /// 늘 S_OK를 돌려준다. 실패를 돌려주면 TSF가 이 스레드에서 다시 초기화하지 못할 수 있다(chewing).
-    fn ActivateEx(&self, ptim: Ref<ITfThreadMgr>, tid: u32, _flags: u32) -> Result<()> {
+    fn ActivateEx(&self, ptim: Ref<ITfThreadMgr>, tid: u32, flags: u32) -> Result<()> {
         guarded(
             || Ok(()),
             || {
@@ -948,6 +949,11 @@ impl ITfTextInputProcessorEx_Impl for TextService_Impl {
                     Ok(thread_mgr) => {
                         if let Err(e) = self.activate(thread_mgr, tid) {
                             debug_log(&format!("activate failed: {e:?}"));
+                        } else {
+                            // 게임처럼 입력기가 안 도는 것 같은 앱에서, 이 프로세스에 들어와 켜지기는 했는지 가린다.
+                            // flags는 TF_TMAE_*(2 보안 모드, 4 UILess만, 0x40 콘솔 등), 배열은 이 스레드의 키보드 배열.
+                            let layout = unsafe { GetKeyboardLayout(0) }.0 as usize;
+                            debug_log(&format!("activated (flags {flags:#x}, keyboard layout {layout:#x})"));
                         }
                     }
                     Err(_) => debug_log("activate without a thread manager"),
@@ -1030,10 +1036,16 @@ impl ITfThreadMgrEventSink_Impl for TextService_Impl {
     }
 
     /// 입력칸이 바뀌었다: 조합을 그 자리에서 끝낸다(맥 deactivate와 같다). 비밀번호 칸인지는 새 칸에서 다시 읽는다.
-    fn OnSetFocus(&self, _focus: Ref<ITfDocumentMgr>, _previous: Ref<ITfDocumentMgr>) -> Result<()> {
+    fn OnSetFocus(&self, focus: Ref<ITfDocumentMgr>, _previous: Ref<ITfDocumentMgr>) -> Result<()> {
         guarded(
             || Ok(()),
             || {
+                // 문서가 없는 창(앱이 입력기를 끈 창: 게임 화면 등)으로 갔다. 그 창의 키는 입력기에 오지 않는다.
+                if focus.ok().is_err() {
+                    debug_log(
+                        "focus: a window without a document (the app turned the input method off there)",
+                    );
+                }
                 if let Ok(mut scope) = self.scope.try_borrow_mut() {
                     *scope = ScopeRead::NotRun;
                 }
