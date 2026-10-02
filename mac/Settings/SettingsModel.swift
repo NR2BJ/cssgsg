@@ -47,9 +47,12 @@ struct CssgsgConfig: Codable, Equatable {
 }
 
 /// 러스트 설정 라이브러리(libcssgsg_config.a, config-ffi) 부르기.
+///
+/// 설정 파일 전체(코어 `Config`의 JSON)를 같이 들고 있다가, 쓸 때 이 앱이 고친 값만 그 위에 얹는다. 그래서 맥 설정 앱이
+/// 모르는 값(윈도우 설정 앱이 쓴 `[windows]` 등)도 그대로 남는다. 0.7.1까지는 아는 값만으로 다시 써서 지웠다.
 enum ConfigBridge {
-    /// 파일 내용(nil이면 기본 설정) → 설정. 틀렸으면 까닭.
-    static func parse(_ toml: String?) -> Result<CssgsgConfig, ConfigProblem> {
+    /// 파일 내용(nil이면 기본 설정) → 설정과 설정 전체의 JSON. 틀렸으면 까닭.
+    static func parse(_ toml: String?) -> Result<(config: CssgsgConfig, document: String), ConfigProblem> {
         let json: String? = {
             let pointer = toml.map { $0.withCString { cssgsg_config_json($0) } } ?? cssgsg_config_json(nil)
             return pointer.map { String(cString: $0) }
@@ -58,22 +61,40 @@ enum ConfigBridge {
         do {
             let decoder = JSONDecoder()
             decoder.keyDecodingStrategy = .convertFromSnakeCase
-            return .success(try decoder.decode(CssgsgConfig.self, from: data))
+            return .success((try decoder.decode(CssgsgConfig.self, from: data), json))
         } catch {
             return .failure(ConfigProblem(message: "\(error)"))
         }
     }
 
-    /// 설정 → 파일 내용(설명이 달리고 기본값인 설정은 주석).
-    static func render(_ config: CssgsgConfig) -> Result<String, ConfigProblem> {
+    /// 설정 → 파일 내용(설명이 달리고 기본값인 설정은 주석). `document`(parse가 준 설정 전체)에 이 앱이 아는 값을 얹는다.
+    static func render(_ config: CssgsgConfig, over document: String) -> Result<String, ConfigProblem> {
         let encoder = JSONEncoder()
         encoder.keyEncodingStrategy = .convertToSnakeCase
-        guard let data = try? encoder.encode(config), let json = String(data: data, encoding: .utf8) else {
+        guard let data = try? encoder.encode(config),
+              let mine = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let base = (try? JSONSerialization.jsonObject(with: Data(document.utf8))) as? [String: Any],
+              let merged = try? JSONSerialization.data(withJSONObject: merge(base, mine), options: [.sortedKeys]),
+              let json = String(data: merged, encoding: .utf8)
+        else {
             return .failure(ConfigProblem(message: tr("설정을 JSON으로 바꾸지 못했습니다.", "Couldn’t encode the settings.",
                                                       "設定を JSON に変換できませんでした。")))
         }
         guard let pointer = json.withCString({ cssgsg_config_toml($0) }) else { return .failure(.lastError) }
         return .success(String(cString: pointer))
+    }
+
+    /// `over`의 값으로 `base`를 덮는다. 표(객체)는 안으로 들어가 덮어서, `over`에 없는 키는 `base` 것이 남는다.
+    static func merge(_ base: [String: Any], _ over: [String: Any]) -> [String: Any] {
+        var out = base
+        for (key, value) in over {
+            if let inner = base[key] as? [String: Any], let replacement = value as? [String: Any] {
+                out[key] = merge(inner, replacement)
+            } else {
+                out[key] = value
+            }
+        }
+        return out
     }
 }
 
@@ -87,7 +108,9 @@ struct ConfigProblem: Error {
 @MainActor
 final class SettingsModel: ObservableObject {
     @Published private(set) var config: CssgsgConfig
-    /// 설정 파일을 읽지 못한 까닭(직접 고치다 틀림). 그동안 입력기는 기본 설정으로 돈다.
+    /// 마지막으로 읽은 설정 전체(JSON). 쓸 때 이 위에 config를 얹는다(ConfigBridge.render).
+    private var document: String
+    /// 설정 파일을 읽지 못한 까닭(직접 고치다 틀림). 그동안 입력기는 앞의 올바른 설정(처음이면 기본 설정)으로 돈다.
     @Published private(set) var fileProblem: String?
     /// 마지막으로 쓰지 못한 까닭.
     @Published private(set) var writeProblem: String?
@@ -103,15 +126,17 @@ final class SettingsModel: ObservableObject {
     @Published private(set) var mozcChecking = false
     private var observers: [NSObjectProtocol] = []
 
-    static let defaults: CssgsgConfig = {
-        guard case let .success(config) = ConfigBridge.parse(nil) else {
+    static let defaults: CssgsgConfig = defaultDocument.config
+    private static let defaultDocument: (config: CssgsgConfig, document: String) = {
+        guard case let .success(parsed) = ConfigBridge.parse(nil) else {
             fatalError("설정 라이브러리가 기본 설정을 주지 못했다: \(ConfigProblem.lastError.message)")
         }
-        return config
+        return parsed
     }()
 
     init() {
         config = Self.defaults
+        document = Self.defaultDocument.document
         reload()
         // 입력기가 권한이나 Mozc 상태를 다시 적으면 바로 다시 읽는다.
         let center = DistributedNotificationCenter.default()
@@ -134,10 +159,12 @@ final class SettingsModel: ObservableObject {
         let text = try? String(contentsOf: Cssgsg.configURL, encoding: .utf8)
         switch ConfigBridge.parse(text) {
         case let .success(parsed):
-            if parsed != config { config = parsed }
+            if parsed.config != config { config = parsed.config }
+            document = parsed.document
             fileProblem = nil
         case let .failure(problem):
             config = Self.defaults
+            document = Self.defaultDocument.document
             fileProblem = problem.message
         }
         hanjaLearningCount = Self.learningCount()
@@ -162,7 +189,7 @@ final class SettingsModel: ObservableObject {
         var next = config
         next.shortcuts[keyPath: path] = value
         // 코어가 받아 주는지 먼저 본다(수식키 없는 글자 키 등). 설정 앱이 미리 거르지 못한 경우의 까닭은 코어의 말이다.
-        if case let .failure(problem) = ConfigBridge.render(next) { return problem.message }
+        if case let .failure(problem) = ConfigBridge.render(next, over: document) { return problem.message }
         update { $0.shortcuts[keyPath: path] = value }
         return nil
     }
@@ -172,7 +199,7 @@ final class SettingsModel: ObservableObject {
         var next = config
         change(&next)
         guard next != config || fileProblem != nil else { return }
-        switch ConfigBridge.render(next) {
+        switch ConfigBridge.render(next, over: document) {
         case let .failure(problem):
             writeProblem = problem.message
         case let .success(text):
@@ -204,7 +231,8 @@ final class SettingsModel: ObservableObject {
     /// 설정 파일을 Finder에서 보인다. 없으면 지금 설정(기본값)으로 만든다.
     func revealConfigFile() {
         let url = Cssgsg.configURL
-        if !FileManager.default.fileExists(atPath: url.path), case let .success(text) = ConfigBridge.render(config) {
+        if !FileManager.default.fileExists(atPath: url.path),
+           case let .success(text) = ConfigBridge.render(config, over: document) {
             try? write(text)
         }
         NSWorkspace.shared.activateFileViewerSelecting([url])
@@ -286,7 +314,8 @@ final class SettingsModel: ObservableObject {
         guard let line = try? String(contentsOf: file, encoding: .utf8) else { return nil }
         let parts = line.split(whereSeparator: \.isWhitespace).map(String.init)
         guard parts.count >= 3 else { return nil }
-        return MozcStatus.Build(version: parts[2], date: parts[1], commit: parts[0])
+        return MozcStatus.Build(version: parts[2], date: parts[1], commit: parts[0],
+                                wrapper: parts.count >= 4 ? Int(parts[3]) : nil)
     }
 
     // MARK: - 개발자 기록 (입력기의 기본값 저장소 developerMode)

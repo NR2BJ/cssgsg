@@ -4,7 +4,9 @@
 #   include/cssgsg_mozc.h     C API
 #   data/mozc.data            사전 데이터(OSS)
 #   bin/cssgsg_mozc_main      확인용 명령줄 도구
-#   MOZC_VERSION              "<커밋> <커밋 날짜> <Mozc 버전>"(입력기가 앱에 든 엔진의 판을 안다)
+#   MOZC_VERSION              "<커밋> <커밋 날짜> <Mozc 버전> <래퍼 판>"(입력기가 앱에 든 엔진의 판을 안다)
+#                             래퍼 판은 mozc/cssgsg/WRAPPER_REVISION. 래퍼(우리 C API) 동작을 고치면 올린다: 그래야 같은 Mozc 커밋으로
+#                             다시 빌드한 엔진을 입력기가 새것으로 본다(0.7.2부터, 그전 엔진은 0).
 #
 # - Mozc 커밋은 tools/mozc/MOZC_COMMIT에 고정한다. 환경 변수 MOZC_COMMIT이 있으면 그것(엔진 워크플로가
 #   upstream 최신을 빌드할 때). MOZC_BAZEL_FLAGS로 Bazel 옵션을 더한다(워크플로의 --disk_cache).
@@ -49,6 +51,8 @@ chmod u+w "$OUT"/lib/* "$OUT"/include/* "$OUT"/data/* "$OUT"/bin/*
 
 VERSION="$(awk -F' = ' '/^MAJOR/{a=$2} /^MINOR/{b=$2} /^BUILD_OSS/{c=$2} /^REVISION/{d=$2} END{printf "%s.%s.%s.%d", a, b, c, d + 1}' version.bzl)"
 DATE="$(git -C "$SRC" show -s --format=%cs HEAD)"
-echo "$MOZC_COMMIT $DATE $VERSION" > "$OUT/MOZC_VERSION"
-echo "Mozc $VERSION ($MOZC_COMMIT, $DATE) → $OUT"
+WRAPPER="$(tr -d '[:space:]' < "$ROOT/mozc/cssgsg/WRAPPER_REVISION")"
+[[ "$WRAPPER" =~ ^[0-9]+$ ]] || { echo "mozc/cssgsg/WRAPPER_REVISION은 숫자여야 한다: $WRAPPER"; exit 1; }
+echo "$MOZC_COMMIT $DATE $VERSION $WRAPPER" > "$OUT/MOZC_VERSION"
+echo "Mozc $VERSION ($MOZC_COMMIT, $DATE, 래퍼 $WRAPPER) → $OUT"
 ls -la "$OUT/lib" "$OUT/data" | grep -v "^total"

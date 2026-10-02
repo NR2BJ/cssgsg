@@ -201,9 +201,9 @@ struct MozcEngineSection: View {
 
             if let pending = model.mozc?.pending {
                 HStack {
-                    Text(tr("새 Mozc \(pending.version) (\(pending.date))를 받아 두었습니다. 입력기가 다시 시작하면 적용됩니다.",
-                            "New Mozc \(pending.version) (\(pending.date)) is downloaded and applies when the input method restarts.",
-                            "新しい Mozc \(pending.version)（\(pending.date)）をダウンロード済みです。入力メソッドの再起動時に適用されます。"))
+                    Text(tr("새 Mozc \(pending.version) (\(pending.shownDate))를 받아 두었습니다. 입력기가 다시 시작하면 적용됩니다.",
+                            "New Mozc \(pending.version) (\(pending.shownDate)) is downloaded and applies when the input method restarts.",
+                            "新しい Mozc \(pending.version)（\(pending.shownDate)）をダウンロード済みです。入力メソッドの再起動時に適用されます。"))
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer()
                     Button(tr("지금 적용", "Apply Now", "今すぐ適用")) { model.applyMozcUpdate() }
@@ -241,10 +241,10 @@ struct MozcEngineSection: View {
         }
     }
 
-    /// "3.34.6239.101 (2026-09-28)": 입력기가 쓴다고 적은 것, 아직 적지 않았으면 앱에 든 것.
+    /// "3.34.6239.101 (2026-09-28, 래퍼 1)": 입력기가 쓴다고 적은 것, 아직 적지 않았으면 앱에 든 것.
     private var versionText: String {
         guard let build = model.mozc?.active ?? SettingsModel.bundledMozc else { return "—" }
-        return "\(build.version) (\(build.date))"
+        return "\(build.version) (\(build.shownDate))"
     }
 
     private var sourceText: String {
@@ -306,5 +306,13 @@ struct CheatSheet: View {
             }
         }
         .padding(.vertical, 4)
+    }
+}
+
+extension MozcStatus.Build {
+    /// 날짜, 래퍼 판이 있으면 같이("2026-09-28, 래퍼 1"). 래퍼만 고친 엔진은 버전·날짜가 같아서 판으로 가린다.
+    var shownDate: String {
+        guard let wrapper, wrapper > 0 else { return date }
+        return "\(date), " + tr("래퍼 \(wrapper)", "wrapper \(wrapper)", "ラッパー \(wrapper)")
     }
 }

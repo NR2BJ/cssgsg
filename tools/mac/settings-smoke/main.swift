@@ -151,6 +151,25 @@ MainActor.assumeIsolated {
     UILanguage.active = .ko
     check(MozcPOS.name(1) == "명사 名詞" && MozcPOS.name(99) == "99", "사전: 품사 이름(한국어, 모르는 번호)")
     check(MozcPOS.choices.count == 18 && Set(MozcPOS.choices).count == 18, "사전: 고르는 품사 18개(NRIME와 같다)")
+
+    // 설정 파일: 맥 설정 앱이 모르는 값(윈도우 설정 앱이 쓴 [windows])도 맥에서 바꿔 쓸 때 남는다(0.7.2).
+    let windowsTOML = "[windows]\nhud = false\ncandidate_font_size = 22\n\n[mac]\ncandidate_font_size = 18\n"
+    if case let .success(parsed) = ConfigBridge.parse(windowsTOML) {
+        var next = parsed.config
+        next.mac.candidateFontSize = 20
+        if case let .success(text) = ConfigBridge.render(next, over: parsed.document),
+           case let .success(again) = ConfigBridge.parse(text) {
+            let object = (try? JSONSerialization.jsonObject(with: Data(again.document.utf8))) as? [String: Any]
+            let windows = object?["windows"] as? [String: Any]
+            check(windows?["hud"] as? Bool == false && windows?["candidate_font_size"] as? Int == 22
+                  && again.config.mac.candidateFontSize == 20,
+                  "설정 파일: 맥에서 바꿔 써도 [windows] 값이 남는다(\(windows.map { "\($0)" } ?? "없음"))")
+        } else {
+            check(false, "설정 파일: [windows]가 든 설정을 다시 쓰지 못했다")
+        }
+    } else {
+        check(false, "설정 파일: [windows]가 든 설정 파일을 읽지 못했다(0.7.1은 이것을 모르는 표로 거부했다)")
+    }
 }
 
 // MARK: - 타자 연습: 페이지 ↔ 기록 파일

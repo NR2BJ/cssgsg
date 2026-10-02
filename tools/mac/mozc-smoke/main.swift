@@ -29,8 +29,14 @@ let realBundled: MozcComponent = {
     guard parts.count >= 3 else { fatalError("build/mozc-out/MOZC_VERSION이 없다. bash tools/mozc/build.sh를 먼저") }
     return MozcComponent(source: .bundled, libraryURL: out.appendingPathComponent("lib/libcssgsg_mozc.dylib"),
                          dataURL: out.appendingPathComponent("data/mozc.data"),
-                         commit: parts[0], date: parts[1], version: parts[2], directory: nil)
+                         commit: parts[0], date: parts[1], version: parts[2],
+                         wrapper: parts.count >= 4 ? Int(parts[3]) ?? -1 : -1, directory: nil)
 }()
+/// 저장소의 래퍼 판(mozc/cssgsg/WRAPPER_REVISION).
+let wrapperRevision = Int((try? String(contentsOf: repository.appendingPathComponent("mozc/cssgsg/WRAPPER_REVISION"),
+                                       encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "") ?? -1
+check(wrapperRevision >= 1 && realBundled.wrapper == wrapperRevision,
+      "빌드한 엔진의 MOZC_VERSION에 래퍼 판(\(realBundled.wrapper))이 있고 저장소의 판(\(wrapperRevision))과 같다")
 
 let fakeBundled = MozcComponent(
     source: .bundled, libraryURL: URL(fileURLWithPath: "/nonexistent/libcssgsg_mozc.dylib"),
@@ -49,12 +55,13 @@ func fresh(bundled: MozcComponent? = fakeBundled) -> URL {
 /// 가짜 파일로 받은 엔진 하나.
 @discardableResult
 func addDownload(_ downloads: URL, commit: String, date: String, version: String = "3.35.1.101",
-                 abi: Int = abi, bad: Bool = false) -> URL {
-    let directory = downloads.appendingPathComponent(commit)
+                 abi: Int = abi, wrapper: Int = 0, bad: Bool = false) -> URL {
+    let directory = downloads.appendingPathComponent(MozcComponents.directoryName(commit: commit, wrapper: wrapper))
     try! fm.createDirectory(at: directory, withIntermediateDirectories: true)
     try! Data("lib".utf8).write(to: directory.appendingPathComponent(MozcComponents.libraryName))
     try! Data("data".utf8).write(to: directory.appendingPathComponent(MozcComponents.dataName))
-    let manifest = MozcComponents.Manifest(abi: abi, commit: commit, date: date, version: version, files: [:])
+    let manifest = MozcComponents.Manifest(abi: abi, commit: commit, date: date, version: version,
+                                           wrapper: wrapper > 0 ? wrapper : nil, files: [:])
     try! JSONEncoder().encode(manifest).write(to: directory.appendingPathComponent(MozcComponents.manifestName))
     if bad {
         try! Data().write(to: directory.appendingPathComponent(MozcComponents.State.bad.rawValue))
@@ -76,6 +83,19 @@ do {
     let same = MozcComponent(source: .downloaded, libraryURL: fakeBundled.libraryURL, dataURL: fakeBundled.dataURL,
                              commit: fakeBundled.commit, date: "2027-01-01", version: fakeBundled.version, directory: nil)
     check(!MozcComponents.isNewer(same, than: fakeBundled), "같은 커밋은 날짜가 달라도 새것이 아니다")
+}
+
+do {
+    // 래퍼만 고친 엔진(0.7.2): 같은 Mozc 커밋이고 래퍼 판만 크다.
+    let downloads = fresh()
+    addDownload(downloads, commit: fakeBundled.commit, date: fakeBundled.date, version: fakeBundled.version, wrapper: 1)
+    addDownload(downloads, commit: fakeBundled.commit, date: fakeBundled.date, version: fakeBundled.version, wrapper: 2)
+    let order = MozcComponents.candidates().map { "\($0.commit.prefix(7))-w\($0.wrapper)" }
+    check(order == ["a069a88-w2", "a069a88-w1", "a069a88-w0"],
+          "래퍼만 고친 엔진: 같은 커밋이면 래퍼 판이 큰 것부터, 그다음 앱에 든 것(\(order))")
+    let downloaded = MozcComponents.downloaded().map { MozcComponents.identity(ofDirectory: $0.directory!.lastPathComponent) }
+    check(Set(downloaded.map(\.wrapper)) == [1, 2] && downloaded.allSatisfy { $0.commit == fakeBundled.commit },
+          "…받은 엔진 폴더는 <커밋>-w<판>, 판은 manifest에서 읽는다")
 }
 
 // MARK: - 지키기
@@ -143,7 +163,7 @@ do {
     check(fm.fileExists(atPath: bad.appendingPathComponent("bad").path)
           && !fm.fileExists(atPath: bad.appendingPathComponent(MozcComponents.dataName).path),
           "정리: 나쁜 엔진은 표시만 남긴다(19MB는 지운다)")
-    check(MozcComponents.badCommits() == ["x"], "나쁜 엔진의 커밋은 다시 받지 않는다")
+    check(MozcComponents.badEngines() == ["x"], "나쁜 엔진의 폴더(커밋)는 다시 받지 않는다")
 }
 
 // MARK: - 진짜 엔진: 잘못 받은 것은 버리고 앱에 든 것을 쓴다
@@ -188,6 +208,37 @@ do {
     check(MozcUpdater.offer(from: release("mozc-1-20261120-c2c2c2c", asset: "other.zip")) == nil, "묶음 이름이 다르다")
     check(MozcUpdater.offer(from: release("mozc-1-20261120-c2c2c2c", digest: nil)) == nil, "해시가 없으면 받지 않는다")
     check(MozcUpdater.offer(from: release("mozc-1-20261120-c2c2c2c", draft: true)) == nil, "초안")
+    check(offer?.wrapper == nil, "래퍼 판이 없는 옛 모양 태그는 판을 모른다(nil)")
+    let wrapped = MozcUpdater.offer(from: release("mozc-1-20261120-c2c2c2c-w2"))
+    check(wrapped?.wrapper == 2 && wrapped?.commitPrefix == "c2c2c2c" && wrapped?.date == "2026-11-20",
+          "래퍼 판이 붙은 태그(…-w2)를 읽는다")
+    for bad in ["mozc-1-20261120-c2c2c2c-x2", "mozc-1-20261120-c2c2c2c-w", "mozc-1-20261120-c2c2c2c-w+2",
+                "mozc-1-20261120-c2c2c2c-", "mozc-1-20261120-c2c2c2c-w2-w3"] {
+        check(MozcUpdater.offer(from: release(bad)) == nil, "틀린 래퍼 판 태그는 건너뛴다: \(bad)")
+    }
+}
+
+do {
+    // 같은 날짜(같은 Mozc 커밋)면 래퍼 판이 큰 것, 나쁜 엔진은 커밋과 판이 모두 같을 때만 건너뛴다.
+    let releases = [release("mozc-1-20261120-c2c2c2c"), release("mozc-1-20261120-c2c2c2c-w1"),
+                    release("mozc-1-20261120-c2c2c2c-w2"), release("mozc-1-20261010-b1b1b1b-w3")]
+    check(MozcUpdater.newest(in: releases, abi: 1, bad: [])?.wrapper == 2, "같은 날짜면 래퍼 판이 큰 것이 가장 새것")
+    check(MozcUpdater.newest(in: releases, abi: 1, bad: ["c2c2c2c8-w2"])?.wrapper == 1,
+          "나쁜 엔진(커밋, 래퍼 판)은 그 판만 건너뛴다")
+    let wrapped = MozcUpdater.offer(from: release("mozc-1-20261120-c2c2c2c-w2"))!
+    func installedEngine(_ commit: String, _ date: String, wrapper: Int) -> MozcComponent {
+        MozcComponent(source: .downloaded, libraryURL: fakeBundled.libraryURL, dataURL: fakeBundled.dataURL,
+                      commit: commit, date: date, version: "3.35.1.101", wrapper: wrapper, directory: nil)
+    }
+    check(MozcUpdater.isWanted(wrapped, installed: [installedEngine("c2c2c2c8", "2026-11-20", wrapper: 1)]),
+          "같은 커밋이라도 래퍼 판이 더 크면 받는다")
+    check(!MozcUpdater.isWanted(wrapped, installed: [installedEngine("c2c2c2c8", "2026-11-20", wrapper: 2)]),
+          "같은 커밋·같은 래퍼 판은 받지 않는다")
+    let plain = MozcUpdater.offer(from: release("mozc-1-20261120-c2c2c2c"))!
+    check(!MozcUpdater.isWanted(plain, installed: [installedEngine("c2c2c2c8", "2026-11-20", wrapper: 0)]),
+          "판을 모르는 옛 모양 태그는 같은 커밋이면 받지 않는다(0.7.1과 같다)")
+    check(!MozcUpdater.isWanted(wrapped, installed: [installedEngine("f0f0f0f0", "2026-11-21", wrapper: 0)]),
+          "래퍼 판이 커도 더 새 Mozc 커밋이 있으면 받지 않는다")
 }
 
 do {
@@ -212,7 +263,8 @@ do {
 func sha256(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
 
 /// package-component.sh처럼 cssgsg-mozc.zip을 만든다(가짜 파일).
-func makeZip(commit: String, date: String, abi: Int = 1, tamperLibraryHash: Bool = false) -> (zip: URL, digest: String) {
+func makeZip(commit: String, date: String, abi: Int = 1, wrapper: Int? = nil,
+             tamperLibraryHash: Bool = false) -> (zip: URL, digest: String) {
     let stage = work.appendingPathComponent(".stage-\(UUID().uuidString)")
     try! fm.createDirectory(at: stage, withIntermediateDirectories: true)
     let library = Data((0..<4096).map { UInt8($0 % 251) })
@@ -220,7 +272,7 @@ func makeZip(commit: String, date: String, abi: Int = 1, tamperLibraryHash: Bool
     try! library.write(to: stage.appendingPathComponent(MozcComponents.libraryName))
     try! data.write(to: stage.appendingPathComponent(MozcComponents.dataName))
     let manifest = MozcComponents.Manifest(
-        abi: abi, commit: commit, date: date, version: "3.35.1.101",
+        abi: abi, commit: commit, date: date, version: "3.35.1.101", wrapper: wrapper,
         files: [MozcComponents.libraryName: tamperLibraryHash ? String(repeating: "0", count: 64) : sha256(library),
                 MozcComponents.dataName: sha256(data)])
     try! JSONEncoder().encode(manifest).write(to: stage.appendingPathComponent(MozcComponents.manifestName))
@@ -234,9 +286,10 @@ func makeZip(commit: String, date: String, abi: Int = 1, tamperLibraryHash: Bool
     return (zip, "sha256:" + sha256(try! Data(contentsOf: zip)))
 }
 
-func offer(commit: String, date: String, digest: String, abi: Int = 1) -> MozcUpdater.Offer {
+func offer(commit: String, date: String, digest: String, abi: Int = 1, wrapper: Int? = nil) -> MozcUpdater.Offer {
     MozcUpdater.Offer(abi: abi, date: date, commitPrefix: String(commit.prefix(7)),
-                      downloadURL: URL(string: "https://example.invalid/cssgsg-mozc.zip")!, digest: digest)
+                      downloadURL: URL(string: "https://example.invalid/cssgsg-mozc.zip")!, digest: digest,
+                      wrapper: wrapper)
 }
 
 do {
@@ -280,6 +333,26 @@ do {
     check(other == nil, "모르는 C API 판이면 설치하지 않는다")
 }
 
+do {
+    // 래퍼만 고친 엔진 설치(0.7.2): <커밋>-w<판> 폴더에, 앱에 든 같은 커밋 엔진보다 먼저 읽는다.
+    let downloads = fresh()
+    let commit = fakeBundled.commit
+    let (zip, digest) = makeZip(commit: commit, date: fakeBundled.date, wrapper: 1)
+    let component = try? MozcUpdater.install(
+        zip: zip, offer: offer(commit: commit, date: fakeBundled.date, digest: digest, wrapper: 1), abi: abi, into: downloads)
+    check(component?.wrapper == 1 && component?.directory?.lastPathComponent == "\(commit)-w1",
+          "래퍼 판이 있는 묶음은 <커밋>-w<판>에 설치한다")
+    check(MozcComponents.candidates().first?.wrapper == 1, "…앱에 든 같은 커밋 엔진(판 0)보다 먼저 읽는다")
+    let (zip2, digest2) = makeZip(commit: commit, date: fakeBundled.date, wrapper: 1)
+    let mismatch = try? MozcUpdater.install(
+        zip: zip2, offer: offer(commit: commit, date: fakeBundled.date, digest: digest2, wrapper: 2), abi: abi, into: downloads)
+    check(mismatch == nil, "태그의 래퍼 판과 manifest의 판이 다르면 설치하지 않는다")
+    let (zip3, digest3) = makeZip(commit: "c2c2c2c2c2c2c2c2c2c2", date: "2026-11-20", wrapper: 3)
+    let legacy = try? MozcUpdater.install(
+        zip: zip3, offer: offer(commit: "c2c2c2c2c2c2c2c2c2c2", date: "2026-11-20", digest: digest3), abi: abi, into: downloads)
+    check(legacy?.wrapper == 3, "옛 모양 태그로 받은 묶음은 manifest의 판을 따른다")
+}
+
 // MARK: - 상태
 
 do {
@@ -298,6 +371,15 @@ do {
     check(afterNew.active == new && afterNew.activeSource == "downloaded" && afterNew.pending == nil,
           "상태: 받아 둔 새것으로 떴으면 기다림 표시를 지운다")
     check(status.started(with: nil).active == nil, "상태: 엔진이 없으면 쓰는 엔진도 없다")
+
+    // 래퍼만 고친 엔진을 기다리는 중: 같은 커밋의 판이 그만큼 되어야 지운다.
+    var waiting = MozcStatus()
+    waiting.pending = MozcStatus.Build(version: old.version, date: old.date, commit: old.commit, wrapper: 1)
+    check(waiting.started(with: bundled).pending != nil, "상태: 같은 커밋이라도 래퍼 판이 낮은 엔진으로 떴으면 계속 기다린다")
+    let wrappedComponent = MozcComponent(source: .downloaded, libraryURL: fakeBundled.libraryURL, dataURL: fakeBundled.dataURL,
+                                         commit: old.commit, date: old.date, version: old.version, wrapper: 1, directory: nil)
+    let afterWrapped = waiting.started(with: wrappedComponent)
+    check(afterWrapped.pending == nil && afterWrapped.active?.wrapper == 1, "상태: 그 판으로 떴으면 지우고 판을 적는다")
 }
 
 // MARK: - 엔진 워크플로가 내는 묶음: 받아서, 설치하고, 앱에 든 것 대신 읽는다
@@ -316,6 +398,7 @@ do {
         let manifestData = pipe.fileHandleForReading.readDataToEndOfFile()
         unzip.waitUntilExit()
         let manifest = try! JSONDecoder().decode(MozcComponents.Manifest.self, from: manifestData)
+        check(manifest.wrapper == wrapperRevision, "실제 묶음의 manifest에 래퍼 판(\(manifest.wrapper.map(String.init) ?? "없음"))")
         // 앱에 든 엔진은 더 오래된 것으로 친다. 그러면 받은 엔진을 고른다.
         let downloads = fresh(bundled: MozcComponent(
             source: .bundled, libraryURL: realBundled.libraryURL, dataURL: realBundled.dataURL,

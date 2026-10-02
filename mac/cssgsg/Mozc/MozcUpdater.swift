@@ -8,6 +8,9 @@ import Foundation
 /// cssgsg-mozc.zip(libcssgsg_mozc.dylib, mozc.data, manifest.json)을 낸다. 앱 업데이트는 이 릴리스를 보지 않는다
 /// (pkg가 없다, 태그가 버전이 아니다).
 ///
+/// 0.7.2부터 태그 끝에 래퍼 판이 붙은 것(…-<커밋 7자리>-w<래퍼 판>)도 읽는다. 래퍼(mozc/cssgsg)만 고쳐 같은 Mozc 커밋으로
+/// 다시 빌드한 엔진은 래퍼 판으로만 새것을 가린다(같은 커밋이면 판이 큰 것). 0.7.1은 이 모양을 건너뛴다.
+///
 /// 입력기가 뜨고 5분 뒤, 그다음은 하루에 한 번 확인한다(설정 앱의 "지금 확인"은 바로). 보내는 것은 릴리스 목록 요청뿐이다.
 /// 받은 파일은 GitHub가 적은 SHA-256과 manifest의 파일별 해시가 모두 맞아야 쓰고, 입력기가 다음에 뜰 때부터 쓴다
 /// (설정 앱의 "지금 적용"은 바로 다시 띄운다). 확인과 받기는 메인 스레드 밖에서 해서 입력을 막지 않는다.
@@ -34,6 +37,8 @@ final class MozcUpdater {
         let downloadURL: URL
         /// GitHub가 적은 "sha256:<hex>".
         let digest: String
+        /// 태그의 래퍼 판. 래퍼 판이 없는 옛 모양 태그면 nil(받아 보아야 manifest로 안다).
+        var wrapper: Int? = nil
     }
 
     // MARK: - 일정 (메인 스레드)
@@ -52,7 +57,7 @@ final class MozcUpdater {
         guard !checking else { return }
         checking = true
         let installed = (active.map { [$0] } ?? []) + MozcComponents.downloaded()
-        let bad = MozcComponents.badCommits()
+        let bad = MozcComponents.badEngines()
         let abi = MozcComponents.supportedABI
         let downloads = MozcComponents.downloadsDirectory
         Task.detached(priority: .utility) {
@@ -117,6 +122,7 @@ final class MozcUpdater {
         case .downloaded(let component):
             DeveloperLogger.shared.log("Mozc", "update downloaded", metadata: [
                 "version": component.version, "date": component.date, "commit": String(component.commit.prefix(7)),
+                "wrapper": "\(component.wrapper)",
             ])
         case .failed(let reason):
             DeveloperLogger.shared.log("Mozc", "update check failed", metadata: ["reason": reason])
@@ -124,11 +130,19 @@ final class MozcUpdater {
         return outcome
     }
 
-    /// 릴리스가 내놓은 엔진: 태그 mozc-<판>-<yyyymmdd>-<커밋 7자리>, cssgsg-mozc.zip, GitHub가 적은 해시.
+    /// 릴리스가 내놓은 엔진: 태그 mozc-<판>-<yyyymmdd>-<커밋 7자리>[-w<래퍼 판>], cssgsg-mozc.zip, GitHub가 적은 해시.
     static func offer(from release: GitHubRelease) -> Offer? {
         guard release.draft != true, release.tagName.hasPrefix(tagPrefix) else { return nil }
-        let parts = release.tagName.dropFirst(tagPrefix.count).split(separator: "-").map(String.init)
-        guard parts.count == 3,
+        let parts = release.tagName.dropFirst(tagPrefix.count).split(separator: "-", omittingEmptySubsequences: false)
+            .map(String.init)
+        var wrapper: Int?
+        if parts.count == 4 {
+            let digits = parts[3].dropFirst()
+            guard parts[3].hasPrefix("w"), !digits.isEmpty, digits.count <= 6,
+                  digits.allSatisfy({ $0.isASCII && $0.isNumber }), let number = Int(digits) else { return nil }
+            wrapper = number
+        }
+        guard parts.count == 3 || parts.count == 4,
               let abi = Int(parts[0]),
               parts[1].count == 8, parts[1].allSatisfy(\.isASCII), Int(parts[1]) != nil,
               parts[2].count >= 7, parts[2].allSatisfy(\.isHexDigit),
@@ -137,23 +151,33 @@ final class MozcUpdater {
               let digest = asset.digest, digest.lowercased().hasPrefix("sha256:") else { return nil }
         let d = parts[1]
         let date = "\(d.prefix(4))-\(d.dropFirst(4).prefix(2))-\(d.suffix(2))"
-        return Offer(abi: abi, date: date, commitPrefix: parts[2].lowercased(), downloadURL: url, digest: digest)
+        return Offer(abi: abi, date: date, commitPrefix: parts[2].lowercased(), downloadURL: url, digest: digest,
+                     wrapper: wrapper)
     }
 
-    /// 이 판의 엔진 중 이 맥에서 나쁜 엔진이 되지 않은 가장 새것.
+    /// 이 판의 엔진 중 이 맥에서 나쁜 엔진이 되지 않은 가장 새것(날짜, 같으면 래퍼 판).
+    /// 나쁜 엔진은 폴더 이름(커밋, 래퍼 판)으로 가린다. 래퍼 판을 모르는 옛 모양 태그는 같은 커밋의 나쁜 엔진이 있으면 건너뛴다.
     static func newest(in releases: [GitHubRelease], abi: Int, bad: Set<String>) -> Offer? {
-        releases
+        let badEngines = bad.map(MozcComponents.identity(ofDirectory:))
+        return releases
             .compactMap(offer(from:))
             .filter { offer in
-                offer.abi == abi && !bad.contains(where: { $0.lowercased().hasPrefix(offer.commitPrefix) })
+                offer.abi == abi && !badEngines.contains { engine in
+                    engine.commit.lowercased().hasPrefix(offer.commitPrefix)
+                        && (offer.wrapper == nil || offer.wrapper == engine.wrapper)
+                }
             }
-            .max { $0.date < $1.date }
+            .max { ($0.date, $0.wrapper ?? 0) < ($1.date, $1.wrapper ?? 0) }
     }
 
-    /// 받을 만한가: 여기 있는 어느 것보다 새것이고, 이미 있는 것이 아니다.
+    /// 받을 만한가: 여기 있는 어느 것보다 새것이다. 같은 커밋이면 래퍼 판이 더 커야 한다(태그에 판이 없으면 같은 커밋은 받지 않는다).
     static func isWanted(_ offer: Offer, installed: [MozcComponent]) -> Bool {
-        !installed.contains { component in
-            component.commit.lowercased().hasPrefix(offer.commitPrefix) || component.date >= offer.date
+        installed.allSatisfy { component in
+            if component.commit.lowercased().hasPrefix(offer.commitPrefix) {
+                guard let wrapper = offer.wrapper else { return false }
+                return wrapper > component.wrapper
+            }
+            return offer.date > component.date
         }
     }
 
@@ -190,6 +214,10 @@ final class MozcUpdater {
               !manifest.commit.contains("/"), !manifest.commit.hasPrefix(".") else {
             throw InstallError.badManifest("커밋이나 날짜가 릴리스와 다르다")
         }
+        let wrapper = manifest.wrapper ?? 0
+        if let expected = offer.wrapper, expected != wrapper {
+            throw InstallError.badManifest("래퍼 판 \(wrapper)이 릴리스(\(expected))와 다르다")
+        }
         for name in [MozcComponents.libraryName, MozcComponents.dataName] {
             guard let hex = manifest.files[name],
                   GitHub.fileMatchesDigest(at: staging.appendingPathComponent(name), expected: "sha256:\(hex)") == true
@@ -202,7 +230,8 @@ final class MozcUpdater {
             removexattr(staging.appendingPathComponent(name).path, "com.apple.quarantine", 0)
         }
 
-        let destination = downloads.appendingPathComponent(manifest.commit)
+        let destination = downloads.appendingPathComponent(
+            MozcComponents.directoryName(commit: manifest.commit, wrapper: wrapper))
         if fm.fileExists(atPath: destination.path) {
             try fm.removeItem(at: destination)
         }
@@ -211,6 +240,6 @@ final class MozcUpdater {
                              libraryURL: destination.appendingPathComponent(MozcComponents.libraryName),
                              dataURL: destination.appendingPathComponent(MozcComponents.dataName),
                              commit: manifest.commit, date: manifest.date, version: manifest.version,
-                             directory: destination)
+                             wrapper: wrapper, directory: destination)
     }
 }

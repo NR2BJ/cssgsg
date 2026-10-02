@@ -25,6 +25,8 @@ struct MozcStatus: Codable, Equatable {
         /// Mozc 커밋 날짜(yyyy-MM-dd).
         let date: String
         let commit: String
+        /// cssgsg 래퍼(mozc/cssgsg) 판(0.7.2). 래퍼만 고쳐 다시 빌드한 엔진은 Mozc 커밋이 같고 이것만 크다. 없으면 0.
+        var wrapper: Int? = nil
     }
 
     var active: Build?

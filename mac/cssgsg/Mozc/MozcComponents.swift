@@ -20,10 +20,16 @@ struct MozcComponent: Equatable {
     /// Mozc 커밋 날짜(yyyy-MM-dd). "더 새것"의 기준.
     let date: String
     let version: String
+    /// cssgsg 래퍼(mozc/cssgsg, 우리 C API) 판. 래퍼만 고쳐 같은 Mozc 커밋으로 다시 빌드한 엔진은 이것만 크다
+    /// (0.7.2, mozc/cssgsg/WRAPPER_REVISION). 판을 적지 않던 엔진은 0.
+    var wrapper: Int = 0
     /// 받은 엔진의 파일과 상태가 있는 폴더. 앱에 든 것은 nil.
     let directory: URL?
 
-    var build: MozcStatus.Build { MozcStatus.Build(version: version, date: date, commit: commit) }
+    /// 상태에 적는 판. 래퍼 판 0은 적지 않는다(0.7.1까지 적은 것과 같은 모양).
+    var build: MozcStatus.Build {
+        MozcStatus.Build(version: version, date: date, commit: commit, wrapper: wrapper > 0 ? wrapper : nil)
+    }
 }
 
 /// 엔진 찾기, 고르기, 지키기.
@@ -47,7 +53,8 @@ enum MozcComponents {
 
     // MARK: - 찾기
 
-    /// 앱 안의 Frameworks/libcssgsg_mozc.dylib, Resources/mozc.data, Resources/MOZC_VERSION("<커밋> <날짜> <버전>").
+    /// 앱 안의 Frameworks/libcssgsg_mozc.dylib, Resources/mozc.data, Resources/MOZC_VERSION("<커밋> <날짜> <버전> <래퍼 판>",
+    /// 래퍼 판은 0.7.2부터).
     static func bundled(in bundle: Bundle) -> MozcComponent? {
         guard let library = bundle.privateFrameworksURL?.appendingPathComponent(libraryName),
               FileManager.default.fileExists(atPath: library.path),
@@ -57,7 +64,8 @@ enum MozcComponents {
         let parts = line.split(whereSeparator: \.isWhitespace).map(String.init)
         guard parts.count >= 3 else { return nil }
         return MozcComponent(source: .bundled, libraryURL: library, dataURL: data,
-                             commit: parts[0], date: parts[1], version: parts[2], directory: nil)
+                             commit: parts[0], date: parts[1], version: parts[2],
+                             wrapper: parts.count >= 4 ? Int(parts[3]) ?? 0 : 0, directory: nil)
     }
 
     /// 받은 엔진 폴더의 manifest.json(엔진 워크플로의 tools/mozc/package-component.sh가 쓴다).
@@ -66,8 +74,24 @@ enum MozcComponents {
         let commit: String
         let date: String
         let version: String
+        /// 래퍼 판(0.7.2부터 적는다). 없으면 0.
+        var wrapper: Int? = nil
         /// 파일 이름 → SHA-256(16진).
         let files: [String: String]
+    }
+
+    /// 받은 엔진 폴더 이름: 래퍼 판이 0이면 커밋(0.7.1까지와 같다), 아니면 "<커밋>-w<래퍼 판>".
+    /// 같은 Mozc 커밋이라도 래퍼 판이 다르면 다른 엔진이다(나쁜 엔진 표시도 따로).
+    static func directoryName(commit: String, wrapper: Int) -> String {
+        wrapper > 0 ? "\(commit)-w\(wrapper)" : commit
+    }
+
+    /// 폴더 이름 → (커밋, 래퍼 판).
+    static func identity(ofDirectory name: String) -> (commit: String, wrapper: Int) {
+        if let range = name.range(of: "-w", options: .backwards), let wrapper = Int(name[range.upperBound...]) {
+            return (String(name[..<range.lowerBound]), wrapper)
+        }
+        return (name, 0)
     }
 
     /// 읽어도 되는 받은 엔진: 파일이 다 있고, 판이 맞고, 나쁜 엔진이 아닌 것.
@@ -86,7 +110,7 @@ enum MozcComponents {
             guard fm.fileExists(atPath: library.path), fm.fileExists(atPath: mozcData.path) else { return nil }
             return MozcComponent(source: .downloaded, libraryURL: library, dataURL: mozcData,
                                  commit: manifest.commit, date: manifest.date, version: manifest.version,
-                                 directory: directory)
+                                 wrapper: manifest.wrapper ?? 0, directory: directory)
         }
     }
 
@@ -102,16 +126,16 @@ enum MozcComponents {
         return newer + (base.map { [$0] } ?? [])
     }
 
-    /// Mozc 커밋 날짜로, 같으면 Mozc 버전으로 비교한다. 같은 커밋은 새것이 아니다.
+    /// Mozc 커밋 날짜로, 같으면 Mozc 버전으로 비교한다. 같은 커밋이면 래퍼 판이 큰 것이 새것이다(래퍼만 고친 엔진, 0.7.2).
     static func isNewer(_ lhs: MozcComponent, than rhs: MozcComponent) -> Bool {
-        guard lhs.commit != rhs.commit else { return false }
+        guard lhs.commit != rhs.commit else { return lhs.wrapper > rhs.wrapper }
         if lhs.date != rhs.date { return lhs.date > rhs.date }
         guard let left = SemanticVersion(lhs.version), let right = SemanticVersion(rhs.version) else { return false }
         return right < left
     }
 
-    /// 나쁜 엔진의 커밋. 다시 받지 않는다.
-    static func badCommits() -> Set<String> {
+    /// 나쁜 엔진의 폴더 이름(directoryName: 커밋, 래퍼 판이 있으면 "<커밋>-w<판>"). 다시 받지 않는다.
+    static func badEngines() -> Set<String> {
         let fm = FileManager.default
         guard let entries = try? fm.contentsOfDirectory(at: downloadsDirectory,
                                                         includingPropertiesForKeys: nil) else { return [] }
@@ -215,7 +239,9 @@ extension MozcStatus {
         var status = self
         status.active = component?.build
         status.activeSource = component?.source.rawValue
-        if let pending, let component, pending.commit == component.commit || pending.date <= component.date {
+        // 기다리던 것만큼 새 엔진으로 떴으면 지운다: 같은 커밋이면 래퍼 판이 그만큼 되었는지, 아니면 날짜로.
+        if let pending, let component,
+           pending.commit == component.commit ? (pending.wrapper ?? 0) <= component.wrapper : pending.date <= component.date {
             status.pending = nil
         }
         return status

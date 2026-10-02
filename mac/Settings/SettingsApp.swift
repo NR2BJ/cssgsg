@@ -66,13 +66,13 @@ struct SettingsView: View {
         VStack(spacing: 0) {
             if let problem = model.fileProblem {
                 Banner(text: tr("""
-                    설정 파일에 오류가 있어 입력기가 기본 설정으로 동작하고 있습니다: \(problem)
+                    설정 파일에 오류가 있어 입력기가 앞의 올바른 설정(처음이면 기본 설정)으로 동작하고 있습니다: \(problem)
                     여기서 설정을 바꾸면 잘못된 파일은 config.toml.bak으로 옮기고 새로 만듭니다.
                     """, """
-                    The settings file has an error, so the input method is running with default settings: \(problem)
+                    The settings file has an error, so the input method keeps its last valid settings (the defaults at first): \(problem)
                     Changing a setting here moves the broken file to config.toml.bak and creates a new one.
                     """, """
-                    設定ファイルにエラーがあるため、入力メソッドは既定の設定で動作しています: \(problem)
+                    設定ファイルにエラーがあるため、入力メソッドは直前の正しい設定（最初は既定の設定）で動作しています: \(problem)
                     ここで設定を変更すると、壊れたファイルを config.toml.bak に移して新しく作成します。
                     """))
             }
