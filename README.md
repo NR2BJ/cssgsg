@@ -119,15 +119,16 @@ curl -fL -o /tmp/cssgsg.pkg https://github.com/NR2BJ/cssgsg/releases/latest/down
 Mozc(일본어 한자 변환 엔진)는 cssgsg와 따로 업데이트된다(0.6.0, NRIME 1.0.12와 같다).
 
 - `.github/workflows/mozc-component.yml`이 매주 월요일 upstream Mozc를 보고, 버전이나 사전 데이터가 바뀌었으면 GitHub 컴퓨터에서 엔진을
-  빌드하고 시험한 뒤 `mozc-<C API 판>-<yyyymmdd>-<커밋 7자리>` 태그의 prerelease로 `cssgsg-mozc.zip`을 낸다(손으로도 돌린다).
-  앱 업데이트는 이 릴리스를 보지 않는다(pkg가 없다).
+  빌드하고 시험한 뒤 `mozc-<C API 판>-<yyyymmdd>-<커밋 7자리>-w<래퍼 판>` 태그의 prerelease로 `cssgsg-mozc.zip`을 낸다(손으로도 돌린다).
+  래퍼 판은 우리 C API 래퍼(`mozc/cssgsg`)의 판이다: 래퍼만 고쳐 올리면 upstream이 그대로여도 다시 빌드하고, 입력기는 같은 Mozc 커밋이라도
+  래퍼 판이 큰 엔진을 새것으로 받는다(맥 0.7.2, 윈도우 0.2.0부터. 앞판은 이 모양의 태그를 건너뛴다). 앱 업데이트는 이 릴리스를 보지 않는다(pkg가 없다).
 - 입력기는 뜨고 5분 뒤, 그다음은 하루 한 번 GitHub 릴리스 목록을 확인한다(보내는 것은 목록 요청뿐). 더 새 엔진이 있으면 받아서
-  GitHub가 적은 SHA-256과 묶음 안 파일별 해시를 확인하고 `~/Library/Application Support/cssgsg/mozc-engines/<커밋>/`에 둔다.
+  GitHub가 적은 SHA-256과 묶음 안 파일별 해시를 확인하고 `~/Library/Application Support/cssgsg/mozc-engines/<커밋>[-w<래퍼 판>]/`에 둔다.
   다음에 입력기가 뜰 때부터 쓴다. 설정 앱 → 일본어 → 변환 엔진에서 지금 확인하고 지금 적용할 수 있다.
 - 받은 엔진이 읽히지 않거나, 읽다가 입력기가 죽거나, 10분 안에 깨끗이 끝나지 않은 시작이 세 번이면 그 엔진은 다시 쓰지 않고
   앱에 든 엔진을 쓴다. 학습과 개인 사전(`~/Library/Application Support/cssgsg/mozc/`)은 엔진이 바뀌어도 그대로다.
 - 윈도우: 같은 릴리스에 윈도우 엔진(`cssgsg-mozc-windows-x64.zip`, `mozc-windows.yml`이 같은 커밋으로 빌드해 붙인다)도 실린다.
-  엔진 호스트가 뜨고 5분 뒤, 그다음 하루 한 번 확인해 `%LOCALAPPDATA%\cssgsg\mozc-engines\<커밋>\`에 받고, 다음에 호스트가 뜰 때부터 쓴다.
+  엔진 호스트가 뜨고 5분 뒤, 그다음 하루 한 번 확인해 `%LOCALAPPDATA%\cssgsg\mozc-engines\<커밋>[-w<래퍼 판>]\`에 받고, 다음에 호스트가 뜰 때부터 쓴다.
   설정 앱 → 일본어 → 변환 엔진에서 지금 확인하고 지금 적용(호스트 다시 시작)할 수 있다. 읽지 못한 엔진·시작을 두 번 끝내지 못한 엔진은
   다시 쓰지 않는다.
 

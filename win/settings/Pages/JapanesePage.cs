@@ -117,7 +117,7 @@ sealed partial class JapanesePage : SettingsPage
     }
 
     /// 엔진 상태: 쓰는 엔진(내려받은 것인지), 받아 두고 기다리는 엔진, 마지막 확인(맥 MozcEngineSection).
-    /// 호스트가 없으면 설치된 엔진의 MOZC_VERSION("<커밋> <날짜> <버전>").
+    /// 호스트가 없으면 설치된 엔진의 MOZC_VERSION("<커밋> <날짜> <버전> <래퍼 판>", 래퍼 판은 없을 수 있다).
     async Task ShowEngineAsync()
     {
         var (status, info) = await HostClient.EngineStatusAsync();
@@ -138,7 +138,7 @@ sealed partial class JapanesePage : SettingsPage
         }
         if (info.Active is { } active)
         {
-            engineVersion.Text = $"{active.Version} ({active.Date})";
+            engineVersion.Text = $"{active.Version} ({active.ShownDate})";
             engineSource.Text = active.Downloaded
                 ? T("내려받은 엔진", "Downloaded engine", "ダウンロードしたエンジン")
                 : T("설치본에 든 엔진", "Engine that came with cssgsg", "cssgsg に含まれるエンジン");
@@ -151,9 +151,9 @@ sealed partial class JapanesePage : SettingsPage
         }
         if (info.Pending is { } pending)
         {
-            pendingText.Text = T($"새 Mozc {pending.Version} ({pending.Date})를 받아 두었습니다. 엔진 호스트가 다시 시작하면 적용됩니다.",
-                $"New Mozc {pending.Version} ({pending.Date}) is downloaded and applies when the engine host restarts.",
-                $"新しい Mozc {pending.Version}（{pending.Date}）をダウンロード済みです。エンジンホストの再起動時に適用されます。");
+            pendingText.Text = T($"새 Mozc {pending.Version} ({pending.ShownDate})를 받아 두었습니다. 엔진 호스트가 다시 시작하면 적용됩니다.",
+                $"New Mozc {pending.Version} ({pending.ShownDate}) is downloaded and applies when the engine host restarts.",
+                $"新しい Mozc {pending.Version}（{pending.ShownDate}）をダウンロード済みです。エンジンホストの再起動時に適用されます。");
             pendingRow.Visibility = Visibility.Visible;
         }
         else
@@ -209,7 +209,8 @@ sealed partial class JapanesePage : SettingsPage
         try
         {
             var parts = File.ReadAllText(Paths.MozcVersion).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length >= 3) return (parts[2], parts[1]);
+            var wrapper = parts.Length >= 4 && int.TryParse(parts[3], out var w) ? w : 0;
+            if (parts.Length >= 3) return (parts[2], HostClient.ShowDate(parts[1], wrapper));
         }
         catch (Exception) { }
         return (null, null);

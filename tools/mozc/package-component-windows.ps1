@@ -1,7 +1,8 @@
 ﻿# build/mozc-out(build-windows.ps1)을 윈도우 엔진 묶음으로 만든다(package-component.sh의 윈도우판):
 #   build/mozc-component/cssgsg-mozc-windows-x64.zip   cssgsg_mozc.dll, mozc.data, manifest.json
-#   build/mozc-component/TAG, TITLE                     맥 묶음과 같은 태그·제목(같은 Mozc 커밋이면 한 릴리스에 같이 싣는다)
-# manifest.json은 맥 것과 같은 모양에 "platform"을 더했다: C API 판, Mozc 커밋·날짜·버전, 파일마다 SHA-256.
+#   build/mozc-component/TAG, TITLE                     맥 묶음과 같은 태그·제목(같은 Mozc 커밋·래퍼 판이면 한 릴리스에 같이 싣는다)
+#     태그: mozc-<C API 판>-<yyyymmdd>-<커밋 7자리>-w<래퍼 판>(래퍼 판이 0이면 -w 없이, CONCEPT §6.3)
+# manifest.json은 맥 것과 같은 모양에 "platform"을 더했다: C API 판, Mozc 커밋·날짜·버전, 래퍼 판, 파일마다 SHA-256.
 # 맥 입력기(MozcUpdater)는 이름이 cssgsg-mozc.zip인 것만 받으므로 이 묶음은 보지 않는다.
 # 이 파일은 UTF-8(BOM)이다.
 $ErrorActionPreference = 'Stop'
@@ -10,7 +11,11 @@ $Out = Join-Path $Root 'build\mozc-out'
 $Dest = Join-Path $Root 'build\mozc-component'
 $Zip = Join-Path $Dest 'cssgsg-mozc-windows-x64.zip'
 
-$Commit, $Date, $Version = (Get-Content (Join-Path $Out 'MOZC_VERSION') -Raw).Trim() -split ' '
+$Commit, $Date, $Version, $Wrapper = (Get-Content (Join-Path $Out 'MOZC_VERSION') -Raw).Trim() -split ' '
+# 래퍼 판 전에 빌드한 엔진(세 칸)은 0.
+if (-not $Wrapper) { $Wrapper = '0' }
+if ($Wrapper -notmatch '^\d{1,6}$') { throw "bad wrapper revision in MOZC_VERSION: $Wrapper" }
+$Wrapper = [int]$Wrapper
 $Abi = (Select-String -Path (Join-Path $Root 'mozc\cssgsg\cssgsg_mozc.h') -Pattern '^#define CSSGSG_MOZC_ABI_VERSION (\d+)').Matches |
     Select-Object -First 1 | ForEach-Object { $_.Groups[1].Value }
 if (-not $Abi) { throw 'CSSGSG_MOZC_ABI_VERSION not found' }
@@ -22,7 +27,7 @@ Copy-Item (Join-Path $Out 'lib\cssgsg_mozc.dll'), (Join-Path $Out 'data\mozc.dat
 $sha = { param($file) (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant() }
 $DllSha = & $sha (Join-Path $Stage 'cssgsg_mozc.dll')
 $DataSha = & $sha (Join-Path $Stage 'mozc.data')
-$Manifest = "{`"abi`": $Abi, `"commit`": `"$Commit`", `"date`": `"$Date`", `"version`": `"$Version`", `"platform`": `"windows-x64`",`n" +
+$Manifest = "{`"abi`": $Abi, `"commit`": `"$Commit`", `"date`": `"$Date`", `"version`": `"$Version`", `"wrapper`": $Wrapper, `"platform`": `"windows-x64`",`n" +
     " `"files`": {`"cssgsg_mozc.dll`": `"$DllSha`", `"mozc.data`": `"$DataSha`"}}`n"
 [IO.File]::WriteAllText((Join-Path $Stage 'manifest.json'), $Manifest, (New-Object Text.UTF8Encoding $false))
 if (Test-Path $Zip) { Remove-Item -Force $Zip }
@@ -30,6 +35,7 @@ Compress-Archive -Path (Join-Path $Stage '*') -DestinationPath $Zip
 Remove-Item -Recurse -Force $Stage
 
 $Tag = "mozc-$Abi-$($Date.Replace('-', ''))-$($Commit.Substring(0, 7))"
+if ($Wrapper -gt 0) { $Tag += "-w$Wrapper" }
 [IO.File]::WriteAllText((Join-Path $Dest 'TAG'), "$Tag`n")
 [IO.File]::WriteAllText((Join-Path $Dest 'TITLE'), "Mozc $Version ($Date)`n")
 Write-Host "${Tag}: Mozc $Version ($Date) -> $Zip ($([math]::Round((Get-Item $Zip).Length / 1MB, 1)) MB)"

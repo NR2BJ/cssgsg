@@ -3,7 +3,8 @@
 #   include/cssgsg_mozc.h     C API
 #   data/mozc.data            사전 데이터(OSS)
 #   bin/cssgsg_mozc_main.exe  확인용 명령줄 도구
-#   MOZC_VERSION              "<커밋> <커밋 날짜> <Mozc 버전>"
+#   MOZC_VERSION              "<커밋> <커밋 날짜> <Mozc 버전> <래퍼 판>"(엔진 호스트가 설치본에 든 엔진의 판을 안다)
+#                             래퍼 판은 mozc/cssgsg/WRAPPER_REVISION(맥 build.sh와 같다, CONCEPT §6.3).
 #
 # - Mozc 커밋은 tools/mozc/MOZC_COMMIT에 고정한다. 환경 변수 MOZC_COMMIT이 있으면 그것. MOZC_BAZEL_FLAGS로 Bazel 옵션을 더한다
 #   (워크플로의 --disk_cache 등).
@@ -67,8 +68,10 @@ try {
     Get-Content 'version.bzl' | ForEach-Object { if ($_ -match '^(\w+) = (\d+)') { $v[$Matches[1]] = [int]$Matches[2] } }
     $Version = '{0}.{1}.{2}.{3}' -f $v['MAJOR'], $v['MINOR'], $v['BUILD_OSS'], ($v['REVISION'] + 1)
     $Date = git -C $Src show -s --format=%cs HEAD
-    Set-Content -Path (Join-Path $Out 'MOZC_VERSION') -Value "$Commit $Date $Version" -Encoding Ascii
-    Write-Host "Mozc $Version ($Commit, $Date) -> $Out"
+    $Wrapper = (Get-Content (Join-Path $Root 'mozc\cssgsg\WRAPPER_REVISION') -Raw).Trim()
+    if ($Wrapper -notmatch '^\d+$') { throw "mozc/cssgsg/WRAPPER_REVISION must be a number: $Wrapper" }
+    Set-Content -Path (Join-Path $Out 'MOZC_VERSION') -Value "$Commit $Date $Version $Wrapper" -Encoding Ascii
+    Write-Host "Mozc $Version ($Commit, $Date, wrapper $Wrapper) -> $Out"
     Get-ChildItem (Join-Path $Out 'lib'), (Join-Path $Out 'data'), (Join-Path $Out 'bin') | Format-Table Name, Length
 }
 finally {

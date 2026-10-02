@@ -62,12 +62,16 @@ pub enum Request {
     CheckEngine,
 }
 
-/// Mozc 엔진 하나: 판(Mozc 버전), upstream 커밋 날짜·커밋, 내려받은 것인지(아니면 설치본에 든 것).
+/// Mozc 엔진 하나: 판(Mozc 버전), upstream 커밋 날짜·커밋, 래퍼 판, 내려받은 것인지(아니면 설치본에 든 것).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EngineBuild {
     pub version: String,
     pub date: String,
     pub commit: String,
+    /// cssgsg 래퍼(mozc/cssgsg, C API) 판(`mozc/cssgsg/WRAPPER_REVISION`, CONCEPT §6.3). 래퍼만 고쳐 같은 Mozc 커밋으로 다시
+    /// 빌드한 엔진은 이것만 크다. 판을 적지 않던 엔진은 0.
+    #[serde(default)]
+    pub wrapper: u32,
     pub downloaded: bool,
 }
 
@@ -189,6 +193,7 @@ mod tests {
                         version: "3.34.6239.101".into(),
                         date: "2026-09-28".into(),
                         commit: "a069a88d4cb5c011de0f9aebb6c149a1c808d904".into(),
+                        wrapper: 1,
                         downloaded: false,
                     }),
                     checked_at: Some(1_790_000_000),
@@ -200,6 +205,9 @@ mod tests {
             assert_eq!(decode::<Reply>(&encode(&r)), Some(r));
         }
         assert_eq!(decode::<Request>(b"{\"Nope\":1}"), None);
+        // 래퍼 판 전의 호스트가 보낸 엔진은 래퍼 판 0이다.
+        let old = r#"{"version":"3.34.6239.101","date":"2026-09-28","commit":"a069a88","downloaded":true}"#;
+        assert_eq!(serde_json::from_str::<EngineBuild>(old).map(|b| b.wrapper).ok(), Some(0));
         // 앞 판의 입력기가 보낸 Start(learn 없음)는 학습한다.
         assert_eq!(
             decode::<Request>("{\"Start\":{\"reading\":\"かな\"}}".as_bytes()),

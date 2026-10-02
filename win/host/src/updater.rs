@@ -1,7 +1,9 @@
 //! 새 Mozc 엔진 받기(맥 MozcUpdater의 윈도우판). 엔진 호스트가 뜨고 5분 뒤, 그다음 하루 한 번(그리고 설정 앱의 "지금 확인")
-//! GitHub 릴리스 목록을 보고, 이 C API 판의 더 새 엔진(`mozc-<판>-<yyyymmdd>-<커밋 7자리>` 태그의 `cssgsg-mozc-windows-x64.zip`)이
-//! 있으면 받는다. GitHub가 적은 SHA-256과 묶음 안 manifest.json의 파일별 해시를 확인하고 mozc-engines\<커밋>\에 둔다.
-//! 다음에 호스트가 뜰 때부터 쓴다(설정 앱 "지금 적용"은 호스트 다시 시작). 엔진 고르기는 [`crate::engines`].
+//! GitHub 릴리스 목록을 보고, 이 C API 판의 더 새 엔진(`mozc-<판>-<yyyymmdd>-<커밋 7자리>[-w<래퍼 판>]` 태그의
+//! `cssgsg-mozc-windows-x64.zip`)이 있으면 받는다. GitHub가 적은 SHA-256과 묶음 안 manifest.json의 파일별 해시를 확인하고
+//! mozc-engines\<커밋>[-w<래퍼 판>]\에 둔다. 다음에 호스트가 뜰 때부터 쓴다(설정 앱 "지금 적용"은 호스트 다시 시작).
+//! 엔진 고르기는 [`crate::engines`]. 래퍼 판 규칙은 맥 0.7.2와 같다(CONCEPT §6.3): 같은 커밋이면 래퍼 판이 큰 것이 새것이고,
+//! 래퍼 판이 없는 옛 모양 태그는 같은 커밋이면 받지 않는다(받아 보아야 판을 안다).
 //!
 //! 보내는 것은 목록 요청과 파일 받기뿐이다(User-Agent에 개인 정보 없음). 네트워크는 윈도우 WinHTTP, 해시는 BCrypt,
 //! 압축 풀기는 윈도우에 든 tar.exe(10 1803부터)를 쓴다.
@@ -31,6 +33,8 @@ pub struct Offer {
     pub abi: i32,
     pub date: String,
     pub commit_prefix: String,
+    /// 태그의 래퍼 판. 래퍼 판이 없는 옛 모양 태그면 None(받아 보아야 manifest로 안다).
+    pub wrapper: Option<u32>,
     pub url: String,
     pub digest: String,
 }
@@ -149,8 +153,8 @@ fn check(abi: i32, bundled_dir: &Path, info: &Mutex<EngineInfo>) -> Result<Strin
         return Err(format!("GitHub {status}"));
     }
     let releases: serde_json::Value = serde_json::from_slice(&body).map_err(|e| e.to_string())?;
-    let bad = engines::bad();
-    let Some(offer) = newest(&releases, abi, |commit| bad.iter().any(|b| b.starts_with(commit))) else {
+    let bad: Vec<(String, u32)> = engines::bad().iter().filter_map(|name| engines::identity(name)).collect();
+    let Some(offer) = newest(&releases, abi, &bad) else {
         return Ok("no engine for this C API".into());
     };
     let mut installed: Vec<EngineBuild> = engines::downloaded(abi).into_iter().map(|e| e.build).collect();
@@ -159,29 +163,45 @@ fn check(abi: i32, bundled_dir: &Path, info: &Mutex<EngineInfo>) -> Result<Strin
         installed.push(active);
     }
     if !wanted(&offer, &installed) {
-        return Ok(format!("up to date ({} {})", offer.date, offer.commit_prefix));
+        return Ok(format!("up to date ({} {} w{:?})", offer.date, offer.commit_prefix, offer.wrapper));
     }
     let engine = install(&offer, abi)?;
-    // 지금 쓰는 것과 새로 받은 것만 남긴다.
+    // 지금 쓰는 것과 새로 받은 것만 남긴다(폴더 이름으로).
     let active = info.lock().ok().and_then(|i| i.active.clone());
-    let keep: Vec<&str> = [Some(engine.build.commit.as_str()), active.as_ref().map(|a| a.commit.as_str())]
+    let keep: Vec<String> = [Some(&engine.build), active.as_ref()]
         .into_iter()
         .flatten()
+        .map(|b| engines::directory_name(&b.commit.to_ascii_lowercase(), b.wrapper))
         .collect();
     engines::prune(&keep);
-    Ok(format!("downloaded {} ({}, {})", engine.build.version, engine.build.date, &engine.build.commit[..7]))
+    Ok(format!(
+        "downloaded {} ({}, {}, wrapper {})",
+        engine.build.version,
+        engine.build.date,
+        &engine.build.commit[..7],
+        engine.build.wrapper
+    ))
 }
 
 /// 릴리스 하나 → 내놓은 엔진(태그 모양, 초안 아님, 윈도우 묶음과 GitHub 해시가 있을 때만).
+/// 태그는 `mozc-<C API 판>-<yyyymmdd>-<커밋 7자리 이상>`, 래퍼 판이 있으면 뒤에 `-w<판>`(숫자 1~6자리).
 pub fn offer(release: &serde_json::Value) -> Option<Offer> {
     if release["draft"].as_bool() == Some(true) {
         return None;
     }
     let tag = release["tag_name"].as_str()?.strip_prefix(TAG_PREFIX)?;
     let parts: Vec<&str> = tag.split('-').collect();
-    if parts.len() != 3 {
-        return None;
-    }
+    let wrapper = match parts.len() {
+        3 => None,
+        4 => {
+            let digits = parts[3].strip_prefix('w')?;
+            if digits.is_empty() || digits.len() > 6 || !digits.bytes().all(|b| b.is_ascii_digit()) {
+                return None;
+            }
+            Some(digits.parse().ok()?)
+        }
+        _ => return None,
+    };
     let abi: i32 = parts[0].parse().ok()?;
     let d = parts[1];
     if d.len() != 8 || !d.bytes().all(|b| b.is_ascii_digit()) {
@@ -200,29 +220,41 @@ pub fn offer(release: &serde_json::Value) -> Option<Offer> {
         abi,
         date: format!("{}-{}-{}", &d[..4], &d[4..6], &d[6..]),
         commit_prefix: commit.to_ascii_lowercase(),
+        wrapper,
         url: asset["browser_download_url"].as_str()?.into(),
         digest: digest.to_ascii_lowercase(),
     })
 }
 
-/// 이 판의 엔진 중 나쁜 엔진이 아닌 가장 새것(날짜로).
-pub fn newest(releases: &serde_json::Value, abi: i32, is_bad: impl Fn(&str) -> bool) -> Option<Offer> {
+/// 이 판의 엔진 중 나쁜 엔진이 아닌 가장 새것(날짜, 같으면 래퍼 판). `bad`: 나쁜 엔진의 (커밋, 래퍼 판).
+/// 래퍼 판을 모르는 옛 모양 태그는 같은 커밋의 나쁜 엔진이 있으면 건너뛴다(맥 newest).
+pub fn newest(releases: &serde_json::Value, abi: i32, bad: &[(String, u32)]) -> Option<Offer> {
     releases
         .as_array()?
         .iter()
         .filter_map(offer)
-        .filter(|o| o.abi == abi && !is_bad(&o.commit_prefix))
-        .max_by(|a, b| a.date.cmp(&b.date))
+        .filter(|o| {
+            o.abi == abi
+                && !bad.iter().any(|(commit, wrapper)| {
+                    commit.starts_with(&o.commit_prefix) && o.wrapper.is_none_or(|w| w == *wrapper)
+                })
+        })
+        .max_by(|a, b| (&a.date, a.wrapper.unwrap_or(0)).cmp(&(&b.date, b.wrapper.unwrap_or(0))))
 }
 
-/// 받을 만한가: 여기 있는 어느 것보다 새것이고 이미 있는 것이 아니다(맥 isWanted).
+/// 받을 만한가: 여기 있는 어느 것보다 새것이다. 같은 커밋이면 래퍼 판이 더 커야 한다(태그에 판이 없으면 같은 커밋은 받지 않는다,
+/// 맥 isWanted).
 pub fn wanted(offer: &Offer, installed: &[EngineBuild]) -> bool {
-    !installed
-        .iter()
-        .any(|b| b.commit.to_ascii_lowercase().starts_with(&offer.commit_prefix) || b.date >= offer.date)
+    installed.iter().all(|b| {
+        if b.commit.to_ascii_lowercase().starts_with(&offer.commit_prefix) {
+            offer.wrapper.is_some_and(|w| w > b.wrapper)
+        } else {
+            offer.date > b.date
+        }
+    })
 }
 
-/// 받아서 확인하고 mozc-engines\<커밋>\에 푼다.
+/// 받아서 확인하고 mozc-engines\<커밋>[-w<래퍼 판>]\에 푼다.
 fn install(offer: &Offer, abi: i32) -> Result<Engine, String> {
     let root = engines::root();
     std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
@@ -237,28 +269,33 @@ fn install(offer: &Offer, abi: i32) -> Result<Engine, String> {
     let _ = std::fs::remove_dir_all(&staging);
     std::fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
     let result = unpack_and_verify(&zip, &staging, offer, abi);
-    let commit = match result {
-        Ok(commit) => commit,
+    let (commit, wrapper) = match result {
+        Ok(identity) => identity,
         Err(e) => {
             let _ = std::fs::remove_dir_all(&staging);
             return Err(e);
         }
     };
-    let destination = root.join(&commit);
+    let destination = root.join(engines::directory_name(&commit.to_ascii_lowercase(), wrapper));
     let _ = std::fs::remove_dir_all(&destination);
     std::fs::rename(&staging, &destination).map_err(|e| e.to_string())?;
     engines::read_downloaded(&destination, abi).ok_or_else(|| "unpacked engine is incomplete".into())
 }
 
-/// 묶음을 풀고 매니페스트(판, 커밋·날짜, 파일 해시)를 확인한다. 커밋을 돌려준다.
-fn unpack_and_verify(zip: &[u8], staging: &Path, offer: &Offer, abi: i32) -> Result<String, String> {
-    let archive = staging.join("engine.zip");
-    std::fs::write(&archive, zip).map_err(|e| e.to_string())?;
-    let tar = std::env::var_os("SystemRoot")
+/// 윈도우에 든 tar.exe(bsdtar). PATH의 다른 tar(Git의 GNU tar 등)는 zip을 모른다.
+fn system_tar() -> PathBuf {
+    std::env::var_os("SystemRoot")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(r"C:\Windows"))
         .join("System32")
-        .join("tar.exe");
+        .join("tar.exe")
+}
+
+/// 묶음을 풀고 매니페스트(판, 커밋·날짜, 래퍼 판, 파일 해시)를 확인한다. (커밋, 래퍼 판)을 돌려준다.
+fn unpack_and_verify(zip: &[u8], staging: &Path, offer: &Offer, abi: i32) -> Result<(String, u32), String> {
+    let archive = staging.join("engine.zip");
+    std::fs::write(&archive, zip).map_err(|e| e.to_string())?;
+    let tar = system_tar();
     let status = {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -292,6 +329,20 @@ fn unpack_and_verify(zip: &[u8], staging: &Path, offer: &Offer, abi: i32) -> Res
     {
         return Err("the manifest's commit or date differs from the release".into());
     }
+    // 래퍼 판을 적지 않던 묶음은 0. 태그에 판이 있으면 같아야 한다.
+    let wrapper = match &manifest["wrapper"] {
+        serde_json::Value::Null => 0,
+        w => w
+            .as_u64()
+            .and_then(|w| u32::try_from(w).ok())
+            .ok_or("the manifest's wrapper revision isn't a number")?,
+    };
+    if offer.wrapper.is_some_and(|expected| expected != wrapper) {
+        return Err(format!(
+            "the manifest's wrapper revision {wrapper} differs from the release ({:?})",
+            offer.wrapper
+        ));
+    }
     for name in [LIBRARY, DATA] {
         let expected = manifest["files"][name].as_str().unwrap_or_default().to_ascii_lowercase();
         let data = std::fs::read(staging.join(name)).map_err(|e| format!("{name}: {e}"))?;
@@ -299,7 +350,7 @@ fn unpack_and_verify(zip: &[u8], staging: &Path, offer: &Offer, abi: i32) -> Res
             return Err(format!("{name}: SHA-256 doesn't match the manifest"));
         }
     }
-    Ok(commit)
+    Ok((commit, wrapper))
 }
 
 /// SHA-256(16진 소문자). 윈도우 BCrypt.
@@ -452,17 +503,55 @@ mod tests {
             release("win-v0.1.0", "cssgsg-setup.exe", false),
             release("mozc-1-2026-1005-bbbbbbb", ASSET, false),
         ]);
-        let o = newest(&list, 1, |_| false).unwrap();
+        let o = newest(&list, 1, &[]).unwrap();
         assert_eq!(
-            (o.date.as_str(), o.commit_prefix.as_str()),
-            ("2026-10-05", "bbbbbbb"),
+            (o.date.as_str(), o.commit_prefix.as_str(), o.wrapper),
+            ("2026-10-05", "bbbbbbb", None),
             "맥 묶음만·초안·다른 판은 뺀다"
         );
         assert_eq!(o.digest, "sha256:abcdef");
+        let bad = [("bbbbbbbffff".to_string(), 0)];
+        assert_eq!(newest(&list, 1, &bad).unwrap().commit_prefix, "a069a88", "나쁜 엔진은 건너뛴다");
+    }
+
+    #[test]
+    fn tags_may_carry_a_wrapper_revision() {
+        let wrapper = |tag: &str| offer(&release(tag, ASSET, false)).map(|o| o.wrapper);
+        assert_eq!(wrapper("mozc-1-20261005-bbbbbbb"), Some(None));
+        assert_eq!(wrapper("mozc-1-20261005-bbbbbbb-w1"), Some(Some(1)));
+        assert_eq!(wrapper("mozc-1-20261005-bbbbbbb-w123456"), Some(Some(123_456)));
+        for tag in [
+            "mozc-1-20261005-bbbbbbb-w",
+            "mozc-1-20261005-bbbbbbb-wx",
+            "mozc-1-20261005-bbbbbbb-1",
+            "mozc-1-20261005-bbbbbbb-w1234567",
+            "mozc-1-20261005-bbbbbbb-w+1",
+            "mozc-1-20261005-bbbbbbb-w1-x",
+        ] {
+            assert_eq!(wrapper(tag), None, "{tag}");
+        }
+    }
+
+    #[test]
+    fn the_newest_offer_follows_the_date_then_the_wrapper() {
+        let list = serde_json::json!([
+            release("mozc-1-20261005-bbbbbbb", ASSET, false),
+            release("mozc-1-20261005-bbbbbbb-w2", ASSET, false),
+            release("mozc-1-20261005-bbbbbbb-w1", ASSET, false),
+            release("mozc-1-20260928-a069a88-w9", ASSET, false),
+        ]);
+        let pick = |bad: &[(String, u32)]| newest(&list, 1, bad).map(|o| (o.commit_prefix, o.wrapper));
+        assert_eq!(pick(&[]), Some(("bbbbbbb".into(), Some(2))), "같은 날이면 래퍼 판이 큰 것");
+        let commit = "bbbbbbbffff".to_string();
         assert_eq!(
-            newest(&list, 1, |c| c == "bbbbbbb").unwrap().commit_prefix,
-            "a069a88",
-            "나쁜 엔진은 건너뛴다"
+            pick(&[(commit.clone(), 2)]),
+            Some(("bbbbbbb".into(), Some(1))),
+            "나쁜 엔진은 커밋과 래퍼 판으로"
+        );
+        assert_eq!(
+            pick(&[(commit.clone(), 2), (commit, 1)]),
+            Some(("a069a88".into(), Some(9))),
+            "판을 모르는 옛 태그는 같은 커밋의 나쁜 엔진이 있으면 건너뛴다"
         );
     }
 
@@ -472,6 +561,7 @@ mod tests {
             abi: 1,
             date: "2026-10-05".into(),
             commit_prefix: "bbbbbbb".into(),
+            wrapper: None,
             url: String::new(),
             digest: String::new(),
         };
@@ -479,13 +569,77 @@ mod tests {
             version: "3.34.6239.101".into(),
             date: "2026-09-28".into(),
             commit: "a069a88d4cb5c011de0f9aebb6c149a1c808d904".into(),
+            wrapper: 0,
             downloaded: false,
         };
         assert!(wanted(&offer, std::slice::from_ref(&bundled)));
         let same = EngineBuild { commit: "bbbbbbbffff".into(), date: "2026-10-05".into(), ..bundled.clone() };
-        assert!(!wanted(&offer, &[bundled.clone(), same]), "이미 받았다");
-        let later = EngineBuild { date: "2026-10-09".into(), commit: "ccc".into(), ..bundled };
+        assert!(!wanted(&offer, &[bundled.clone(), same.clone()]), "이미 받았다");
+        let later = EngineBuild { date: "2026-10-09".into(), commit: "ccc".into(), ..bundled.clone() };
         assert!(!wanted(&offer, &[later]), "더 새것이 있다");
+
+        // 같은 커밋: 태그의 래퍼 판이 더 커야 받는다.
+        let rebuilt = Offer { wrapper: Some(1), ..offer.clone() };
+        assert!(wanted(&rebuilt, &[bundled.clone(), same.clone()]), "래퍼만 고친 엔진");
+        let same_w1 = EngineBuild { wrapper: 1, ..same };
+        assert!(!wanted(&rebuilt, &[bundled.clone(), same_w1.clone()]), "같은 래퍼 판은 이미 받았다");
+        assert!(!wanted(&offer, &[bundled, same_w1]), "판을 모르는 옛 태그는 같은 커밋이면 받지 않는다");
+    }
+
+    /// 받은 묶음의 manifest 래퍼 판은 태그와 같아야 한다(태그에 판이 없으면 manifest의 판을 쓴다, 없으면 0).
+    #[test]
+    fn the_manifest_wrapper_must_match_the_tag() {
+        let dir = std::env::temp_dir().join(format!("cssgsg-updater-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let src = dir.join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join(LIBRARY), b"dll").unwrap();
+        std::fs::write(src.join(DATA), b"data").unwrap();
+        let commit = "bbbbbbbffff0000000000000000000000000000a";
+        let zip = |wrapper: &str| {
+            let manifest = format!(
+                r#"{{"abi": 1, "commit": "{commit}", "date": "2026-10-05", "version": "3.34.6300.101"{wrapper},
+                 "files": {{"{LIBRARY}": "{}", "{DATA}": "{}"}}}}"#,
+                sha256_hex(b"dll").unwrap(),
+                sha256_hex(b"data").unwrap()
+            );
+            std::fs::write(src.join(MANIFEST), manifest).unwrap();
+            let out = dir.join("engine.zip");
+            let status = std::process::Command::new(system_tar())
+                .args(["--format=zip", "-cf"])
+                .arg(&out)
+                .arg("-C")
+                .arg(&src)
+                .args([LIBRARY, DATA, MANIFEST])
+                .status()
+                .unwrap();
+            assert!(status.success());
+            std::fs::read(out).unwrap()
+        };
+        let offer = |wrapper: Option<u32>| Offer {
+            abi: 1,
+            date: "2026-10-05".into(),
+            commit_prefix: "bbbbbbb".into(),
+            wrapper,
+            url: String::new(),
+            digest: String::new(),
+        };
+        let mut n = 0;
+        let mut verify = |zip: &[u8], offer: &Offer| {
+            n += 1;
+            let staging = dir.join(format!("staging-{n}"));
+            std::fs::create_dir_all(&staging).unwrap();
+            unpack_and_verify(zip, &staging, offer, 1).map(|(_, wrapper)| wrapper)
+        };
+        let w1 = zip(r#", "wrapper": 1"#);
+        assert_eq!(verify(&w1, &offer(Some(1))), Ok(1));
+        assert!(verify(&w1, &offer(Some(2))).is_err(), "태그와 다른 판");
+        assert_eq!(verify(&w1, &offer(None)), Ok(1), "옛 모양 태그는 manifest의 판");
+        let old = zip("");
+        assert_eq!(verify(&old, &offer(None)), Ok(0), "판을 적지 않던 묶음은 0");
+        assert!(verify(&old, &offer(Some(1))).is_err());
+        assert!(verify(&zip(r#", "wrapper": "1""#), &offer(Some(1))).is_err(), "판은 숫자");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

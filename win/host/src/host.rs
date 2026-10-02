@@ -431,7 +431,7 @@ fn load_engine(options: &Options) -> (Box<dyn Converter>, Option<String>, Option
             Err(e) => {
                 log(&format!("Mozc {} unavailable ({e})", engine.dir.display()));
                 if engine.build.downloaded {
-                    engines::mark_bad(&engine.build.commit);
+                    engines::mark_bad(&engine.build);
                 }
             }
         }

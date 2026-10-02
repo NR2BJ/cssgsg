@@ -1,6 +1,6 @@
 # 윈도우용 Mozc 엔진(cssgsg_mozc.dll)을 GitHub 컴퓨터에서 빌드하고 시험해서 묶음(cssgsg-mozc-windows-x64.zip)을 만든다.
 # - 손으로 돌리거나(workflow_dispatch), 맥 엔진 워크플로(mozc-component.yml)가 새 엔진을 낼 때 같은 커밋으로 부른다(workflow_call).
-# - publish가 켜져 있으면 맥 엔진과 같은 태그(mozc-<판>-<yyyymmdd>-<커밋 7자리>)의 엔진 릴리스에 묶음을 올린다. 그 릴리스가
+# - publish가 켜져 있으면 맥 엔진과 같은 태그(mozc-<판>-<yyyymmdd>-<커밋 7자리>[-w<래퍼 판>])의 엔진 릴리스에 묶음을 올린다. 그 릴리스가
 #   아직 없으면 만든다(prerelease, "최신" 아님). 윈도우 엔진 호스트가 하루 한 번 이 묶음을 찾아 받는다(win/host/src/updater.rs).
 #   맥 입력기(MozcUpdater)는 이름이 cssgsg-mozc.zip인 것만 받아서 이 묶음은 보지 않는다.
 #

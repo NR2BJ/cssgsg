@@ -107,16 +107,26 @@ static class HostClient
         return reply.Body?["Hello"]?["engine"]?.GetValue<string>() ?? "";
     }
 
-    /// Mozc 엔진 하나(win/ipc EngineBuild).
-    public sealed record EngineBuild(string Version, string Date, string Commit, bool Downloaded);
+    /// Mozc 엔진 하나(win/ipc EngineBuild). Wrapper는 cssgsg 래퍼 판(CONCEPT §6.3, 옛 호스트는 보내지 않는다: 0).
+    public sealed record EngineBuild(string Version, string Date, string Commit, int Wrapper, bool Downloaded)
+    {
+        /// 날짜, 래퍼 판이 있으면 같이("2026-09-28, 래퍼 1"). 래퍼만 고친 엔진은 버전·날짜가 같아서 판으로 가린다(맥 shownDate).
+        public string ShownDate => ShowDate(Date, Wrapper);
+    }
+
+    public static string ShowDate(string? date, int wrapper) =>
+        wrapper > 0 ? $"{date}, " + Lang.T($"래퍼 {wrapper}", $"wrapper {wrapper}", $"ラッパー {wrapper}") : date ?? "";
 
     /// 엔진 업데이트 상태(win/ipc EngineInfo). 시각은 유닉스 초.
     public sealed record EngineInfo(EngineBuild? Active, EngineBuild? Pending, bool Checking, long? CheckedAt, long? FailedAt, string? Failure);
 
     static EngineBuild? Build(JsonNode? n) => n is JsonObject o
-        ? new EngineBuild(o["version"]?.GetValue<string>() ?? "", o["date"]?.GetValue<string>() ?? "",
-            o["commit"]?.GetValue<string>() ?? "", o["downloaded"]?.GetValue<bool>() ?? false)
+        ? new EngineBuild(Text(o["version"]), Text(o["date"]), Text(o["commit"]),
+            o["wrapper"] is JsonValue w && w.TryGetValue<int>(out var wrapper) ? wrapper : 0,
+            o["downloaded"] is JsonValue d && d.TryGetValue<bool>(out var downloaded) && downloaded)
         : null;
+
+    static string Text(JsonNode? n) => n is JsonValue v && v.TryGetValue<string>(out var s) ? s : "";
 
     /// 호스트의 엔진 상태. 호스트가 없으면 NoHost, 이 요청을 모르는 옛 호스트면 Failed.
     public static async Task<(HostClient.Status Status, EngineInfo? Info)> EngineStatusAsync()
