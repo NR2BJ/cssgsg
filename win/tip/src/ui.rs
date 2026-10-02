@@ -10,6 +10,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Once;
 
+use crate::uiless::GameCandidates;
 use cssgsg_core::Mode;
 use cssgsg_core::config::{HudPosition, WindowsConfig};
 use cssgsg_core::engine::{CAND_GRID_COLUMNS, CAND_GRID_PAGE, CAND_LIST_PAGE, Candidates};
@@ -694,11 +695,17 @@ pub struct Screen {
     japanese: bool,
     /// 마지막으로 잰 자리(이번에 못 재면 이것을 쓴다).
     last: Option<RECT>,
+    /// 게임 스레드(UILess 전용)면 후보를 먼저 앱에 알린다. 앱이 그리면 우리 후보창은 띄우지 않는다.
+    game: Option<GameCandidates>,
 }
 
 impl Screen {
     pub fn set_settings(&mut self, settings: WindowsConfig) {
         self.settings = settings;
+    }
+
+    pub fn set_game(&mut self, game: Option<GameCandidates>) {
+        self.game = game;
     }
 
     /// 엔진 출력의 화면 변경을 받아 둔다. `hud`는 이 앱에서 모드를 바꿨을 때만(다른 앱을 따라갈 때는 보이지 않는다).
@@ -724,9 +731,18 @@ impl Screen {
         let rect = rect.or(self.last);
         match self.pending_candidates.take() {
             Some(Some(c)) => {
-                self.candidates.show(&c, self.japanese, rect, self.settings.candidate_font_size as i32)
+                if self.game.as_mut().is_some_and(|g| g.show(&c)) {
+                    self.candidates.hide();
+                } else {
+                    self.candidates.show(&c, self.japanese, rect, self.settings.candidate_font_size as i32)
+                }
             }
-            Some(None) => self.candidates.hide(),
+            Some(None) => {
+                if let Some(g) = self.game.as_mut() {
+                    g.hide();
+                }
+                self.candidates.hide()
+            }
             None => {}
         }
         if let Some(mode) = self.pending_hud.take() {
@@ -741,6 +757,9 @@ impl Screen {
     /// 조합이 끝났다(포커스 이동, 앱이 끝냄, 입력기 끄기): 후보창을 닫는다.
     pub fn close_candidates(&mut self) {
         self.pending_candidates = None;
+        if let Some(g) = self.game.as_mut() {
+            g.hide();
+        }
         self.candidates.hide();
     }
 }

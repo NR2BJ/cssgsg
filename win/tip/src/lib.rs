@@ -24,6 +24,7 @@ mod plan;
 mod register;
 mod service;
 mod ui;
+mod uiless;
 
 use std::ffi::c_void;
 use std::io::Write;

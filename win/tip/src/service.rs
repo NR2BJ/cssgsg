@@ -46,6 +46,7 @@ use crate::keys::{self, Clock};
 use crate::langbar::ModeButton;
 use crate::plan::plan;
 use crate::ui::Screen;
+use crate::uiless::GameCandidates;
 use crate::{
     GUID_COMPARTMENT_MODE, GUID_DISPLAY_ATTRIBUTE_FOCUSED, GUID_DISPLAY_ATTRIBUTE_INPUT, debug_log, display,
     read_debug_flag,
@@ -356,6 +357,12 @@ impl TextService_Impl {
             synced: (0, 0),
             game: flags & TF_TMAE_UIELEMENTENABLEDONLY != 0,
         });
+        // 게임(UILess 전용)이면 후보를 게임이 그리게 넘긴다(uiless.rs).
+        if flags & TF_TMAE_UIELEMENTENABLEDONLY != 0
+            && let Ok(mut screen) = self.screen.try_borrow_mut()
+        {
+            screen.set_game(GameCandidates::new(thread_mgr));
+        }
 
         let keystrokes: ITfKeystrokeMgr = thread_mgr.cast()?;
         unsafe { keystrokes.AdviseKeyEventSink(client_id, &self.to_interface::<ITfKeyEventSink>(), true)? };
@@ -461,6 +468,10 @@ impl TextService_Impl {
     fn deactivate(&self) {
         cancel_engine_timer();
         self.end_composition();
+        if let Ok(mut screen) = self.screen.try_borrow_mut() {
+            screen.close_candidates();
+            screen.set_game(None);
+        }
         let Some(a) = self.state.try_borrow_mut().ok().and_then(|mut s| s.take()) else { return };
         unsafe {
             if let Ok(keystrokes) = a.thread_mgr.cast::<ITfKeystrokeMgr>() {
@@ -781,8 +792,8 @@ impl TextService_Impl {
             self.refresh_screen(Some(context));
             return true;
         }
-        let Some((client_id, attrs)) =
-            self.state.try_borrow().ok().and_then(|s| s.as_ref().map(|a| (a.client_id, a.attrs)))
+        let Some((client_id, attrs, game)) =
+            self.state.try_borrow().ok().and_then(|s| s.as_ref().map(|a| (a.client_id, a.attrs, a.game)))
         else {
             return false;
         };
@@ -793,6 +804,7 @@ impl TextService_Impl {
             self.to_interface::<ITfCompositionSink>(),
             attrs,
             Some(self.ui_hook()),
+            game,
         );
         let ran = session.ran();
         let session: ITfEditSession = session.into();

@@ -13,12 +13,13 @@ use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::TextServices::{
     GUID_PROP_ATTRIBUTE, GUID_PROP_INPUTSCOPE, INSERT_TEXT_AT_SELECTION_FLAGS, IS_NUMERIC_PASSWORD,
     IS_PASSWORD, IS_PRIVATE, ITfComposition, ITfCompositionSink, ITfContext, ITfContextComposition,
-    ITfEditSession, ITfEditSession_Impl, ITfInputScope, ITfInsertAtSelection, ITfRange, InputScope,
-    TF_AE_END, TF_ANCHOR_END, TF_ANCHOR_START, TF_DEFAULT_SELECTION, TF_IAS_QUERYONLY, TF_SELECTION,
-    TF_SELECTIONSTYLE,
+    ITfEditSession, ITfEditSession_Impl, ITfInputScope, ITfInsertAtSelection, ITfRange, ITfRangeACP,
+    InputScope, TF_AE_END, TF_ANCHOR_END, TF_ANCHOR_START, TF_DEFAULT_SELECTION, TF_IAS_QUERYONLY,
+    TF_SELECTION, TF_SELECTIONSTYLE,
 };
 use windows::core::{BOOL, IUnknown, Interface, Result, implement};
 
+use crate::debug_log;
 use crate::guard::guarded;
 use crate::plan::{Op, Segment};
 
@@ -55,6 +56,8 @@ pub struct ApplyOps {
     focus: Cell<Option<(usize, usize)>>,
     /// 세션이 돌았으면 true(RequestEditSession 안에서 바로 돌았는지 보는 데 쓴다).
     ran: Rc<Cell<bool>>,
+    /// 게임 스레드(UILess 전용): 조합을 GetSelection의 커서 자리에서 시작한다(아래 start).
+    game: bool,
 }
 
 impl ApplyOps {
@@ -65,8 +68,9 @@ impl ApplyOps {
         sink: ITfCompositionSink,
         attrs: Attrs,
         hook: Option<UiHook>,
+        game: bool,
     ) -> Self {
-        Self { context, ops, slot, sink, attrs, hook, focus: Cell::new(None), ran: Rc::default() }
+        Self { context, ops, slot, sink, attrs, hook, focus: Cell::new(None), ran: Rc::default(), game }
     }
 
     pub fn ran(&self) -> Rc<Cell<bool>> {
@@ -137,11 +141,25 @@ impl ApplyOps {
         self.slot.try_borrow_mut().ok()?.take()
     }
 
-    /// 커서 자리에서 조합을 시작한다.
+    /// 커서 자리에서 조합을 시작한다. 보통은 InsertTextAtSelection(QUERYONLY)이 알려 주는 자리(MS 예제 입력기와 같다).
+    /// 게임(UILess 전용)은 GetSelection의 자리: 오버워치에서 조합이 입력칸 맨 앞에 그려져 이미 쓴 글자를 가렸다(2026-10-02,
+    /// 0.2.3). 게임이 QUERYONLY에 0을 돌려준다고 보고 바꿔 본다. 자리 숫자는 개발자 기록에 남긴다(글자는 안 남긴다).
     unsafe fn start(&self, ec: u32) -> Result<Composing> {
         unsafe {
             let insert: ITfInsertAtSelection = self.context.cast()?;
-            let range = insert.InsertTextAtSelection(ec, TF_IAS_QUERYONLY, &[])?;
+            let at_insert = insert.InsertTextAtSelection(ec, TF_IAS_QUERYONLY, &[])?;
+            let selection = selection_range(ec, &self.context);
+            debug_log(&format!(
+                "composition start: insert point {:?}, selection {:?}, document end {:?}{}",
+                extent(ec, &at_insert),
+                selection.as_ref().and_then(|s| extent(ec, s)),
+                self.context.GetEnd(ec).ok().and_then(|end| extent(ec, &end)).map(|(start, _)| start),
+                if self.game { " (game: starting at the selection)" } else { "" }
+            ));
+            let range = match selection {
+                Some(s) if self.game => s,
+                _ => at_insert,
+            };
             let compositions: ITfContextComposition = self.context.cast()?;
             let composition = compositions.StartComposition(ec, &range, &self.sink)?;
             let composing = Composing { composition, context: self.context.clone() };
@@ -174,6 +192,29 @@ impl ApplyOps {
             }
         }
         Ok(())
+    }
+}
+
+/// 지금 선택 영역(커서). 없으면 None.
+unsafe fn selection_range(ec: u32, context: &ITfContext) -> Option<ITfRange> {
+    unsafe {
+        let mut selection = [TF_SELECTION::default()];
+        let mut fetched = 0;
+        context.GetSelection(ec, TF_DEFAULT_SELECTION, &mut selection, &mut fetched).ok()?;
+        if fetched == 0 {
+            return None;
+        }
+        ManuallyDrop::into_inner(std::mem::take(&mut selection[0].range))
+    }
+}
+
+/// 범위의 (문서 앞에서 몇 번째 UTF-16 단위, 길이). ACP 문서가 아니면 None. 개발자 기록용.
+unsafe fn extent(_ec: u32, range: &ITfRange) -> Option<(i32, i32)> {
+    unsafe {
+        let acp: ITfRangeACP = range.cast().ok()?;
+        let (mut start, mut len) = (0, 0);
+        acp.GetExtent(&mut start, &mut len).ok()?;
+        Some((start, len))
     }
 }
 

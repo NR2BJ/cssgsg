@@ -765,8 +765,15 @@ k     = { cho = "ㄱ" }
     "EN" 쿼티만 나왔다. MS 한국어·일본어 입력기는 됐고 일본어 후보창은 게임이 그렸다. `win/tip/examples/uiless_host.rs`가 게임처럼
     (창보다 먼저 UILess 전용으로 켜고, 키를 ITfKeystrokeMgr로 넘긴다) 켜서 0.2.1은 DLL이 안 들어오고 고친 판은 "activated (flags 0x4)"인
     것을 VM에서 확인했다. 그런 스레드(`Active::game`)에서 입력칸이 꺼져 있으면 수식키 탭 전환을 하지 않는다. TSF는 문맥(입력칸) 없이는 키를
-    입력기에 넘기지 않아서(지금까지 기록에 문맥 없는 키 0번) 플레이 화면의 Shift는 원래 입력기에 오지 않는다. 남은 것: 게임이 우리 후보를
-    그리게 하는 ITfUIElementMgr·ITfCandidateListUIElement(지금은 우리 창).
+    입력기에 넘기지 않아서(지금까지 기록에 문맥 없는 키 0번) 플레이 화면의 Shift는 원래 입력기에 오지 않는다.
+  - 0.2.3 오버워치 후기(2026-10-02 사용자): 게임 안에서 켜지고(tasklist에 Overwatch.exe, 기록 "activated (flags 0x4)"), 채팅에서 모드
+    전환·단축키·Win+Space가 되고 플레이 화면에서는 Shift로 안 바뀐다. 기록의 "lparam 0x…0001 → 0x…0000"으로 보아 오버워치의 입력칸은 IMM32
+    (CUAS)이고 TSF는 UILess(후보)만 쓴다(SDL 같은 방식). 남은 문제 셋: ① 조합 중 글자가 입력칸 맨 앞에 그려져 이미 쓴 글자를 가린다
+    ② 한자·일본어 후보창이 모니터 오른쪽 아래(우리 창) ③ 모드 HUD가 안 보인다.
+  - 0.2.4: 게임 스레드는 후보를 `ITfUIElementMgr::BeginUIElement`로 알리고 앱이 그린다고 하면(show = FALSE) 우리 창을 띄우지 않는다
+    (`win/tip/src/uiless.rs`, ITfCandidateListUIElement: 목록, 고른 것, 페이지(목록 9·격자 30), 한자는 뜻을 붙여 "國 나라 국"). 바뀌면
+    UpdateUIElement, 닫히면 EndUIElement. 보통 앱은 지금처럼 우리 창. ①은 원인을 모른다: 게임 스레드에서는 조합을 GetSelection 자리에서
+    시작하게 바꾸고(QUERYONLY가 0을 준다는 가정), 모든 앱에서 조합 시작 때 자리(삽입점·커서·문서 끝, 숫자만)를 기록한다.
   - 런타임에는 `GetActiveFlags`로 분기한다(SECUREMODE / IMMERSIVEMODE / CONSOLE / UIELEMENTENABLEDONLY).
   - 설치는 레지스트리 직접 기록이 아니라 `RegisterProfile` + `InstallLayoutOrTip`으로 한다.
 - **M3a에서 확인한 것(2026-10-01, 윈도우 11 25H2 VM, `win/tip`)**
