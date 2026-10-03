@@ -170,7 +170,7 @@ mod imp {
                     return LRESULT(0);
                 }
                 WM_IME_ENDCOMPOSITION => {
-                    println!("  ENDCOMPOSITION");
+                    println!("  ENDCOMPOSITION (comp={:?})", comp_string(hwnd, GCS_COMPSTR));
                     return LRESULT(0);
                 }
                 WM_IME_COMPOSITION => {
@@ -208,7 +208,14 @@ mod imp {
                 }
                 WM_IME_NOTIFY => println!("  NOTIFY {:#x} {:#x}", wparam.0, lparam.0),
                 // 앱이 언어 바뀜을 아는 길.
-                0x0051 => println!("  INPUTLANGCHANGE charset {} layout {:#010x}", wparam.0, lparam.0 as u32),
+                // 언어가 바뀔 때 앱이 다시 읽을 수 있는 조합·확정 문자열(남아 있으면 앱이 그 글자를 조합 중으로 볼 수 있다).
+                0x0051 => println!(
+                    "  INPUTLANGCHANGE charset {} layout {:#010x} (comp={:?} result={:?})",
+                    wparam.0,
+                    lparam.0 as u32,
+                    comp_string(hwnd, GCS_COMPSTR),
+                    comp_string(hwnd, GCS_RESULTSTR)
+                ),
                 0x0281 => println!("  IME_SETCONTEXT {} {:#x}", wparam.0, lparam.0 as u32),
                 0x0285 => println!("  IME_SELECT {} {:#010x}", wparam.0, lparam.0 as u32),
                 0x0288 => println!("  IME_REQUEST {:#x}", wparam.0),

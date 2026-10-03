@@ -434,6 +434,41 @@ impl ITfEditSession_Impl for ReadInputScope_Impl {
     }
 }
 
+/// 조합 글자를 `text`로 확정하되 조합은 끝내지 않는다: 조합을 빈 채로 글자 뒤로 옮긴다. 끝내기는 다음 세션
+/// ([`EndComposition`])에서 한다. 한국어 CUAS는 같은 세션에서 조합을 끝내면 조합 끝(ENDCOMPOSITION)이 확정(RESULTSTR)보다
+/// 먼저 간다(MS 한국어 입력기는 확정 → 끝).
+#[implement(ITfEditSession)]
+pub struct Finalize {
+    composing: Composing,
+    text: Vec<u16>,
+}
+
+impl Finalize {
+    pub fn new(composing: Composing, text: Vec<u16>) -> Self {
+        Self { composing, text }
+    }
+}
+
+impl ITfEditSession_Impl for Finalize_Impl {
+    fn DoEditSession(&self, ec: u32) -> Result<()> {
+        guarded(
+            || Err(E_UNEXPECTED.into()),
+            || unsafe {
+                let c = &self.composing;
+                let range = c.composition.GetRange()?;
+                range.SetText(ec, 0, &self.text)?;
+                if let Ok(property) = c.context.GetProperty(&GUID_PROP_ATTRIBUTE) {
+                    let _ = property.Clear(ec, &range);
+                }
+                caret_at_end(ec, &c.context, &range)?;
+                let end = range.Clone()?;
+                end.Collapse(ec, TF_ANCHOR_END)?;
+                c.composition.ShiftStart(ec, &end)
+            },
+        )
+    }
+}
+
 /// 조합을 그 자리에서 끝낸다(포커스가 옮겨 갈 때, 입력기를 끌 때). 글자는 확정된 채로 남는다.
 #[implement(ITfEditSession)]
 pub struct EndComposition {

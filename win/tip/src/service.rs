@@ -34,7 +34,7 @@ use windows::Win32::UI::TextServices::{
     ITfKeystrokeMgr, ITfLangBarItemButton, ITfLangBarItemMgr, ITfSource, ITfTextInputProcessor_Impl,
     ITfTextInputProcessorEx, ITfTextInputProcessorEx_Impl, ITfThreadMgr, ITfThreadMgrEventSink,
     ITfThreadMgrEventSink_Impl, TF_E_SYNCHRONOUS, TF_ES_ASYNCDONTCARE, TF_ES_READ, TF_ES_READWRITE,
-    TF_ES_SYNC, TF_INPUTPROCESSORPROFILE, TF_IPPMF_FORPROCESS, TF_IPPMF_FORSESSION,
+    TF_ES_SYNC, TF_INPUTPROCESSORPROFILE, TF_IPPMF_ENABLEPROFILE, TF_IPPMF_FORPROCESS, TF_IPPMF_FORSESSION,
     TF_PROFILETYPE_INPUTPROCESSOR, TF_SD_READONLY, TF_TMAE_UIELEMENTENABLEDONLY, TS_SS_NOHIDDENTEXT,
     TS_SS_TRANSITORY,
 };
@@ -47,7 +47,7 @@ use windows::core::{
 };
 
 use crate::edit::{
-    ApplyOps, Attrs, EndComposition, GameEdit, Measure, ReadInputScope, ScopeRead, Slot, UiHook,
+    ApplyOps, Attrs, EndComposition, Finalize, GameEdit, Measure, ReadInputScope, ScopeRead, Slot, UiHook,
 };
 use crate::guard::{guarded, poisoned};
 use crate::host::{self, HostConverter, HostLink};
@@ -561,13 +561,16 @@ impl TextService_Impl {
                 flags,
             )
         };
+        // TF_IPPMF_ENABLEPROFILE: 일본어 프로필은 기본 사용 끔으로 등록한다(register.rs). 일본어가 깔린 PC에서 꺼진 프로필을 켜라고 하면
+        // 윈도우가 우리 입력기를 끄고 그 언어의 다른 입력기(MS IME)를 켰다(가나 대신 쿼티, VM). 켜면서 바꾸면 언어 목록은 그대로다.
+        let enable = TF_IPPMF_ENABLEPROFILE;
         let result = if changed.is_some() {
-            activate(TF_IPPMF_FORSESSION).or_else(|e| {
+            activate(TF_IPPMF_FORSESSION | enable).or_else(|e| {
                 debug_log(&format!("profile for the session: {e:?}, trying this app only"));
-                activate(TF_IPPMF_FORPROCESS)
+                activate(TF_IPPMF_FORPROCESS | enable)
             })
         } else {
-            activate(TF_IPPMF_FORPROCESS)
+            activate(TF_IPPMF_FORPROCESS | enable)
         };
         debug_log(&format!(
             "profile {now:#06x} -> {want:#06x} for {mode:?} ({}): {result:?}",
@@ -776,7 +779,7 @@ impl TextService_Impl {
         if let Some(((reading, text), link)) = pick {
             host::report_pick(&link, &reading, &text);
         }
-        self.after(&out, context.is_some_and(cuas));
+        self.after(&out, context);
         if let Ok(mut seen) = self.seen.try_borrow_mut() {
             *seen = Some(Seen { id, out: out.clone(), applied: false, keyed: actual, taken: false });
         }
@@ -952,23 +955,32 @@ impl TextService_Impl {
     }
 
     /// 모드가 바뀌었으면 전역 칸·입력 모드 칸·아이콘에 알린다. 일본어를 나가면 Caps Lock을 끈다.
-    /// `cuas`: 이 출력을 넣을 입력칸이 CUAS 문서다.
-    fn after(&self, out: &Output, cuas: bool) {
+    /// `context`: 이 출력을 넣을 입력칸.
+    fn after(&self, out: &Output, context: Option<&ITfContext>) {
+        let cuas = context.is_some_and(cuas);
         if let Some(mode) = out.mode {
+            // 모드를 바꾸며 확정이 나왔다 = 엔진은 조합 중이었고 그 조합은 문서에 있다. 모드를 알리고(입력 모드 칸) 프로필을 바꾸면
+            // 앱이 그 조합을 스스로 끝낸다: CUAS는 입력 모드 칸이 바뀔 때, TSF 앱(Edge)은 프로필이 바뀔 때. 그다음 우리가 또 확정하면
+            // 두 번 들어갔다("안안日本語", 2026-10-03). 그래서 조합을 먼저 우리가 다룬다.
+            // - CUAS에서 한국어를 떠나며 입력 언어가 바뀐다(한→일): 한국어 조합은 확정하지 않고 지운 뒤 바꾸고, 그 글자는 이 키를
+            //   다룰 때 새 언어에서 넣는다(apply: 시작 → 확정 → 끝). 한국어 CUAS는 우리 조합을 어떻게 끝내도 조합 끝을 확정보다 먼저
+            //   보내고(MS 한국어는 확정 → 끝), 그 뒤 언어가 바뀌면 오버워치가 그 글자를 조합 중으로 남겼다(이가 → 이가가, 지워지지
+            //   않고 방향키가 안 됨).
+            // - 그 밖의 CUAS: 확정 → 끝으로 먼저 끝낸다(finish_before_switch). 이 키의 확정은 넣지 않는다.
+            // - TSF 앱: 프로필을 바꾸는 사이 우리 조합이 끝났으면 이 키의 확정은 넣지 않는다.
+            let commit = !out.commit.is_empty();
+            let from = profile_mgr().ok().and_then(|p| active_language(&p));
+            let leaving_korean = from == Some(LANGID_KO_KR) && profile_language(mode) != LANGID_KO_KR;
+            let canceled =
+                cuas && commit && leaving_korean && context.is_some_and(|c| self.cancel_composition(c));
+            let finished = cuas && commit && !canceled && self.finish_before_switch(&out.commit);
             self.show_mode(mode, true);
-            // 프로필은 바로 바꾼다(다음 키가 새 언어로 오게). 이 키의 확정은 아직 문서에 넣기 전이다. CUAS는 입력 언어가 바뀌면
-            // 남은 조합을 그 자리에서 확정한다(조합 중에 프로필만 바꾸면 결과가 한 번, examples/imm_spy). 우리가 따로 확정하면
-            // 언어가 바뀐 뒤 CUAS가 그 글자를 한 번 더 보냈다(조합 중 한→일: "안안日本語", 2026-10-03). 그래서 언어를 바꿔 앱이
-            // 조합을 끝내면 이 키의 같은 확정은 넣지 않고 앱에 맡긴다([`Self::apply`]). 이 키도 잡지 않는다([`Self::test`]).
             let composing = self.slot.try_borrow().is_ok_and(|s| s.is_some());
             let switched = self.sync_profile(Some(mode));
-            // TSF 앱(Edge)은 프로필을 바꾸는 그 자리에서 우리 조합을 끝내며 글자를 남긴다: 그러면 우리 확정은 새 글자로 한 번 더
-            // 들어갔다("안안日本語"). CUAS는 바로 끝내지 않아도 언어가 바뀔 때 끝낸다(게임처럼 TSF를 켠 창은 이때 우리 조합이
-            // 이미 문서에 없었다). 모드를 바꾸며 확정이 나왔으면 엔진은 조합 중이었다.
             let ended = composing && self.slot.try_borrow().is_ok_and(|s| s.is_none());
-            if switched && !out.commit.is_empty() && (cuas || ended) {
+            if commit && !canceled && (finished || (switched && (cuas || ended))) {
                 debug_log(&format!(
-                    "the profile switch completes the composition (CUAS {cuas}, ended {ended}), not committing it here"
+                    "mode change: composition finished first {finished}, CUAS {cuas}, ended by the switch {ended}; not committing it again"
                 ));
                 if let Ok(mut done) = self.completed_by_switch.try_borrow_mut() {
                     *done = Some(out.commit.encode_utf16().collect());
@@ -1024,7 +1036,7 @@ impl TextService_Impl {
             debug_log(&format!("engine timer: flushed (commit={})", out.commit.chars().count()));
         }
         let context = unsafe { thread_mgr.GetFocus() }.ok().and_then(|d| unsafe { d.GetTop() }.ok());
-        self.after(&out, context.as_ref().is_some_and(cuas));
+        self.after(&out, context.as_ref());
         match context {
             Some(context) => {
                 self.apply(&context, &out, When::Whenever);
@@ -1170,8 +1182,48 @@ impl TextService_Impl {
         let deferred_elsewhere =
             self.deferred.try_borrow().ok().and_then(|d| d.as_ref().map(|(c, _)| !same_object(c, context)));
         if elsewhere == Some(true) || deferred_elsewhere == Some(true) {
+            debug_log("composition in another document: ending it");
             self.end_composition();
         }
+    }
+
+    /// 모드를 바꾸며 입력 언어도 바꾸기 전에 남은 조합을 MS 한국어 입력기처럼 끝낸다(CUAS): 확정([`Finalize`]) → 조합 끝
+    /// ([`EndComposition`])을 세션 둘로. 한 세션이면 한국어 CUAS는 끝을 확정보다 먼저 보내고, 그대로 언어를 바꾸면 CUAS가
+    /// 끝 → 확정으로 마무리해서 오버워치가 그 글자를 조합 중으로 남겼다(지워지지 않고 방향키가 안 됨, 2026-10-03). 했으면 true.
+    fn finish_before_switch(&self, text: &str) -> bool {
+        let Some(c) = self.slot.try_borrow().ok().and_then(|s| s.clone()) else {
+            debug_log("switching the profile: no composition in the document to finish");
+            return false;
+        };
+        let Some(client_id) = self.state.try_borrow().ok().and_then(|s| s.as_ref().map(|a| a.client_id))
+        else {
+            return false;
+        };
+        let request = |session: ITfEditSession| unsafe {
+            c.context.RequestEditSession(client_id, &session, TF_ES_SYNC | TF_ES_READWRITE)
+        };
+        let finalized = request(Finalize::new(c.clone(), text.encode_utf16().collect()).into());
+        if !matches!(finalized, Ok(hr) if hr.is_ok()) {
+            debug_log(&format!("switching the profile: finalize {finalized:?}"));
+            return false;
+        }
+        let _ = self.slot.try_borrow_mut().map(|mut s| s.take());
+        let ended = request(EndComposition::new(c.clone()).into());
+        debug_log(&format!("switching the profile: finalized, then ended the composition {ended:?}"));
+        true
+    }
+
+    /// 문서의 조합을 확정하지 않고 지운다(지금, 동기). 엔진의 조합은 이미 확정으로 나왔다([`Self::after`]). 했으면 true.
+    fn cancel_composition(&self, context: &ITfContext) -> bool {
+        if !self.slot.try_borrow().is_ok_and(|s| s.is_some()) {
+            return false;
+        }
+        let Some(env) = self.edit_env(context) else { return false };
+        let canceled = self.request_edit(context, env, vec![Op::Clear], None, When::Now);
+        debug_log(&format!(
+            "mode change: canceled the composition to put it in after the language switch: {canceled}"
+        ));
+        canceled
     }
 
     /// 조합을 그 자리에서 끝내고(글자는 남는다) 엔진의 조합을 버린다. 미뤄 둔 새 조합도 버린다.
@@ -1360,6 +1412,7 @@ impl ITfCompositionSink_Impl for TextService_Impl {
                     _ => false,
                 };
                 if ours {
+                    debug_log("composition terminated by the app");
                     self.drop_engine_composition();
                 }
                 Ok(())
