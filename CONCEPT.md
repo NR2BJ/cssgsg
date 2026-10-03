@@ -799,6 +799,20 @@ k     = { cho = "ㄱ" }
     SendInput으로 다시 보낸다(`resend_key`): 다시 보낸 키는 입력 줄 맨 뒤라 확정 메시지 다음에 간다 → MS와 같은 순서, 메모장 "안 녕 / 안".
     음절 경계는 한 메시지 그대로(글자를 잃지 않게), 오버워치 겹침은 남았다. 게임 HUD: 화면 구석의 입력 자리·마우스는 쓰지 않는다
     (`at_screen_corner`).
+  - 0.2.6 후기(2026-10-03): 오버워치에서 HUD가 마우스 옆에 뜬다(해결). 조합 겹침은 그대로.
+  - 0.2.7: 음절 경계를 MS처럼 나눈다. CUAS 문맥에서 확정 뒤에 새 조합이 오면 확정만 지금 하고, 새 조합은 0ms 스레드 타이머로 미룬다
+    (`TextService::deferred`, `compose_timer_fired`). WM_TIMER는 메시지 줄에 붙인 메시지·입력이 없을 때만 오므로 앱이 확정 메시지를 읽은
+    뒤에 새 조합을 시작한다 → imm_spy [RESULTSTR "안"] → END → START → [COMPSTR "ㄴ"], 확정 글자를 읽을 수 있다(MS와 같은 모양). 그 사이
+    다음 키가 오면 미룬 것은 버리고 그 키의 출력으로 조합을 시작한다(엔진은 이미 조합 중이다). 포커스가 옮겨 가거나 입력기를 끄면 버린다
+    (`end_composition`, `has_composition`이 미룬 것도 조합으로 본다).
+  - 0.2.7: Space·Enter를 MS처럼 넘긴다. imm_spy에 `fast`(키를 한꺼번에 보내기)를 더해 보니 0.2.6의 SendInput으로 다시 보낸 키는 이미 줄 선
+    다음 키보다 늦게 갔다("안녕 아" → "안녕아 "). MS는 한꺼번에 쳐도 [RESULTSTR] → END → KEYDOWN → CHAR 다음에 다음 키다. 견준 것(빠르게):
+    ① 실제 쪽에서 확정 + 키를 PostMessage → KEYDOWN이 확정보다 먼저(Enter로 보내면 마지막 글자가 빠진다) ② 시험에서 확정 + 키를 잡지 않음
+    → 같은 문제 ③ 시험에서 확정 + 키를 잡고 같은 키를 포커스 창에 PostMessage → [RESULTSTR] → END → (VK_PROCESSKEY) → KEYDOWN → CHAR,
+    빠르게 쳐도 순서 그대로. 시험 안의 동기 확정은 CUAS가 확정 메시지를 바로 보내고, 붙인 메시지는 입력 줄보다 먼저 꺼내지기 때문이다.
+    ③을 쓴다(`key_window`, `post_key`, `Seen::taken`). 입력 장치를 거치지 않아 원시 입력을 읽는 게임에 키가 두 번 보이지도 않는다.
+    Alt를 누르고 있거나 포커스 창이 없거나 시험의 동기 편집을 거절당하면 0.2.6 방식(실제 쪽 확정 + SendInput). 옛 메모장: "안녕 안녕 /
+    안 "이 보통 빠르기·한꺼번에 모두 맞다.
   - 런타임에는 `GetActiveFlags`로 분기한다(SECUREMODE / IMMERSIVEMODE / CONSOLE / UIELEMENTENABLEDONLY).
   - 설치는 레지스트리 직접 기록이 아니라 `RegisterProfile` + `InstallLayoutOrTip`으로 한다.
 - **M3a에서 확인한 것(2026-10-01, 윈도우 11 25H2 VM, `win/tip`)**

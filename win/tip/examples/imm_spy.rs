@@ -4,14 +4,22 @@
 //!
 //!   cargo run -p cssgsg-tip --example imm_spy -- ms       MS 한국어 입력기(두벌식)로 "안녕"
 //!   cargo run -p cssgsg-tip --example imm_spy -- cssgsg   cssgsg(참신세벌식, 한국어 모드)로 "안녕"
+//!   ... -- cssgsg fast                                    키를 한꺼번에 보낸다(앞 키를 다 처리하기 전에 다음 키가 와 있다: 빠른 타자)
+//!   ... -- cssgsg fast keys=24,21,1f,32,39                 칠 키(쿼티 자리 스캔 코드, 16진)를 직접 준다(여기는 "안" + ㄴ + Space)
 //!
 //! 창을 띄우고 스스로 키를 보낸다(SendInput). 그동안 다른 창을 누르지 않는다.
 
 fn main() {
     #[cfg(windows)]
     {
-        let which = std::env::args().nth(1).unwrap_or_default();
-        if let Err(e) = imp::run(which == "ms") {
+        let args: Vec<String> = std::env::args().skip(1).collect();
+        let ms = args.first().is_some_and(|a| a == "ms");
+        let fast = args.iter().any(|a| a == "fast");
+        // keys=24,21,1f: 쿼티 자리 스캔 코드(16진)를 직접 준다.
+        let keys = args.iter().find_map(|a| a.strip_prefix("keys=")).map(|list| {
+            list.split(',').map(|k| u16::from_str_radix(k.trim(), 16).expect("scan code in hex")).collect()
+        });
+        if let Err(e) = imp::run(ms, fast, keys) {
             eprintln!("{e:?}");
             std::process::exit(1);
         }
@@ -169,8 +177,8 @@ mod imp {
         }
     }
 
-    /// 쿼티 자리(스캔 코드)로 한 키씩 친다.
-    unsafe fn type_keys(scans: &[u16]) {
+    /// 쿼티 자리(스캔 코드)로 한 키씩 친다. `fast`면 모두 한꺼번에 보내고 나서 메시지를 처리한다.
+    unsafe fn type_keys(scans: &[u16], fast: bool) {
         let key = |scan: u16, up: bool| INPUT {
             r#type: INPUT_KEYBOARD,
             Anonymous: INPUT_0 {
@@ -181,6 +189,16 @@ mod imp {
                 },
             },
         };
+        if fast {
+            println!("keys {scans:#04x?} (all at once)");
+            let all: Vec<INPUT> =
+                scans.iter().flat_map(|&scan| [key(scan, false), key(scan, true)]).collect();
+            unsafe {
+                SendInput(&all, size_of::<INPUT>() as i32);
+                pump(1500);
+            }
+            return;
+        }
         for &scan in scans {
             println!("key {scan:#04x}");
             unsafe {
@@ -192,7 +210,7 @@ mod imp {
         }
     }
 
-    pub fn run(ms: bool) -> Result<()> {
+    pub fn run(ms: bool, fast: bool, keys: Option<Vec<u16>>) -> Result<()> {
         unsafe {
             CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok()?;
             // 게임처럼 창보다 먼저 TSF를 UILess 전용으로 켠다(cssgsg는 이것을 보고 게임 스레드로 다룬다). 키는 TSF에 넘기지 않고
@@ -249,10 +267,16 @@ mod imp {
                 ImmReleaseContext(hwnd, himc);
                 pump(200);
                 println!("== Microsoft Korean IME (두벌식) 안녕: d k s s u d, Space, d k, Enter");
-                type_keys(&[0x20, 0x25, 0x1F, 0x1F, 0x16, 0x20, 0x39, 0x20, 0x25, 0x1C]);
+                type_keys(
+                    keys.as_deref().unwrap_or(&[0x20, 0x25, 0x1F, 0x1F, 0x16, 0x20, 0x39, 0x20, 0x25, 0x1C]),
+                    fast,
+                );
             } else {
                 println!("== cssgsg (참신세벌식, 한국어 모드여야 한다) 안녕: j f s m t d, Space, j f, Enter");
-                type_keys(&[0x24, 0x21, 0x1F, 0x32, 0x14, 0x20, 0x39, 0x24, 0x21, 0x1C]);
+                type_keys(
+                    keys.as_deref().unwrap_or(&[0x24, 0x21, 0x1F, 0x32, 0x14, 0x20, 0x39, 0x24, 0x21, 0x1C]),
+                    fast,
+                );
             }
             pump(500);
             let _ = threads.Deactivate();

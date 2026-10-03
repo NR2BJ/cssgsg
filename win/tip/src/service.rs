@@ -19,9 +19,9 @@ use windows::Win32::Foundation::{E_UNEXPECTED, LPARAM, WPARAM};
 use windows::Win32::System::SystemInformation::GetTickCount;
 use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetKeyboardLayout, GetLastInputInfo, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT,
-    KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, LASTINPUTINFO, SendInput, VIRTUAL_KEY,
-    VK_CAPITAL, VK_PACKET,
+    GetFocus, GetKeyboardLayout, GetLastInputInfo, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS,
+    KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, LASTINPUTINFO, SendInput,
+    VIRTUAL_KEY, VK_CAPITAL, VK_PACKET,
 };
 use windows::Win32::UI::TextServices::{
     GUID_COMPARTMENT_EMPTYCONTEXT, GUID_COMPARTMENT_KEYBOARD_DISABLED,
@@ -35,7 +35,9 @@ use windows::Win32::UI::TextServices::{
     ITfThreadMgrEventSink_Impl, TF_E_SYNCHRONOUS, TF_ES_ASYNCDONTCARE, TF_ES_READ, TF_ES_READWRITE,
     TF_ES_SYNC, TF_SD_READONLY, TF_TMAE_UIELEMENTENABLEDONLY, TS_SS_TRANSITORY,
 };
-use windows::Win32::UI::WindowsAndMessaging::{GetMessageTime, KillTimer, SetTimer};
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetMessageTime, KillTimer, PostMessageW, SetTimer, WM_KEYDOWN,
+};
 use windows::core::{
     BOOL, ComObject, GUID, HRESULT, IUnknown, IUnknownImpl, Interface, Ref, Result, implement,
 };
@@ -92,6 +94,8 @@ pub struct TextService {
     field: Cell<Field>,
     /// 후보창과 모드 HUD(편집 세션이 자리를 잰 뒤 맞춘다).
     screen: Rc<RefCell<Screen>>,
+    /// CUAS 문서에서 확정 뒤로 미룬 새 조합(앱이 확정 메시지를 읽은 뒤 스레드 타이머로 시작한다, [`TextService_Impl::apply`]).
+    deferred: RefCell<Option<(ITfContext, Vec<Op>)>>,
 }
 
 /// Activate부터 Deactivate까지.
@@ -122,6 +126,8 @@ struct Seen {
     applied: bool,
     /// 실제 쪽(OnKeyDown/OnKeyUp)이 이 메시지를 받았다. 받기 전이면 다음 실제는 시각·lParam이 달라도 이 메시지다([`KeyId::same_key`]).
     keyed: bool,
+    /// 시험에서 확정하고 키를 앱에 따로 붙였다(CUAS). 실제 쪽은 이 키를 먹는다.
+    taken: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -158,6 +164,7 @@ impl TextService {
             scope: RefCell::new(ScopeRead::NotRun),
             field: Cell::new(Field::Normal),
             screen: Rc::new(RefCell::new(Screen::default())),
+            deferred: RefCell::new(None),
         }
     }
 }
@@ -259,6 +266,35 @@ fn cancel_engine_timer() {
     }
 }
 
+thread_local! {
+    /// CUAS 앱에서 확정 뒤로 미룬 새 조합의 타이머와 텍스트 서비스([`TextService_Impl::apply`]).
+    static COMPOSE_TIMER: RefCell<Option<(usize, ComObject<TextService>)>> = const { RefCell::new(None) };
+}
+
+/// 미룬 새 조합을 시작할 때. 스레드 타이머의 WM_TIMER는 메시지 줄에 다른 것(앱에 배달될 확정 메시지, 다음 키)이 없을 때만 온다.
+unsafe extern "system" fn compose_timer_fired(_hwnd: HWND, _msg: u32, id: usize, _time: u32) {
+    let _ = unsafe { KillTimer(None, id) };
+    let service = COMPOSE_TIMER.with(|t| {
+        let mut slot = t.borrow_mut();
+        match slot.take() {
+            Some((pending, service)) if pending == id => Some(service),
+            other => {
+                *slot = other;
+                None
+            }
+        }
+    });
+    if let Some(service) = service {
+        guarded(|| (), || service.apply_deferred());
+    }
+}
+
+fn cancel_compose_timer() {
+    if let Some((id, _)) = COMPOSE_TIMER.with(|t| t.borrow_mut().take()) {
+        let _ = unsafe { KillTimer(None, id) };
+    }
+}
+
 fn mode_value(mode: Mode, last_non_en: Mode) -> i32 {
     mode as i32 | (last_non_en as i32) << 4
 }
@@ -317,6 +353,23 @@ fn resend_key(wparam: WPARAM, lparam: LPARAM) {
         },
     };
     unsafe { SendInput(&[input], std::mem::size_of::<INPUT>() as i32) };
+}
+
+/// 받은 키를 메시지로 붙일 창(이 스레드의 포커스 창). Alt를 누르고 있으면(WM_SYSKEYDOWN 자리) 붙이지 않는다.
+fn key_window(lparam: LPARAM) -> Option<HWND> {
+    const ALT_DOWN: isize = 1 << 29;
+    if lparam.0 & ALT_DOWN != 0 {
+        return None;
+    }
+    Some(unsafe { GetFocus() }).filter(|w| !w.is_invalid())
+}
+
+/// 받은 키(누름)를 창에 WM_KEYDOWN으로 붙인다. 붙인 메시지는 입력 줄에 선 키보다 먼저 가고(빠르게 친 다음 키와 순서가 바뀌지
+/// 않는다), 입력 장치를 거치지 않아 원시 입력을 읽는 게임에 키가 두 번 보이지 않는다. 입력기도 다시 받지 않는다.
+fn post_key(window: HWND, wparam: WPARAM, lparam: LPARAM) -> bool {
+    // 반복 수 1(CUAS가 입력기에 주는 lParam은 0이다).
+    let lparam = LPARAM((lparam.0 & !0xFFFF) | 1);
+    unsafe { PostMessageW(Some(window), WM_KEYDOWN, wparam, lparam) }.is_ok()
 }
 
 /// 글자를 유니코드 키 입력(VK_PACKET)으로 넣는다. 앱이 문서 고치기를 받지 않을 때만 쓴다: 이미 줄 선 키보다
@@ -618,7 +671,7 @@ impl TextService_Impl {
         }
         self.after(&out);
         if let Ok(mut seen) = self.seen.try_borrow_mut() {
-            *seen = Some(Seen { id, out: out.clone(), applied: false, keyed: actual });
+            *seen = Some(Seen { id, out: out.clone(), applied: false, keyed: actual, taken: false });
         }
         Some((out, false))
     }
@@ -681,6 +734,31 @@ impl TextService_Impl {
     fn test(&self, down: bool, context: Option<&ITfContext>, wparam: WPARAM, lparam: LPARAM) -> bool {
         let Some((out, applied)) = self.process(down, false, context, wparam, lparam) else { return false };
         let edits = !applied && has_edits(&out);
+        // CUAS(옛 Win32 앱, 게임 채팅)에서 확정하고 넘기는 키(조합 중 Space·Enter·기호·방향키): 시험에서 확정하고, 키는 잡고
+        // (앱에는 VK_PROCESSKEY), 같은 키를 포커스 창에 메시지로 붙인다. 시험 안에서 확정하면 CUAS가 확정 메시지(RESULTSTR,
+        // ENDCOMPOSITION)를 바로 앱에 보내서, 붙인 키는 확정 다음에 가고 입력 줄에 이미 선 다음 키보다는 먼저 간다: MS 한국어
+        // 입력기와 같은 순서(examples/imm_spy, 한꺼번에 친 키도, 2026-10-03). 0.2.6은 실제 쪽에서 확정하고 SendInput으로 다시
+        // 보냈는데, 다시 보낸 키가 입력 줄 맨 뒤에 서서 빠르게 친 다음 키보다 늦게 갔다("안녕 아" → "안녕아 "). 시험에서 확정하고
+        // 키를 잡지 않으면 원래 키가 확정 메시지보다 먼저 간다(채팅 Enter에서 마지막 글자가 빠진다). 못 하면 실제 쪽(아래 key)에서.
+        if down
+            && !out.consumed
+            && edits
+            && let Some(context) = context.filter(|c| transitory(c))
+            && let Some(window) = key_window(lparam)
+            && self.apply(context, &out, When::Now)
+        {
+            let posted = post_key(window, wparam, lparam);
+            if let Ok(mut seen) = self.seen.try_borrow_mut()
+                && let Some(s) = seen.as_mut()
+            {
+                s.applied = true;
+                s.taken = posted;
+            }
+            if !posted {
+                debug_log("CUAS: committed in the test, could not post the key: passing it");
+            }
+            return posted;
+        }
         if !edits {
             self.mark_applied();
             // 문서는 그대로인데 화면만 바뀌었다(모드 HUD, 후보 페이지): 실제 쪽이 안 올 수 있으니 지금 맞춘다.
@@ -692,6 +770,10 @@ impl TextService_Impl {
     /// 실제: 문서를 고치고, 먹었는지 돌려준다(뗌은 늘 넘긴다).
     fn key(&self, down: bool, context: Option<&ITfContext>, wparam: WPARAM, lparam: LPARAM) -> bool {
         let Some((out, applied)) = self.process(down, true, context, wparam, lparam) else { return false };
+        // 시험이 확정하고 같은 키를 붙였다: 이 키(VK_PROCESSKEY)는 먹는다.
+        if down && self.seen.try_borrow().is_ok_and(|s| s.as_ref().is_some_and(|s| s.taken)) {
+            return true;
+        }
         if !applied {
             match context {
                 // 비밀번호 칸: 앱이 문서 고치기를 바로 받지 않으면(빈 문맥 등) 글자를 유니코드 키 입력으로 넣는다.
@@ -701,11 +783,10 @@ impl TextService_Impl {
                         inject_text(&out.commit);
                     }
                 }
-                // CUAS(옛 Win32 앱, 게임 채팅): 확정하고 키를 넘길 때(조합 중 Space·Enter·기호)는 키를 먹고, 확정한 뒤 같은 키를
-                // 다시 보낸다. 시험에서 이미 키를 잡아 CUAS가 그 키를 VK_PROCESSKEY로 바꿨으므로, 넘긴다고 해도 원래 키가 앱에 가지
-                // 않았다(메모장: 안 + Space + 녕 + Enter + 안 → "안녕안", 2026-10-03). 시험에서 확정하고 키를 잡지 않으면 확정 메시지가
-                // 키보다 늦게 배달되어 순서가 바뀌었다(" 안", 줄바꿈 뒤 "녕"). 다시 보낸 키는 입력 줄 맨 뒤에 서서 확정 메시지 다음에
-                // 간다(MS 한국어 입력기와 같은 순서: 확정 → 조합 끝 → 키, examples/imm_spy).
+                // CUAS에서 확정하고 넘기는 키를 시험에서 다루지 못했다(Alt를 누르고 있다, 포커스 창이 없다, 시험의 동기 편집을
+                // 거절당했다): 키를 먹고, 확정한 뒤 같은 키를 입력으로 다시 보낸다. 시험에서 이미 키를 잡아 CUAS가 그 키를
+                // VK_PROCESSKEY로 바꿨으므로, 넘긴다고 해도 원래 키가 앱에 가지 않는다(0.2.5까지 메모장 "안 녕" → "안녕"). 다시 보낸
+                // 키는 확정 메시지 다음에 가지만 입력 줄 맨 뒤에 선다(빠르게 친 다음 키보다 늦을 수 있다).
                 Some(context) if down && !out.consumed && has_edits(&out) && transitory(context) => {
                     if !self.apply(context, &out, When::Now) {
                         self.apply(context, &out, When::Whenever);
@@ -824,7 +905,7 @@ impl TextService_Impl {
 
     /// 엔진 출력대로 문서를 고친다. 고쳤거나 고치기로 했으면(비동기) true.
     fn apply(&self, context: &ITfContext, out: &Output, when: When) -> bool {
-        let ops = plan(out);
+        let mut ops = plan(out);
         if ops.is_empty() {
             self.refresh_screen(Some(context));
             return true;
@@ -837,11 +918,58 @@ impl TextService_Impl {
         }) else {
             return false;
         };
-        // 확정과 새 조합은 한 세션으로 한다. CUAS(옛 Win32 앱)는 이것을 한 메시지(RESULTSTR + COMPSTR)로 옮기고, MS 한국어 입력기는
-        // 확정 → 조합 끝 → 새 조합 시작으로 따로 보낸다(2026-10-03, examples/imm_spy). 세션을 나눠 보았지만(같은 키 안에서, 비동기로
-        // 미뤄서) 앱이 나중에 배달되는 확정 메시지를 읽을 때 확정 글자가 이미 비어 있었다(result="") — 글자를 잃느니 합친 메시지로 둔다.
-        // 오버워치가 이 조합을 입력칸 맨 앞에 그리는 것은 아직 못 고쳤다.
+        // 새로 고칠 것이 오면 미뤄 둔 새 조합은 낡았다.
+        self.drop_deferred();
+        // CUAS(옛 Win32 앱, 게임 채팅)는 편집 세션 하나를 IMM 메시지로 옮긴다. 확정과 새 조합을 한 세션에 하면 한 메시지
+        // (RESULTSTR + COMPSTR)가 되는데, MS 한국어 입력기는 확정 → 조합 끝 → 새 조합 시작으로 따로 보내고(examples/imm_spy),
+        // 오버워치는 합친 메시지의 새 조합을 입력칸 맨 앞에 그렸다(2026-10-03). 같은 키 안에서나 비동기 세션으로 나누면 앱이 나중에
+        // 배달되는 확정 메시지를 읽을 때 확정 글자가 이미 비어 있었다(result=""). 그래서 확정은 지금 하고, 새 조합은 스레드 타이머로
+        // 미뤄 메시지 줄이 빈 뒤(앱이 확정을 읽은 뒤) 시작한다. 그 사이 다음 키가 오면 미룬 것은 버린다(위).
+        if transitory(context)
+            && let Some(i) = ops.iter().position(|op| matches!(op, Op::Commit(_)))
+            && i + 1 < ops.len()
+        {
+            let rest = ops.split_off(i + 1);
+            let committed = self.request_edit(context, env, ops, None, when);
+            if let Ok(mut deferred) = self.deferred.try_borrow_mut() {
+                *deferred = Some((context.clone(), rest));
+            }
+            let id = unsafe { SetTimer(None, 0, 0, Some(compose_timer_fired)) };
+            if id == 0 {
+                debug_log("compose timer: SetTimer failed");
+                self.apply_deferred();
+            } else {
+                COMPOSE_TIMER.with(|t| *t.borrow_mut() = Some((id, self.to_object())));
+            }
+            return committed;
+        }
         self.request_edit(context, env, ops, Some(self.ui_hook()), when)
+    }
+
+    /// 확정 뒤로 미룬 새 조합을 지금 시작한다.
+    fn apply_deferred(&self) {
+        let Some((context, ops)) = self.deferred.try_borrow_mut().ok().and_then(|mut d| d.take()) else {
+            return;
+        };
+        let Some(env) = self.state.try_borrow().ok().and_then(|s| {
+            s.as_ref().map(|a| {
+                let game = GameEdit { game: a.game, interim: a.game && a.engine.mode() == Mode::Ko };
+                (a.client_id, a.attrs, game)
+            })
+        }) else {
+            return;
+        };
+        if !self.request_edit(&context, env, ops, Some(self.ui_hook()), When::Whenever) {
+            debug_log("deferred composition failed");
+        }
+    }
+
+    /// 미뤄 둔 새 조합을 버린다(더 새 것이 왔다, 포커스가 옮겨 갔다, 입력기를 끈다).
+    fn drop_deferred(&self) {
+        cancel_compose_timer();
+        if let Ok(mut deferred) = self.deferred.try_borrow_mut() {
+            *deferred = None;
+        }
     }
 
     /// 편집 세션 하나를 청한다. `env`: (클라이언트 id, 표시 속성, 게임 편집 방식).
@@ -896,17 +1024,20 @@ impl TextService_Impl {
         }
     }
 
-    /// 다른 문맥에 조합이 남아 있으면(포커스가 옮겨 갔다) 그 자리에서 끝낸다.
+    /// 다른 문맥에 조합이 남아 있으면(포커스가 옮겨 갔다) 그 자리에서 끝낸다. 다른 문맥에 미뤄 둔 새 조합도 같다.
     fn settle_context(&self, context: &ITfContext) {
         let elsewhere =
             self.slot.try_borrow().ok().and_then(|s| s.as_ref().map(|c| !same_object(&c.context, context)));
-        if elsewhere == Some(true) {
+        let deferred_elsewhere =
+            self.deferred.try_borrow().ok().and_then(|d| d.as_ref().map(|(c, _)| !same_object(c, context)));
+        if elsewhere == Some(true) || deferred_elsewhere == Some(true) {
             self.end_composition();
         }
     }
 
-    /// 조합을 그 자리에서 끝내고(글자는 남는다) 엔진의 조합을 버린다.
+    /// 조합을 그 자리에서 끝내고(글자는 남는다) 엔진의 조합을 버린다. 미뤄 둔 새 조합도 버린다.
     fn end_composition(&self) {
+        self.drop_deferred();
         if let Some(c) = self.slot.try_borrow_mut().ok().and_then(|mut s| s.take())
             && let Some(client_id) =
                 self.state.try_borrow().ok().and_then(|s| s.as_ref().map(|a| a.client_id))
@@ -991,8 +1122,10 @@ impl TextService_Impl {
         }
     }
 
+    /// 문서에 조합이 있거나, 확정 뒤로 미룬 새 조합이 있다(엔진은 조합 중이다).
     fn has_composition(&self) -> bool {
         self.slot.try_borrow().map(|s| s.is_some()).unwrap_or(false)
+            || self.deferred.try_borrow().map(|d| d.is_some()).unwrap_or(false)
     }
 }
 
