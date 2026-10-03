@@ -25,7 +25,7 @@ fn main() {
 mod imp {
     use std::time::{Duration, Instant};
 
-    use cssgsg_tip::{CLSID_TEXT_SERVICE, GUID_PROFILE, LANGID_EN_US};
+    use cssgsg_tip::{CLSID_TEXT_SERVICE, GUID_PROFILE, LANGID_KO_KR};
     use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
     use windows::Win32::System::Com::{
         CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
@@ -141,7 +141,7 @@ mod imp {
                 CoCreateInstance(&CLSID_TF_InputProcessorProfiles, None, CLSCTX_INPROC_SERVER)?;
             let chosen = profiles.ActivateProfile(
                 TF_PROFILETYPE_INPUTPROCESSOR,
-                LANGID_EN_US,
+                LANGID_KO_KR,
                 &CLSID_TEXT_SERVICE,
                 &GUID_PROFILE,
                 HKL::default(),

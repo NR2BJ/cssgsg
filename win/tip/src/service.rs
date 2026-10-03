@@ -21,7 +21,7 @@ use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetFocus, GetKeyboardLayout, GetLastInputInfo, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS,
     KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, LASTINPUTINFO, SendInput,
-    VIRTUAL_KEY, VK_CAPITAL, VK_PACKET,
+    VIRTUAL_KEY, VK_CAPITAL, VK_HANGUL, VK_HANJA, VK_PACKET,
 };
 use windows::Win32::UI::TextServices::{
     GUID_COMPARTMENT_EMPTYCONTEXT, GUID_COMPARTMENT_KEYBOARD_DISABLED,
@@ -33,7 +33,7 @@ use windows::Win32::UI::TextServices::{
     ITfKeystrokeMgr, ITfLangBarItemButton, ITfLangBarItemMgr, ITfSource, ITfTextInputProcessor_Impl,
     ITfTextInputProcessorEx, ITfTextInputProcessorEx_Impl, ITfThreadMgr, ITfThreadMgrEventSink,
     ITfThreadMgrEventSink_Impl, TF_E_SYNCHRONOUS, TF_ES_ASYNCDONTCARE, TF_ES_READ, TF_ES_READWRITE,
-    TF_ES_SYNC, TF_SD_READONLY, TF_TMAE_UIELEMENTENABLEDONLY, TS_SS_TRANSITORY,
+    TF_ES_SYNC, TF_SD_READONLY, TF_TMAE_UIELEMENTENABLEDONLY, TS_SS_NOHIDDENTEXT, TS_SS_TRANSITORY,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     GetMessageTime, KillTimer, PostMessageW, SetTimer, WM_KEYDOWN,
@@ -220,9 +220,13 @@ fn has_edits(out: &Output) -> bool {
     !plan(out).is_empty()
 }
 
-/// IMM32로 입력기를 쓰는 옛 Win32 입력칸인가: CUAS가 만들어 주는 임시 문서(TS_SS_TRANSITORY)다.
-fn transitory(context: &ITfContext) -> bool {
-    unsafe { context.GetStatus() }.is_ok_and(|s| s.dwStaticFlags & TS_SS_TRANSITORY != 0)
+/// IMM32로 입력기를 쓰는 옛 Win32 입력칸(CUAS: 옛 메모장, 게임 채팅)인가. CUAS가 만들어 주는 임시 문서는 TS_SS_TRANSITORY만
+/// 켠다(메모장 0x4). 크로미움(Edge·Chrome·VS Code 등)은 자기 텍스트 저장소에 TS_SS_TRANSITORY | TS_SS_NOHIDDENTEXT를 켜 둬서
+/// (MS 한국어 입력기의 한자 문제를 피하려고, Edge 0xc) TRANSITORY만으로는 가를 수 없다: 0.2.6~0.2.7은 크로미움도 CUAS로 다뤄
+/// Enter가 빠지고 빠르게 친 Space·Enter가 뒤로 밀렸다(2026-10-03, Edge). ITfContextOwnerServices는 둘 다 준다.
+fn cuas(context: &ITfContext) -> bool {
+    unsafe { context.GetStatus() }
+        .is_ok_and(|s| s.dwStaticFlags & (TS_SS_TRANSITORY | TS_SS_NOHIDDENTEXT) == TS_SS_TRANSITORY)
 }
 
 /// 마지막 입력(키·마우스) 시각. 메시지 시각보다 앞이면(그럴 일은 없다) 메시지 시각.
@@ -629,7 +633,7 @@ impl TextService_Impl {
         };
         // 엔진에 줄 키 시각(탭 판정). IMM32 앱(CUAS)의 시험은 GetMessage 안에서 불려 GetMessageTime이 앞 메시지(앞 키를 뗀 때 등)의
         // 시각일 때가 있다(메모장 기록). 그대로 쓰면 쉬었다 톡 친 Shift가 오래 누른 것으로 보여 전환이 안 된다: 마지막 입력 시각을 쓴다.
-        let time = if !actual && context.is_some_and(transitory) { latest_input(id.time) } else { id.time };
+        let time = if !actual && context.is_some_and(cuas) { latest_input(id.time) } else { id.time };
         let ev = keys::event(down, wparam, lparam, self.clock.try_borrow_mut().ok()?.seconds(time));
         let out = {
             let mut state = self.state.try_borrow_mut().ok()?;
@@ -637,14 +641,31 @@ impl TextService_Impl {
             if self.terminated.take() {
                 let _ = a.engine.reset();
             }
-            let out = a.engine.handle_key(&ev, &ctx);
+            // 한국어 배치의 한/영·한자 키(VK_HANGUL·VK_HANJA, 키보드 종류에 따라 오른쪽 Alt·Ctrl 자리). 가상 키로 본다:
+            // 종류 2는 두 자리가 바뀐다. 한/영은 영어 ↔ 방금 쓰던 비영어(MS 한국어 입력기처럼, 누름을 먹는다), 한자는 한자
+            // 단축키와 같다. 게임 플레이 화면(입력칸 없음)에서는 수식키 탭처럼 넘긴다.
+            let hangul = wparam.0 == VK_HANGUL.0 as usize;
+            let hanja = wparam.0 == VK_HANJA.0 as usize;
+            let out = if (hangul || hanja) && !ctx.taps_disabled {
+                if !down || ev.repeat {
+                    Output { consumed: down && hangul, ..Output::default() }
+                } else if hangul {
+                    let target = if a.engine.mode() == Mode::En { a.engine.last_non_en() } else { Mode::En };
+                    Output { consumed: true, ..a.engine.set_mode(target) }
+                } else {
+                    a.engine.hanja_key_pressed(&ctx)
+                }
+            } else {
+                a.engine.handle_key(&ev, &ctx)
+            };
             if let Ok(mut screen) = self.screen.try_borrow_mut() {
                 screen.queue(out.candidates.clone(), out.mode, a.engine.mode() == Mode::Ja);
             }
             if a.log {
                 debug_log(&format!(
-                    "key {:?} down={} mods={:?} repeat={} field={:?}({}) scope={:?} -> eat={} commit={} preedit={:?} mode={:?}",
+                    "key {:?} vk={:#04x} down={} mods={:?} repeat={} field={:?}({}) scope={:?} -> eat={} commit={} preedit={:?} mode={:?}",
                     ev.key,
+                    wparam.0,
                     ev.down,
                     ev.mods,
                     ev.repeat,
@@ -743,7 +764,7 @@ impl TextService_Impl {
         if down
             && !out.consumed
             && edits
-            && let Some(context) = context.filter(|c| transitory(c))
+            && let Some(context) = context.filter(|c| cuas(c))
             && let Some(window) = key_window(lparam)
             && self.apply(context, &out, When::Now)
         {
@@ -787,7 +808,7 @@ impl TextService_Impl {
                 // 거절당했다): 키를 먹고, 확정한 뒤 같은 키를 입력으로 다시 보낸다. 시험에서 이미 키를 잡아 CUAS가 그 키를
                 // VK_PROCESSKEY로 바꿨으므로, 넘긴다고 해도 원래 키가 앱에 가지 않는다(0.2.5까지 메모장 "안 녕" → "안녕"). 다시 보낸
                 // 키는 확정 메시지 다음에 가지만 입력 줄 맨 뒤에 선다(빠르게 친 다음 키보다 늦을 수 있다).
-                Some(context) if down && !out.consumed && has_edits(&out) && transitory(context) => {
+                Some(context) if down && !out.consumed && has_edits(&out) && cuas(context) => {
                     if !self.apply(context, &out, When::Now) {
                         self.apply(context, &out, When::Whenever);
                     }
@@ -903,6 +924,16 @@ impl TextService_Impl {
 
     // ---- 문서 고치기 ------------------------------------------------------------------------------
 
+    /// 편집 세션에 줄 것: (클라이언트 id, 표시 속성, 고치는 방식). 한글 조합은 게임과 IMM32 앱(CUAS)에서 MS 한국어 입력기처럼
+    /// 중간 글자로 둔다: 한국어 프로필에서 옛 메모장의 입력칸은 중간 글자가 아닌 한글 조합을 키마다 끝내 버려 자모가 낱자로
+    /// 확정됐다("ㅇㅏㄴ", 2026-10-03). 오버워치는 중간 글자일 때 커서 자리에 끼워 그린다.
+    fn edit_env(&self, context: &ITfContext) -> Option<(u32, Attrs, GameEdit)> {
+        let s = self.state.try_borrow().ok()?;
+        let a = s.as_ref()?;
+        let interim = a.engine.mode() == Mode::Ko && (a.game || cuas(context));
+        Some((a.client_id, a.attrs, GameEdit { game: a.game, interim }))
+    }
+
     /// 엔진 출력대로 문서를 고친다. 고쳤거나 고치기로 했으면(비동기) true.
     fn apply(&self, context: &ITfContext, out: &Output, when: When) -> bool {
         let mut ops = plan(out);
@@ -910,12 +941,7 @@ impl TextService_Impl {
             self.refresh_screen(Some(context));
             return true;
         }
-        let Some(env) = self.state.try_borrow().ok().and_then(|s| {
-            s.as_ref().map(|a| {
-                let game = GameEdit { game: a.game, interim: a.game && a.engine.mode() == Mode::Ko };
-                (a.client_id, a.attrs, game)
-            })
-        }) else {
+        let Some(env) = self.edit_env(context) else {
             return false;
         };
         // 새로 고칠 것이 오면 미뤄 둔 새 조합은 낡았다.
@@ -925,7 +951,7 @@ impl TextService_Impl {
         // 오버워치는 합친 메시지의 새 조합을 입력칸 맨 앞에 그렸다(2026-10-03). 같은 키 안에서나 비동기 세션으로 나누면 앱이 나중에
         // 배달되는 확정 메시지를 읽을 때 확정 글자가 이미 비어 있었다(result=""). 그래서 확정은 지금 하고, 새 조합은 스레드 타이머로
         // 미뤄 메시지 줄이 빈 뒤(앱이 확정을 읽은 뒤) 시작한다. 그 사이 다음 키가 오면 미룬 것은 버린다(위).
-        if transitory(context)
+        if cuas(context)
             && let Some(i) = ops.iter().position(|op| matches!(op, Op::Commit(_)))
             && i + 1 < ops.len()
         {
@@ -951,12 +977,7 @@ impl TextService_Impl {
         let Some((context, ops)) = self.deferred.try_borrow_mut().ok().and_then(|mut d| d.take()) else {
             return;
         };
-        let Some(env) = self.state.try_borrow().ok().and_then(|s| {
-            s.as_ref().map(|a| {
-                let game = GameEdit { game: a.game, interim: a.game && a.engine.mode() == Mode::Ko };
-                (a.client_id, a.attrs, game)
-            })
-        }) else {
+        let Some(env) = self.edit_env(&context) else {
             return;
         };
         if !self.request_edit(&context, env, ops, Some(self.ui_hook()), When::Whenever) {
@@ -1250,10 +1271,23 @@ impl ITfThreadMgrEventSink_Impl for TextService_Impl {
             || Ok(()),
             || {
                 // 문서가 없는 창(앱이 입력기를 끈 창: 게임 화면 등)으로 갔다. 그 창의 키는 입력기에 오지 않는다.
-                if focus.ok().is_err() {
-                    debug_log(
+                match focus.ok() {
+                    Err(_) => debug_log(
                         "focus: a window without a document (the app turned the input method off there)",
-                    );
+                    ),
+                    // 어떤 입력칸인지(CUAS 판정의 근거, 개발자 기록).
+                    Ok(document) => {
+                        let log = self.state.try_borrow().ok().and_then(|s| s.as_ref().map(|a| a.log));
+                        if log == Some(true)
+                            && let Ok(context) = unsafe { document.GetTop() }
+                        {
+                            let flags = unsafe { context.GetStatus() }.map(|s| s.dwStaticFlags).unwrap_or(0);
+                            debug_log(&format!(
+                                "focus: document static flags {flags:#x}, CUAS {}",
+                                cuas(&context)
+                            ));
+                        }
+                    }
                 }
                 if let Ok(mut scope) = self.scope.try_borrow_mut() {
                     *scope = ScopeRead::NotRun;

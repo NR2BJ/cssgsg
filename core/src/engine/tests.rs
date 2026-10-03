@@ -716,6 +716,23 @@ fn hanja_shortcut_follows_the_setting() {
 }
 
 #[test]
+fn hanja_key_converts_whatever_the_shortcut() {
+    // 윈도우 한국어 배치의 한자 키는 단축키 설정과 상관없이 한자 변환이다(단축키를 꺼 두어도).
+    let mut s = ko_with("[shortcuts]\nhanja = \"none\"\n");
+    s.type_keys("kre").unwrap();
+    assert!(s.hanja_key().consumed);
+    assert_eq!((s.text.as_str(), s.preedit.as_str()), ("", "國"));
+    s.hanja_key();
+    assert_eq!(s.preedit, "局", "변환 중에 다시 누르면 다음 후보");
+    // 조합이 없으면 키를 앱에 넘긴다. 한국어가 아니거나 비밀번호 칸이어도 넘긴다.
+    s.type_keys("{ent}").unwrap();
+    assert!(!s.hanja_key().consumed);
+    s.type_keys("kre").unwrap();
+    s.ctx.secure_field = true;
+    assert!(!s.hanja_key().consumed);
+}
+
+#[test]
 fn japanese_conversion_keys_can_be_turned_off() {
     let mut s = sim_with("[ja]\nconvert_with_space = false\n");
     s.type_keys("{ls}ckeuwl{sp}").unwrap();

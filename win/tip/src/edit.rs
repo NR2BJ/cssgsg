@@ -59,12 +59,12 @@ pub struct ApplyOps {
     game: GameEdit,
 }
 
-/// 게임 스레드(UILess 전용)에서 고치는 방식.
+/// 게임 스레드(UILess 전용)와 IMM32 앱(CUAS)에서 고치는 방식.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct GameEdit {
     /// 게임 스레드다: 조합을 GetSelection의 커서 자리에서 시작한다(아래 start).
     pub game: bool,
-    /// 한글 조합 글자를 MS 한국어 입력기처럼 중간 글자(interim char: 그 글자를 덮는 선택)로 둔다. IMM32로는 CS_INSERTCHAR가 되어,
+    /// 한글 조합 글자를 MS 한국어 입력기처럼 중간 글자(interim char: 그 글자를 덮는 선택)로 둔다(게임, CUAS). IMM32로는 CS_INSERTCHAR가 되어,
     /// 한글을 지원하는 게임이 커서 자리에 끼워 그린다. 보통 조합(커서를 뒤에 둔다)은 오버워치가 입력칸 맨 앞에 그렸다(2026-10-03).
     pub interim: bool,
 }

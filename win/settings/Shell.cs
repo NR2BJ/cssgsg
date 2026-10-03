@@ -26,11 +26,11 @@ static class Shell
         catch (Exception) { }
     }
 
-    /// win/tip/src/lib.rs의 CLSID_TEXT_SERVICE, GUID_PROFILE(내 입력 목록의 항목 이름, en-US).
-    const string TipItem = "0409:{A9227DC2-56BC-4023-AE29-82A9AAA4EE14}{DCFBD969-D52F-4AFB-ABC0-271CC58FE18C}";
+    /// win/tip/src/lib.rs의 CLSID_TEXT_SERVICE, GUID_PROFILE(내 입력 목록의 항목 이름, 한국어. 0.2.7까지는 0409 en-US).
+    const string TipItem = "0412:{A9227DC2-56BC-4023-AE29-82A9AAA4EE14}{DCFBD969-D52F-4AFB-ABC0-271CC58FE18C}";
 
     /// 내 입력 목록(윈도우 설정 → 시간 및 언어 → 언어 및 지역)에 cssgsg가 있는지. 윈도우는 언어마다 키를 두고
-    /// 그 언어의 입력기를 값 이름으로 적는다(HKCU\Control Panel\International\User Profile\en-US).
+    /// 그 언어의 입력기를 값 이름으로 적는다(HKCU\Control Panel\International\User Profile\ko).
     public static bool InInputList()
     {
         try

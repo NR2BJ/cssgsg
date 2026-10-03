@@ -159,8 +159,9 @@ bash tools/mac/release.sh 0.1.1 --notes-file docs/releases/v0.1.1.md    # 검사
 
 GitHub 릴리스 `win-v<버전>`의 `cssgsg-setup.exe`를 받아 실행한다(x64, 윈도우 10 1809 이상·11). 관리자 권한 창이 한 번 뜬다.
 
-- 설치기는 `Program Files\cssgsg`에 입력기 DLL·엔진 호스트·Mozc 엔진을 넣고 등록한 뒤, 설치한 사용자의 입력 목록(en-US)에 cssgsg를 넣고
-  엔진 호스트를 시작 프로그램에 넣어 띄운다. 끝나면 Win+Space로 cssgsg(ENG)를 고른다. 이미 열려 있던 앱은 다시 열면 새 입력기를 쓴다.
+- 설치기는 `Program Files\cssgsg`에 입력기 DLL·엔진 호스트·Mozc 엔진을 넣고 등록한 뒤, 설치한 사용자의 입력 목록(한국어)에 cssgsg를 넣고
+  엔진 호스트를 시작 프로그램에 넣어 띄운다. 끝나면 Win+Space로 한국어 cssgsg를 고른다. 이미 열려 있던 앱은 다시 열면 새 입력기를 쓴다.
+  0.2.7까지는 영어(미국) 입력기였다: 올리면 영어 쪽 cssgsg를 빼고, 영어(미국)에 남는 입력기가 없으면 그 언어째 뺀다(윈도우 표시 언어면 둔다).
 - 서명이 없다: 스마트 앱 컨트롤이 켜져 있으면 입력기가 뜨지 않는다(Windows 보안 → 앱 및 브라우저 컨트롤). SmartScreen이 막으면
   "추가 정보 → 실행"을 누른다.
 - 설정: 시작 메뉴 → **cssgsg 설정**, 또는 작업 표시줄의 모드 아이콘(G/ㅊ/月)을 눌러 나오는 메뉴(0.2.0, 맥 메뉴 막대 메뉴와 같다:
@@ -194,16 +195,17 @@ Claude 데스크톱 앱(MSIX) 안의 셸에서 띄운 프로그램은 `%APPDATA%
 C 런타임은 정적으로 링크해서(`.cargo/config.toml`) 입력기 DLL은 시스템 DLL에만 기댄다.
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools\win\tip-dev.ps1 install     # 빌드 → Program Files\cssgsg → 등록(관리자 창) → 내 입력 목록(en-US)에 추가
+powershell -ExecutionPolicy Bypass -File tools\win\tip-dev.ps1 install     # 빌드 → Program Files\cssgsg → 등록(관리자 창) → 내 입력 목록(한국어)에 추가
 powershell -ExecutionPolicy Bypass -File tools\win\tip-dev.ps1 uninstall   # 목록에서 빼기 → 등록 해제 → 파일·흔적 지우기(쓰는 중인 DLL은 다시 시작 때)
 powershell -ExecutionPolicy Bypass -File tools\win\tip-dev.ps1 status
 powershell -ExecutionPolicy Bypass -File tools\win\tip-dev.ps1 debuglog-on  # 개발자 기록 %LOCALAPPDATA%\cssgsg\tip-debug.log(키 코드·길이만), debuglog-off로 끔
 ```
 
-입력기는 en-US 프로필 하나로 등록한다(기반 배치는 US 그대로, [CONCEPT.md](CONCEPT.md) §10.2). 고르는 곳은 Win+Space다.
-윈도우 설정에서는 시간 및 언어 → 언어 및 지역 → 영어(미국) → 언어 옵션 → 키보드에 cssgsg로 보인다(언어 팩은 받지 않는다).
-그 언어의 키보드가 cssgsg 하나뿐이면 윈도우가 키보드 제거를 막으므로 영어(미국) 언어째 지운다. 한자 단축키는 윈도우 기본이 오른쪽 Ctrl 톡이다
-(Alt 조합은 앱 메뉴가 먼저 가져가서 쓸 수 없다).
+입력기는 한국어 프로필 하나로 등록한다(0.2.8부터, [CONCEPT.md](CONCEPT.md) §10.2). 앱과 게임이 한국어 입력기로 보고(오버워치는
+그때만 한글 조합을 제자리에 그린다), 기반 배치는 한국어 배치라 오른쪽 Alt·Ctrl이 한/영·한자 키다(MS 한국어 입력기와 같다).
+한/영 키는 영어 ↔ 방금 쓰던 비영어, 한자 키는 한자 변환이다. 고르는 곳은 Win+Space다. 윈도우 설정에서는 시간 및 언어 → 언어 및 지역 →
+한국어 → 언어 옵션 → 키보드에 cssgsg로 보인다. 그 언어의 키보드가 cssgsg 하나뿐이면 윈도우가 키보드 제거를 막으므로 지울 때는
+제거기(--uninstall-user)가 윈도우 언어 목록으로 뺀다. 한자 단축키는 윈도우 기본이 오른쪽 Ctrl 톡이다(Alt 조합은 앱 메뉴가 먼저 가져가서 쓸 수 없다).
 
 이 스크립트의 사용자 단계(입력 목록, HKCU 정리, 개발자 기록 설정)는 WMI로 띄운 프로세스에서 한다. MSIX 패키지 앱(Claude 데스크톱 앱 등) 안의 셸은
 HKCU·%LOCALAPPDATA% 쓰기가 그 앱의 칸으로 옮겨져서 다른 앱의 입력기가 보지 못한다.

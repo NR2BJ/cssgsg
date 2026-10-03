@@ -1,7 +1,7 @@
 //! 등록·해제(regsvr32, 관리자). 사용자 입력 목록에 넣고 빼는 것(InstallLayoutOrTip)은 사용자 권한에서 따로 한다
 //! (tools/win/tip-dev.ps1).
 //!
-//! 등록하는 것: CLSID의 InprocServer32(DLL 경로, Apartment), en-US 입력 프로필, TSF 카테고리.
+//! 등록하는 것: CLSID의 InprocServer32(DLL 경로, Apartment), 한국어 입력 프로필, TSF 카테고리. 0.2.7까지의 en-US 프로필은 지운다.
 //! DLL은 앱 컨테이너 앱(새 메모장, 시작 메뉴 검색)도 읽을 수 있는 곳(Program Files)에 두어야 한다.
 
 use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, MAX_PATH};
@@ -18,7 +18,7 @@ use windows::Win32::UI::TextServices::{
 };
 use windows::core::{Error, GUID, HRESULT, Result};
 
-use crate::{CLSID_TEXT_SERVICE, GUID_PROFILE, LANGID_EN_US, braced, module};
+use crate::{CLSID_TEXT_SERVICE, GUID_PROFILE, LANGID_EN_US, LANGID_KO_KR, braced, module};
 
 /// 입력 목록에 보이는 이름.
 const DESCRIPTION: &str = "cssgsg";
@@ -46,6 +46,11 @@ fn clsid_key() -> String {
 /// TSF가 프로필·카테고리를 적는 곳. 해제 API는 값만 지우고 빈 키 뼈대를 남겨서 마지막에 통째로 지운다.
 fn tsf_key() -> String {
     format!("SOFTWARE\\Microsoft\\CTF\\TIP\\{}", braced(&CLSID_TEXT_SERVICE))
+}
+
+/// 0.2.7까지의 en-US 프로필 키.
+fn legacy_profile_key() -> String {
+    format!("{}\\LanguageProfile\\0x{:08x}", tsf_key(), LANGID_EN_US)
 }
 
 fn module_path() -> Result<String> {
@@ -92,10 +97,13 @@ pub fn register() -> Result<()> {
     unsafe {
         let profiles: ITfInputProcessorProfileMgr =
             CoCreateInstance(&CLSID_TF_InputProcessorProfiles, None, CLSCTX_INPROC_SERVER)?;
+        // 0.2.7까지의 en-US 프로필(없으면 실패해도 된다). 해제 API가 남기는 빈 키도 지운다.
+        let _ = profiles.UnregisterProfile(&CLSID_TEXT_SERVICE, LANGID_EN_US, &GUID_PROFILE, 0);
+        let _ = windows_registry::LOCAL_MACHINE.remove_tree(legacy_profile_key());
         // 아이콘은 아직 없다(M3b에서 DLL 리소스로). 기본 사용 켬: 사용자 목록에 넣으면 바로 고를 수 있다.
         profiles.RegisterProfile(
             &CLSID_TEXT_SERVICE,
-            LANGID_EN_US,
+            LANGID_KO_KR,
             &GUID_PROFILE,
             &description,
             &[],
@@ -137,7 +145,8 @@ pub fn unregister() -> Result<()> {
             CLSCTX_INPROC_SERVER,
         ) {
             Ok(profiles) => {
-                keep(profiles.UnregisterProfile(&CLSID_TEXT_SERVICE, LANGID_EN_US, &GUID_PROFILE, 0))
+                keep(profiles.UnregisterProfile(&CLSID_TEXT_SERVICE, LANGID_KO_KR, &GUID_PROFILE, 0));
+                let _ = profiles.UnregisterProfile(&CLSID_TEXT_SERVICE, LANGID_EN_US, &GUID_PROFILE, 0);
             }
             Err(e) => keep(Err(e)),
         }

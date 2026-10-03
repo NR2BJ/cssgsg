@@ -56,8 +56,8 @@ Name: "ko"; MessagesFile: "compiler:Languages\Korean.isl"
 Name: "en"; MessagesFile: "compiler:Default.isl"
 
 [Messages]
-ko.FinishedLabel=설치를 마쳤습니다.%n%nWin+Space를 눌러 입력기 목록에서 cssgsg(ENG)를 고르세요. 이미 열려 있던 앱은 다시 열면 새 입력기를 씁니다.
-en.FinishedLabel=Setup has finished.%n%nPress Win+Space and choose cssgsg (ENG) in the input list. Apps that were already open use the new version after you reopen them.
+ko.FinishedLabel=설치를 마쳤습니다.%n%nWin+Space를 눌러 입력기 목록에서 한국어 cssgsg를 고르세요. 이미 열려 있던 앱은 다시 열면 새 입력기를 씁니다.
+en.FinishedLabel=Setup has finished.%n%nPress Win+Space and choose cssgsg (Korean) in the input list. Apps that were already open use the new version after you reopen them.
 
 [CustomMessages]
 ko.AddingInput=입력 목록에 cssgsg를 넣는 중…

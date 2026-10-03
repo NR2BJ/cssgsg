@@ -150,6 +150,13 @@ impl Sim {
         out
     }
 
+    /// 윈도우 한국어 배치의 한자 키(VK_HANJA)를 누른다([`Engine::hanja_key_pressed`]).
+    pub fn hanja_key(&mut self) -> Output {
+        let out = self.engine.hanja_key_pressed(&self.ctx);
+        self.apply(None, &out);
+        out
+    }
+
     /// 셸처럼 타이머 시각에 엔진을 부른다. 수식키는 마지막으로 넣은 이벤트 그대로 누르고 있다고 본다.
     pub fn fire_timer(&mut self, now: f64) -> Output {
         self.fire_timer_held(now, self.held)

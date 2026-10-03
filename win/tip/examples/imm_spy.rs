@@ -31,15 +31,15 @@ mod imp {
     use std::ffi::c_void;
     use std::time::{Duration, Instant};
 
-    use cssgsg_tip::{CLSID_TEXT_SERVICE, GUID_PROFILE, LANGID_EN_US};
+    use cssgsg_tip::{CLSID_TEXT_SERVICE, GUID_PROFILE, LANGID_KO_KR};
     use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
     use windows::Win32::System::Com::{
         CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
     };
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::UI::Input::KeyboardAndMouse::{
-        HKL, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP,
-        KEYEVENTF_SCANCODE, SendInput, SetFocus,
+        HKL, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY,
+        KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, SendInput, SetFocus,
     };
     use windows::Win32::UI::TextServices::{
         CLSID_TF_InputProcessorProfiles, CLSID_TF_ThreadMgr, ITfInputProcessorProfileMgr, ITfThreadMgrEx,
@@ -76,6 +76,45 @@ mod imp {
         fn ImmGetCompositionStringW(himc: isize, index: u32, buf: *mut c_void, len: u32) -> i32;
         fn ImmSetOpenStatus(himc: isize, open: i32) -> i32;
         fn ImmSetConversionStatus(himc: isize, conversion: u32, sentence: u32) -> i32;
+        fn ImmGetProperty(hkl: isize, index: u32) -> u32;
+        fn ImmIsIME(hkl: isize) -> i32;
+    }
+
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn GetKeyboardLayout(thread: u32) -> isize;
+    }
+
+    /// 앱이 볼 수 있는 입력 언어와 입력기 성질(게임이 언어로 조합 표시 방식을 고를 수 있다).
+    unsafe fn print_layout(when: &str) {
+        unsafe {
+            let hkl = GetKeyboardLayout(0);
+            println!(
+                "{when}: keyboard layout {:#010x}, ImmIsIME {}, IGP_PROPERTY {:#x}, IGP_CONVERSION {:#x}, IGP_SENTENCE {:#x}, IGP_UI {:#x}, IGP_SETCOMPSTR {:#x}, IGP_SELECT {:#x}",
+                hkl as u32,
+                ImmIsIME(hkl),
+                ImmGetProperty(hkl, 0x04),
+                ImmGetProperty(hkl, 0x08),
+                ImmGetProperty(hkl, 0x0C),
+                ImmGetProperty(hkl, 0x10),
+                ImmGetProperty(hkl, 0x14),
+                ImmGetProperty(hkl, 0x18),
+            );
+        }
+    }
+
+    /// 조합 정보 바이트(속성) 또는 u32 목록(문절).
+    unsafe fn comp_bytes(hwnd: HWND, index: u32) -> Vec<u8> {
+        unsafe {
+            let himc = ImmGetContext(hwnd);
+            let bytes = ImmGetCompositionStringW(himc, index, std::ptr::null_mut(), 0);
+            let mut buf = vec![0u8; bytes.max(0) as usize];
+            if bytes > 0 {
+                ImmGetCompositionStringW(himc, index, buf.as_mut_ptr().cast(), bytes as u32);
+            }
+            ImmReleaseContext(hwnd, himc);
+            buf
+        }
     }
 
     /// 조합 문자열 하나(글자) 또는 숫자 하나(커서 자리 등).
@@ -149,10 +188,29 @@ mod imp {
                     if l & GCS_RESULTSTR != 0 {
                         line += &format!(" result={:?}", comp_string(hwnd, GCS_RESULTSTR));
                     }
+                    // 플래그와 상관없이 앱이 읽을 수 있는 것.
+                    let clause: Vec<u32> = comp_bytes(hwnd, 0x20)
+                        .chunks_exact(4)
+                        .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                        .collect();
+                    line += &format!(
+                        "\n      any: cursor={} delta={} attr={:?} clause={:?} read={:?} readattr={:?}",
+                        comp_number(hwnd, GCS_CURSORPOS),
+                        comp_number(hwnd, GCS_DELTASTART),
+                        comp_bytes(hwnd, 0x10),
+                        clause,
+                        comp_string(hwnd, 0x01),
+                        comp_bytes(hwnd, 0x02),
+                    );
                     println!("{line}");
                     return LRESULT(0);
                 }
-                WM_IME_NOTIFY => println!("  NOTIFY {:#x}", wparam.0),
+                WM_IME_NOTIFY => println!("  NOTIFY {:#x} {:#x}", wparam.0, lparam.0),
+                // 앱이 언어 바뀜을 아는 길.
+                0x0051 => println!("  INPUTLANGCHANGE charset {} layout {:#010x}", wparam.0, lparam.0 as u32),
+                0x0281 => println!("  IME_SETCONTEXT {} {:#x}", wparam.0, lparam.0 as u32),
+                0x0285 => println!("  IME_SELECT {} {:#010x}", wparam.0, lparam.0 as u32),
+                0x0288 => println!("  IME_REQUEST {:#x}", wparam.0),
                 // 0xE5(VK_PROCESSKEY)면 입력기가 그 키를 가져갔다.
                 WM_KEYDOWN => println!("  KEYDOWN vk={:#04x}", wparam.0),
                 WM_IME_CHAR => println!("  IME_CHAR {:?}", char::from_u32(wparam.0 as u32)),
@@ -183,8 +241,11 @@ mod imp {
             r#type: INPUT_KEYBOARD,
             Anonymous: INPUT_0 {
                 ki: KEYBDINPUT {
-                    wScan: scan,
-                    dwFlags: KEYEVENTF_SCANCODE | if up { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) },
+                    // 0xE038처럼 0xFF보다 크면 확장 키(E0 접두): 오른쪽 Alt·Ctrl.
+                    wScan: scan & 0xFF,
+                    dwFlags: KEYEVENTF_SCANCODE
+                        | if up { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) }
+                        | if scan > 0xFF { KEYEVENTF_EXTENDEDKEY } else { KEYBD_EVENT_FLAGS(0) },
                     ..Default::default()
                 },
             },
@@ -243,12 +304,13 @@ mod imp {
             let _ = SetForegroundWindow(hwnd);
             let _ = SetFocus(Some(hwnd));
             pump(300);
+            print_layout("before");
             let profiles: ITfInputProcessorProfileMgr =
                 CoCreateInstance(&CLSID_TF_InputProcessorProfiles, None, CLSCTX_INPROC_SERVER)?;
             let (lang, clsid, profile) = if ms {
                 (0x0412, CLSID_MS_KOREAN, PROFILE_MS_KOREAN)
             } else {
-                (LANGID_EN_US, CLSID_TEXT_SERVICE, GUID_PROFILE)
+                (LANGID_KO_KR, CLSID_TEXT_SERVICE, GUID_PROFILE)
             };
             profiles.ActivateProfile(
                 TF_PROFILETYPE_INPUTPROCESSOR,
@@ -259,6 +321,7 @@ mod imp {
                 TF_IPPMF_FORPROCESS,
             )?;
             pump(500);
+            print_layout("after ActivateProfile");
             if ms {
                 // MS 한국어 입력기를 한글 상태로.
                 let himc = ImmGetContext(hwnd);

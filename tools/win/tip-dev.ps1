@@ -29,7 +29,7 @@ $ErrorActionPreference = 'Stop'
 
 $Clsid = '{A9227DC2-56BC-4023-AE29-82A9AAA4EE14}'        # win/tip/src/lib.rs CLSID_TEXT_SERVICE
 $ProfileGuid = '{DCFBD969-D52F-4AFB-ABC0-271CC58FE18C}'  # GUID_PROFILE
-$Tip = "0x0409:$Clsid$ProfileGuid"                       # InstallLayoutOrTip 형식(en-US)
+$Tip = "0x0412:$Clsid$ProfileGuid"                       # InstallLayoutOrTip 형식(한국어). 0.2.7까지는 0x0409(en-US)
 $InstallDir = Join-Path $env:ProgramFiles 'cssgsg'
 $Target = Join-Path $InstallDir 'cssgsg_tip.dll'
 $HostExe = Join-Path $InstallDir 'cssgsg-host.exe'      # 엔진 호스트(win/host)
@@ -184,7 +184,7 @@ public static extern bool InstallLayoutOrTip(string psz, uint dwFlags);
                 Write-Host ("CLSID 등록: {0}  TSF 프로필: {1}  내 입력 목록: {2}  파일: {3}  개발자 기록: {4}" -f $reg, $ctf, $listed, (Test-Path $Target), $debug)
                 foreach ($l in $langs) { Write-Host ("  {0}: {1}" -f $l.LanguageTag, ($l.InputMethodTips -join ', ')) }
                 $left = @((Test-Path "HKCU:\Software\Microsoft\CTF\TIP\$Clsid"), (Test-Path 'HKCU:\Software\Microsoft\CTF\SortOrder\AssemblyItem\0x00000409'))
-                Write-Host ("  사용자 TSF 키: {0}  en-US 정렬 캐시: {1}" -f $left[0], $left[1])
+                Write-Host ("  사용자 TSF 키: {0}  옛 en-US 정렬 캐시: {1}" -f $left[0], $left[1])
                 $running = @(Get-Process cssgsg-host -ErrorAction SilentlyContinue).Count
                 $startup = $null -ne (Get-ItemProperty $RunKey -Name 'cssgsg' -ErrorAction SilentlyContinue)
                 Write-Host ("  엔진 호스트: {0}  Mozc 엔진: {1}  시작 프로그램: {2}  떠 있는 호스트: {3}" -f (Test-Path $HostExe), (Test-Path (Join-Path $MozcDir 'cssgsg_mozc.dll')), $startup, $running)

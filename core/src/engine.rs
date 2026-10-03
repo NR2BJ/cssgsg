@@ -328,6 +328,15 @@ impl Engine {
         self.finish(out, before)
     }
 
+    /// 한자 키(윈도우 한국어 배치의 VK_HANJA. 키보드 종류에 따라 오른쪽 Ctrl이나 오른쪽 Alt 자리다): 설정한 한자 단축키와
+    /// 상관없이 한자 단축키와 같다(변환 중이면 다음 후보, 아니면 변환 시작). 셸이 키 자리를 보지 않고 부른다.
+    pub fn hanja_key_pressed(&mut self, ctx: &Context) -> Output {
+        let before = self.snapshot();
+        let flushed = self.flush_buffered(ctx);
+        let out = merge(flushed, self.shortcut_action(ShortcutAction::Hanja, ctx));
+        self.finish(out, before)
+    }
+
     fn route(&mut self, ev: &KeyEvent, ctx: &Context) -> Output {
         self.caps = ev.mods.caps();
         let threshold = self.config.tap_threshold_ms as f64 / 1000.0;

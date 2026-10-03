@@ -332,7 +332,7 @@ cssgsg/
   - 영어 모드에서는 marked text 없이 `insertText`로 바로 커밋한다.
   - 주의: 웹과 Electron에서는 keydown의 `key`가 쿼티 글자로 보이고, 실제 입력은 Graphite가 된다. 텍스트 필드 안에서 keydown으로 글자를 처리하는 앱이 있으면 어긋난다.
     - 브라우저 이벤트 하네스(§11)로 검증한다. Firefox, Codex, Discord, KakaoTalk, VS Code(통합 터미널 포함) 순서로 먼저 본다.
-- **윈도우:** TIP을 en-US(US 레이아웃)로 등록한다.
+- **윈도우:** TIP을 한국어(ko-KR) 프로필로 등록한다(0.2.8부터. 0.2.7까지는 en-US, §10.2 프로필).
   - 텍스트 컨텍스트가 있을 때만 키를 먹고, edit session으로 커밋한다.
   - 빈 컨텍스트(`EMPTYCONTEXT`)이거나 `KEYBOARD_DISABLED`이면 통과시킨다.
 - **비번:** NRIME 로직(인증 UI 판정 → 비켜주기 / ABC 핸드오프)을 그대로 가져온다.
@@ -732,7 +732,8 @@ k     = { cho = "ㄱ" }
 
 ### 10.1 영어(Graphite) — TIP이 직접 만든다 (v1 결정, §4)
 
-- TIP을 en-US에 등록한다. 기반 레이아웃은 US(쿼티) 그대로 둔다. 레지스트리 조작은 하지 않는다.
+- TIP을 한국어 프로필에 등록한다(0.2.8부터, §10.2). 기반 레이아웃은 한국어 배치(글자 자리는 US 쿼티와 같고 오른쪽 Alt·Ctrl이
+  한/영·한자 키)다. 레지스트리 조작은 하지 않는다.
 - 영어 모드에서는 텍스트 컨텍스트가 있을 때만 키를 먹는다. 코어 latin 층이 scan code → Graphite 문자로 바꾸고 edit session으로 커밋한다.
 - Ctrl/Alt/Win 조합은 절대 먹지 않는다. 그래서 단축키는 쿼티 자리다.
 - **TIP이 없는 곳은 쿼티다.** 비번 필드(텍스트 서비스가 꺼지고 기반 레이아웃이 직접 침), UAC, 로그인 화면이 그렇다.
@@ -746,11 +747,17 @@ k     = { cho = "ㄱ" }
 - **언어:** Rust + `windows` crate.
   - 레퍼런스는 **windows-chewing-tsf**(新酷音 공식)다. 순수 Rust TIP이고 production에서 쓰인다. 코드베이스는 Codeberg로 이전했다.
   - azooKey-Windows는 Rust TIP + gRPC 서버 구성이다.
-- **프로필:** TIP 하나를 en-US 프로필 하나에 등록하고 모드는 내부에서 처리한다.
+- **프로필:** TIP 하나를 한국어 프로필 하나에 등록하고 모드는 내부에서 처리한다(0.2.8, 2026-10-03 사용자 결정. 0.2.7까지는 en-US).
   - Win+Space에 항목이 하나만 뜨고 언어 변경 이벤트가 없다.
   - 모드 표시는 작업 표시줄의 `GUID_LBI_INPUTMODE` 아이콘(한/あ/A)으로 한다.
-  - 대가: 앱은 모든 텍스트를 en-US로 본다(교정, 폰트 태깅). `GUID_PROP_LANGID`를 앱이 존중하는지는 미검증이다.
-  - en-US 기반 레이아웃이 가장 중립적이다. ko-KR 기반은 RAlt/RCtrl을 한/영·한자 키로 바꿀 수 있다.
+  - 까닭: 앱과 게임은 입력 언어(GetKeyboardLayout의 아래 낱말, IME 성질)로 조합 표시 방식을 고른다. 오버워치는 한국어 입력기일 때만
+    한글 조합을 제자리에 그린다: en-US cssgsg는 IMM 메시지가 MS 한국어와 같아도(examples/imm_spy) 일본어 입력기처럼 입력칸 맨 앞에
+    겹쳐 그렸다. 한국어로 등록하면 앱이 보는 것(배치 0x04120412, IGP_PROPERTY 0x1d000a 등)이 MS 한국어와 같다.
+  - 대가: 기반 배치가 한국어 배치라 오른쪽 Alt·Ctrl이 키보드 종류(종류 1: Alt = 한/영, Ctrl = 한자, 종류 2는 반대)에 따라 한/영(VK_HANGUL)·
+    한자(VK_HANJA) 키가 된다(MS 한국어 입력기와 같다). 입력기는 가상 키로 받아 한/영은 영어 ↔ 방금 쓰던 비영어, 한자는 한자 단축키와
+    같게 한다(`Engine::hanja_key_pressed`). 앱은 모든 텍스트를 한국어로 본다(교정, 폰트 태깅. en-US였을 때는 영어로 봤다).
+  - 한국어 배치의 Edit 컨트롤(옛 메모장)은 중간 글자가 아닌 한글 조합을 키마다 끝낸다(자모가 낱자로 확정, "ㅇㅏㄴ"): CUAS 문서의 한글
+    조합은 게임처럼 중간 글자(interim char, CS_INSERTCHAR)로 둔다(MS 한국어 입력기와 같다).
 - 윈도우 8 이후 입력기는 전역이다. 앱별 모드 기억은 넣지 않기로 했으니(§7) 신경 쓸 필요 없다.
 - **남의 프로세스 안에서 도는 코드라서 지킬 것:**
   - 패닉이 COM 경계를 넘지 않게 한다.
@@ -813,14 +820,32 @@ k     = { cho = "ㄱ" }
     ③을 쓴다(`key_window`, `post_key`, `Seen::taken`). 입력 장치를 거치지 않아 원시 입력을 읽는 게임에 키가 두 번 보이지도 않는다.
     Alt를 누르고 있거나 포커스 창이 없거나 시험의 동기 편집을 거절당하면 0.2.6 방식(실제 쪽 확정 + SendInput). 옛 메모장: "안녕 안녕 /
     안 "이 보통 빠르기·한꺼번에 모두 맞다.
+  - 0.2.7 후기(2026-10-03): 오버워치에서 한국어·일본어 모두 여전히 맨 앞에 겹친다(띄어쓰기·Enter·빠른 타자는 이상 없음).
+  - 0.2.8 원인 찾기: imm_spy가 플래그와 상관없이 앱이 읽을 수 있는 것(CURSORPOS, DELTASTART, COMPATTR, COMPCLAUSE, 읽기 문자열)과
+    GetKeyboardLayout·ImmGetProperty·WM_IME_REQUEST·WM_INPUTLANGCHANGE를 찍게 했다. 조합 정보는 MS 한국어와 같고(커서 0, 속성 [0],
+    문절 없음) 다른 것은 입력 언어뿐이었다: MS 한국어 배치 0x04120412·IGP_PROPERTY 0x1d000a·IGP_CONVERSION 0x9, cssgsg 0x04090409·
+    0x90000·0. MS 일본어도 겹치니 오버워치는 한국어 입력기에만 제자리 그리기를 하는 것으로 본다 → 한국어 프로필(위 프로필, 사용자 결정).
+    한국어로 등록하자 배치·성질이 MS 한국어와 같아졌다. 한국어 배치의 hklSubstitute로 US 배치를 쓰는 길은 없다(대체 배치는 그 언어의
+    배치여야 한다).
+  - 한국어 프로필에서 드러난 것: ① CUAS의 확정은 조합 끝(END)이 확정(RESULTSTR)보다 먼저 온다(같은 세션에서 확정하고 조합을 끝내면
+    한국어 CUAS가 END를 바로 보낸다). 옛 MS 한국어 입력기(호환 모드)가 보내던 순서라 앱들이 받는다. 새 MS 한국어는 RESULT → END.
+    ② 옛 메모장이 중간 글자가 아닌 한글 조합을 키마다 끝냈다 → CUAS 한글 조합은 중간 글자. ③ 크로미움(Edge)도 TS_SS_TRANSITORY를
+    켠다(TS_SS_TRANSITORY | TS_SS_NOHIDDENTEXT = 0xc, 크로미움 소스: MS 한국어 입력기 한자 문제를 피하려고). CUAS 문서는 0x4뿐이다.
+    TRANSITORY만 보던 0.2.6~0.2.7은 크로미움 앱(Edge·Chrome·VS Code·Discord…)도 CUAS로 다뤄 Space·Enter를 먹고 SendInput으로
+    다시 보냈다: Enter 줄바꿈이 빠지고 빠르게 치면 Space·Enter가 뒤로 밀렸다(Edge "안녕 안녕안", "안녕안녕안 ⏎"). 이제 CUAS는
+    TRANSITORY이고 NOHIDDENTEXT가 아닌 문맥(`cuas`). ITfContextOwnerServices는 둘 다 준다(가르지 못한다).
+  - 0.2.8 확인(VM): 옛 메모장·Edge에서 "안녕 안녕 / 안 "(보통·한꺼번에), 한/영 키로 "안hello안 ", 한자 키 + 1로 "安 ". imm_spy(게임처럼):
+    순서 맞음. 올리기: 관리자 단계가 en-US 프로필을 지우고 한국어로 등록, 사용자 단계(`--install-user`)가 한국어에 넣고 옛 en-US 항목을
+    뺀다. InstallLayoutOrTip(ILOT_UNINSTALL)은 언어의 마지막 입력기면 성공이라 하고 남기거나 입력기 없는 언어를 남긴다 → 윈도우 언어
+    목록(Set-WinUserLanguageList)으로 그 언어를 뺀다(표시 언어면 그 언어의 기본 입력기를 둔다). VM에서 0.2.7 상태를 꾸며 확인.
   - 런타임에는 `GetActiveFlags`로 분기한다(SECUREMODE / IMMERSIVEMODE / CONSOLE / UIELEMENTENABLEDONLY).
   - 설치는 레지스트리 직접 기록이 아니라 `RegisterProfile` + `InstallLayoutOrTip`으로 한다.
 - **M3a에서 확인한 것(2026-10-01, 윈도우 11 25H2 VM, `win/tip`)**
-  - 등록은 관리자(regsvr32 → `DllRegisterServer`: CLSID InprocServer32 Apartment → `RegisterProfile` → `RegisterCategory`)와 사용자(`InstallLayoutOrTip("0x0409:{CLSID}{PROFILE}")`)로 나뉜다.
+  - 등록은 관리자(regsvr32 → `DllRegisterServer`: CLSID InprocServer32 Apartment → `RegisterProfile` → `RegisterCategory`)와 사용자(`InstallLayoutOrTip("0x0409:{CLSID}{PROFILE}")`, 0.2.8부터 `0x0412:`)로 나뉜다.
     해제 API는 값만 지우고 흔적을 남긴다: HKLM `CTF\TIP\{CLSID}` 빈 뼈대, HKCU `CTF\TIP\{CLSID}`(Enable=0), HKCU `CTF\SortOrder\AssemblyItem\0x00000409`. 모두 우리 CLSID 것만 골라 지운다.
   - 윈도우 설정에는 언어 및 지역 → 영어(미국) → 키보드에 cssgsg로 나온다(언어 팩은 받지 않는다). 그 언어의 키보드가 하나뿐이면 윈도우가
     키보드 제거를 막아서 언어째 지워야 하므로, 넣고 빼기는 설치기·제거기와 설정 앱이 맡는다. 한국어 프로필로 바꾸면 한국어 아래에 붙지만
-    기반 배치가 한국어라 오른쪽 Alt·Ctrl이 한/영·한자 키가 된다(위 en-US를 고른 까닭).
+    기반 배치가 한국어라 오른쪽 Alt·Ctrl이 한/영·한자 키가 된다(그때 en-US를 고른 까닭. 0.2.8에 한국어로 바꿨다, 위 프로필).
     (처음에 설정에 안 보였던 것은 개발 셸이 MSIX 앱 안에서 돌아 InstallLayoutOrTip이 가상 칸에 적혔기 때문이었다. 2026-10-02 바로잡음.)
   - 한자 단축키: 윈도우 기본은 오른쪽 Control 탭(한국 키보드의 한자 키 자리, `Shortcuts::windows`). 맥 기본인 왼쪽 Option(Alt)+Return은
     쓸 수 없다: Alt 조합은 시스템 키 메시지라 앱 메뉴가 먼저 가져가서 입력기에 Alt 눌림이 오지 않고, 앱이 메뉴로 포커스를 옮기며 조합을
@@ -1192,7 +1217,8 @@ k     = { cho = "ㄱ" }
   윈도우는 `win-v<버전>` 릴리스로 내고 "최신"으로 두지 않는다. 윈도우 설정 앱은 목록에서 `win-v` 태그만 본다(M3e).
 - 윈도우 설정 앱(2026-10-02): WinUI 3, 패키지 없이, .NET 10 네이티브 AOT, Windows App SDK는 WinUI 패키지만(§10.5). 윈도우 화면 설정은
   설정 파일 `[windows]`(맥 `[mac]`과 따로: 글자 크기 단위·기본값이 다르다). 단축키에 Alt·Windows 키는 쓰지 않는다(녹화가 받지 않는다).
-- en-US 프로필 하나, x64, SAC 끔, 서명 없음(§10.5). 개발은 VMware VM에서 한다.
+- 한국어 프로필 하나(0.2.8, 2026-10-03 사용자 결정: 게임이 한국어 입력기로 봐야 한글 조합을 제자리에 그린다. 0.2.7까지는 en-US),
+  x64, SAC 끔, 서명 없음(§10.5). 개발은 VMware VM에서 한다.
 - 후보창·HUD는 앱 프로세스 안에서 그린다(§10.4). 모드는 작업 표시줄 아이콘과 TSF 전역 칸으로 앱 사이에서 하나다.
 - 설정 앱은 WinUI 3다. 배열 학습·타자 연습 탭은 같은 HTML을 WebView2로 띄운다(2026-10-01 사용자 결정).
 - 한자 기본 키는 오른쪽 Control 탭이다(Alt 조합은 입력기에 오지 않는다, §10.2). Alt 단독·Control 단독 탭이어도 된다(사용자).

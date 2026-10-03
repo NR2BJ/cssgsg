@@ -31,11 +31,11 @@ sealed partial class AboutPage : SettingsPage
         addInput = Ui.Button(T("추가", "Add", "追加"), () => _ = AddInputAsync());
         var inputRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Children = { inputList, addInput } };
         Add(Ui.Section("cssgsg", T(
-                "입력기 목록은 윈도우 설정 → 시간 및 언어 → 언어 및 지역 → 영어(미국) → 언어 옵션 → 키보드에도 있습니다. " +
+                "입력기 목록은 윈도우 설정 → 시간 및 언어 → 언어 및 지역 → 한국어 → 언어 옵션 → 키보드에도 있습니다. " +
                 "입력기는 Win+Space(또는 왼쪽 Alt+Shift)로 바꿉니다.",
-                "The input list is also in Windows Settings → Time & language → Language & region → English (United States) → " +
+                "The input list is also in Windows Settings → Time & language → Language & region → Korean → " +
                 "Language options → Keyboards. Switch input methods with Win+Space (or Left Alt+Shift).",
-                "入力方式の一覧は Windows の設定 → 時刻と言語 → 言語と地域 → 英語（米国）→ 言語のオプション → キーボード にもあります。" +
+                "入力方式の一覧は Windows の設定 → 時刻と言語 → 言語と地域 → 韓国語 → 言語のオプション → キーボード にもあります。" +
                 "入力方式は Win+Space（または左Alt+Shift）で切り替えます。"),
             Ui.Row(T("버전", "Version", "バージョン"), new TextBlock { Text = BuildInfo.Version, IsTextSelectionEnabled = true }),
             Ui.Row(T("입력기 목록", "Input List", "入力方式の一覧"), inputRow),
