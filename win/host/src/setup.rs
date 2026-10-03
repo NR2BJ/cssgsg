@@ -1,8 +1,8 @@
 //! 설치기가 부르는 사용자 쪽 일. 관리자 쪽(파일 복사, 입력기 DLL 등록)은 설치기(win/installer)가 하고, 사용자마다 하는 일은
 //! 그 사용자로 돌아야 해서 여기 둔다(설치기가 원래 사용자로 부른다). tools/win/tip-dev.ps1의 enable·disable도 이것을 부른다.
 //! - `--install-user`: 내 입력 목록에 cssgsg(한국어)를 넣고, 엔진 호스트를 시작 프로그램에 넣고 띄운다. 0.2.7까지의 en-US 항목은
-//!   목록에서 빼고 그 흔적을 지운다([`remove_from_list`]). 0.2.9가 일본어 목록에 남긴 일본어 cssgsg도 뺀다(일본어 프로필은 목록 밖에서
-//!   입력기가 스스로 켠다).
+//!   목록에서 빼고 그 흔적을 지운다([`remove_from_list`]). 일본어 목록은 건드리지 않는다(일본어 프로필은 평범하게 등록해서 일본어가
+//!   깔린 PC의 Win+Space에 뜬다).
 //! - `--uninstall-user`: 목록에서 빼고, TSF가 사용자별로 남기는 흔적(정렬 캐시, 사용자 키)과 시작 프로그램을 지우고, 호스트를 끈다.
 //!   학습·사용자 사전(%LOCALAPPDATA%\cssgsg)은 남긴다.
 //! - `--quit`: 떠 있는 호스트를 끈다(엔진을 내려 학습을 마무리한 뒤). 설치기가 파일을 바꾸기 전에 부른다.
@@ -30,8 +30,8 @@ windows::core::link!("kernel32.dll" "system" fn GetUserDefaultUILanguage() -> u1
 /// 입력 프로필 언어(win/tip/src/lib.rs의 LANGID_KO_KR). 0.2.7까지는 en-US(LANGID_EN_US)였다.
 const LANG_KO_KR: u16 = 0x0412;
 const LANG_EN_US: u16 = 0x0409;
-/// 일본어 모드에서 입력기가 스스로 바꾸는 프로필(win/tip/src/lib.rs LANGID_JA_JP). 입력 목록에는 두지 않는다: 0.2.9는 일본어가 깔린
-/// PC에서 윈도우가 이 프로필을 일본어 목록에 넣어 Win+Space에 "일본어 cssgsg"가 떴다.
+/// 일본어 모드에서 입력기가 스스로 바꾸는 프로필(win/tip/src/lib.rs LANGID_JA_JP). 목록에 넣지는 않는다(기본 사용 켬으로 등록해서
+/// 일본어가 깔린 PC의 Win+Space에 "일본어 cssgsg"가 뜬다). 지울 때는 일본어 목록에 있으면 뺀다.
 const LANG_JA_JP: u16 = 0x0411;
 
 /// 내 입력 목록의 항목 이름("0412:{CLSID}{PROFILE}", HKCU\Control Panel\International\User Profile\<언어>의 값 이름).
@@ -140,7 +140,6 @@ fn drop_legacy_profile() -> bool {
 pub fn install_user() -> i32 {
     let listed = add_to_list(LANG_KO_KR);
     let legacy = drop_legacy_profile();
-    let japanese = remove_from_list(LANG_JA_JP);
     let Ok(exe) = std::env::current_exe() else { return 1 };
     let startup = CURRENT_USER
         .create(RUN_KEY)
@@ -149,7 +148,7 @@ pub fn install_user() -> i32 {
     // 지금도 띄운다. 이미 떠 있으면 새것은 바로 끝난다(사용자당 하나).
     let spawned = std::process::Command::new(&exe).spawn().is_ok();
     log(&format!(
-        "install-user: input list {listed}, old en-US entry removed {legacy}, Japanese entry not listed {japanese}, startup {startup}, host {spawned}"
+        "install-user: input list {listed}, old en-US entry removed {legacy}, startup {startup}, host {spawned}"
     ));
     if listed && startup && spawned { 0 } else { 1 }
 }

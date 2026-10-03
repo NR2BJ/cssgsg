@@ -337,6 +337,40 @@ fn cancel_compose_timer() {
     }
 }
 
+thread_local! {
+    /// CUAS 앱에서 키를 다 다룬 뒤로 미룬 입력 프로필 바꾸기의 타이머와 텍스트 서비스([`TextService_Impl::after`]).
+    static PROFILE_TIMER: RefCell<Option<(usize, ComObject<TextService>)>> = const { RefCell::new(None) };
+}
+
+/// 미룬 프로필 바꾸기를 할 때. 스레드 타이머의 WM_TIMER는 메시지 줄에 다른 것(그 키가 낸 확정 메시지, 다음 키)이 없을 때만 온다.
+unsafe extern "system" fn profile_timer_fired(_hwnd: HWND, _msg: u32, id: usize, _time: u32) {
+    let _ = unsafe { KillTimer(None, id) };
+    let service = PROFILE_TIMER.with(|t| {
+        let mut slot = t.borrow_mut();
+        match slot.take() {
+            Some((pending, service)) if pending == id => Some(service),
+            other => {
+                *slot = other;
+                None
+            }
+        }
+    });
+    if let Some(service) = service {
+        guarded(|| (), || service.switch_to_mode_profile());
+    }
+}
+
+/// 미룬 프로필 바꾸기를 거둔다. 걸려 있었으면 true.
+fn cancel_profile_timer() -> bool {
+    match PROFILE_TIMER.with(|t| t.borrow_mut().take()) {
+        Some((id, _)) => {
+            let _ = unsafe { KillTimer(None, id) };
+            true
+        }
+        None => false,
+    }
+}
+
 fn mode_value(mode: Mode, last_non_en: Mode) -> i32 {
     mode as i32 | (last_non_en as i32) << 4
 }
@@ -529,8 +563,8 @@ impl TextService_Impl {
         Ok(())
     }
 
-    /// 입력 프로필 언어를 모드에 맞춘다([`profile_language`]). 바꿨으면 true. 프로필은 모드를 따라가기만 한다(일본어 프로필은 사용자 입력 목록에
-    /// 넣지 않아 Win+Space에 뜨지 않고, 고를 수도 없다).
+    /// 입력 프로필 언어를 모드에 맞춘다([`profile_language`]). 바꿨으면 true. 프로필은 모드를 따라가기만 한다(일본어가 깔린 PC에서는
+    /// 일본어 프로필이 Win+Space에도 뜬다: 다른 입력기와 같은 평범한 등록, 2026-10-03 사용자 결정).
     /// - `Some(mode)`: 모드를 바꾼 앱(앞에 있는 앱)이 세션 전체를 바꾼다(Win+Space로 고르는 것과 같다: 새로 뜨는 앱도 그 프로필).
     ///   뒤에 있는 앱의 입력기는 전역 칸으로 모드만 따라가고 바꾸지 않는다(여러 앱이 같이 바꾸면 빠르게 오갈 때 순서가 엇갈린다).
     /// - `None`: 켜질 때·입력칸이 바뀔 때 지금 모드와 다르면 이 앱만 맞춘다(세션 전체를 못 바꾼 경우).
@@ -561,8 +595,8 @@ impl TextService_Impl {
                 flags,
             )
         };
-        // TF_IPPMF_ENABLEPROFILE: 일본어 프로필은 기본 사용 끔으로 등록한다(register.rs). 일본어가 깔린 PC에서 꺼진 프로필을 켜라고 하면
-        // 윈도우가 우리 입력기를 끄고 그 언어의 다른 입력기(MS IME)를 켰다(가나 대신 쿼티, VM). 켜면서 바꾸면 언어 목록은 그대로다.
+        // TF_IPPMF_ENABLEPROFILE: 사용자가 설정에서 일본어 cssgsg를 뺐어도(사용 끔) 月 모드는 일본어 프로필이어야 한다. 일본어가 깔린
+        // PC에서 꺼진 프로필을 켜라고 하면 윈도우가 우리 입력기를 끄고 그 언어의 다른 입력기(MS IME)를 켰다(가나 대신 쿼티, VM).
         let enable = TF_IPPMF_ENABLEPROFILE;
         let result = if changed.is_some() {
             activate(TF_IPPMF_FORSESSION | enable).or_else(|e| {
@@ -577,6 +611,34 @@ impl TextService_Impl {
             if changed.is_some() { "changed here" } else { "catching up" }
         ));
         result.is_ok()
+    }
+
+    /// 프로필 바꾸기를 지금 키를 다 다룬 뒤로 미룬다(0ms 스레드 타이머, 이미 걸려 있으면 다시 건다). 타이머를 못 걸면 바로 바꾼다.
+    fn schedule_profile(&self) {
+        cancel_profile_timer();
+        let id = unsafe { SetTimer(None, 0, 0, Some(profile_timer_fired)) };
+        if id == 0 {
+            debug_log("profile timer: SetTimer failed");
+            self.switch_to_mode_profile();
+            return;
+        }
+        PROFILE_TIMER.with(|t| *t.borrow_mut() = Some((id, self.to_object())));
+    }
+
+    /// 미뤄 둔 프로필 바꾸기가 있으면 지금 한다(다음 키를 다루기 전에, 입력칸이 바뀔 때). `why`: 개발자 기록.
+    fn flush_profile(&self, why: &str) {
+        if cancel_profile_timer() {
+            debug_log(&format!("profile switch moved up: {why}"));
+            self.switch_to_mode_profile();
+        }
+    }
+
+    /// 지금 모드의 프로필로 바꾼다(이 앱에서 바꾼 것처럼 세션 전체).
+    fn switch_to_mode_profile(&self) {
+        let mode = self.state.try_borrow().ok().and_then(|s| s.as_ref().map(|a| a.engine.mode()));
+        if let Some(mode) = mode {
+            self.sync_profile(Some(mode));
+        }
     }
 
     /// 작업 표시줄 모드 아이콘 메뉴에서 고른 것을 처리한다([`crate::menu`]).
@@ -636,6 +698,7 @@ impl TextService_Impl {
 
     fn deactivate(&self) {
         cancel_engine_timer();
+        cancel_profile_timer();
         self.end_composition();
         if let Ok(mut screen) = self.screen.try_borrow_mut() {
             screen.close_candidates();
@@ -704,6 +767,10 @@ impl TextService_Impl {
                 if actual { "key" } else { "test" }
             ));
             self.apply(context, &left.out, When::Whenever);
+        }
+        // 조합을 확정하고 입력 언어 바꾸기를 미뤄 둔 사이 다음 키가 왔다: 이 키의 조합은 새 언어에서 시작해야 한다.
+        if down {
+            self.flush_profile("the next key came first");
         }
         if let Some(context) = context {
             self.settle_context(context);
@@ -962,25 +1029,30 @@ impl TextService_Impl {
             // 모드를 바꾸며 확정이 나왔다 = 엔진은 조합 중이었고 그 조합은 문서에 있다. 모드를 알리고(입력 모드 칸) 프로필을 바꾸면
             // 앱이 그 조합을 스스로 끝낸다: CUAS는 입력 모드 칸이 바뀔 때, TSF 앱(Edge)은 프로필이 바뀔 때. 그다음 우리가 또 확정하면
             // 두 번 들어갔다("안안日本語", 2026-10-03). 그래서 조합을 먼저 우리가 다룬다.
-            // - CUAS에서 한국어를 떠나며 입력 언어가 바뀐다(한→일): 한국어 조합은 확정하지 않고 지운 뒤 바꾸고, 그 글자는 이 키를
-            //   다룰 때 새 언어에서 넣는다(apply: 시작 → 확정 → 끝). 한국어 CUAS는 우리 조합을 어떻게 끝내도 조합 끝을 확정보다 먼저
-            //   보내고(MS 한국어는 확정 → 끝), 그 뒤 언어가 바뀌면 오버워치가 그 글자를 조합 중으로 남겼다(이가 → 이가가, 지워지지
-            //   않고 방향키가 안 됨).
-            // - 그 밖의 CUAS: 확정 → 끝으로 먼저 끝낸다(finish_before_switch). 이 키의 확정은 넣지 않는다.
-            // - TSF 앱: 프로필을 바꾸는 사이 우리 조합이 끝났으면 이 키의 확정은 넣지 않는다.
+            // - CUAS(옛 Win32 앱, 게임): 모드를 알리기 전에 확정한다(finish_before_switch: 다른 키로 확정할 때와 같은 메시지). 이 키의
+            //   확정은 넣지 않는다. 입력 언어는 이 키를 다 다룬 뒤 앱의 메시지 처리에서 바꾼다(schedule_profile). MS 입력기는 언어를
+            //   스스로 바꾸지 않는다: Win+Space·언어 전환 단축키도 윈도우가 그 키 처리가 끝난 뒤 앱의 메시지 처리 중에 바꾼다. 그
+            //   모양을 따른다(게임마다 따로 다루지 않는다). 키 처리 안에서 바꾼 0.2.9는 오버워치가 그 글자를 두 번 남기고 조합을 놓지
+            //   않았다. 이전 버전 MS 한국어 입력기는 확정 순서가 우리와 같고(끝 → 확정), Win+Space로 바꾸면 한 번만 들어갔다.
+            // - TSF 앱: 바로 바꾼다. 바꾸는 사이 우리 조합이 끝났으면 이 키의 확정은 넣지 않는다.
+            // 미뤄 둔 바꾸기가 있으면 이번 모드가 앞선다(빠르게 두 번 바꿈).
+            cancel_profile_timer();
             let commit = !out.commit.is_empty();
-            let from = profile_mgr().ok().and_then(|p| active_language(&p));
-            let leaving_korean = from == Some(LANGID_KO_KR) && profile_language(mode) != LANGID_KO_KR;
-            let canceled =
-                cuas && commit && leaving_korean && context.is_some_and(|c| self.cancel_composition(c));
-            let finished = cuas && commit && !canceled && self.finish_before_switch(&out.commit);
-            self.show_mode(mode, true);
+            let finished = cuas && commit && self.finish_before_switch(&out.commit);
             let composing = self.slot.try_borrow().is_ok_and(|s| s.is_some());
-            let switched = self.sync_profile(Some(mode));
+            self.show_mode(mode, true);
+            if cuas {
+                let from = profile_mgr().ok().and_then(|p| active_language(&p));
+                if from != Some(profile_language(mode)) {
+                    self.schedule_profile();
+                }
+            } else {
+                self.sync_profile(Some(mode));
+            }
             let ended = composing && self.slot.try_borrow().is_ok_and(|s| s.is_none());
-            if commit && !canceled && (finished || (switched && (cuas || ended))) {
+            if commit && (finished || ended) {
                 debug_log(&format!(
-                    "mode change: composition finished first {finished}, CUAS {cuas}, ended by the switch {ended}; not committing it again"
+                    "mode change: composition finished first {finished}, ended by the app {ended}, CUAS {cuas}; not committing it again"
                 ));
                 if let Ok(mut done) = self.completed_by_switch.try_borrow_mut() {
                     *done = Some(out.commit.encode_utf16().collect());
@@ -1187,9 +1259,9 @@ impl TextService_Impl {
         }
     }
 
-    /// 모드를 바꾸며 입력 언어도 바꾸기 전에 남은 조합을 MS 한국어 입력기처럼 끝낸다(CUAS): 확정([`Finalize`]) → 조합 끝
-    /// ([`EndComposition`])을 세션 둘로. 한 세션이면 한국어 CUAS는 끝을 확정보다 먼저 보내고, 그대로 언어를 바꾸면 CUAS가
-    /// 끝 → 확정으로 마무리해서 오버워치가 그 글자를 조합 중으로 남겼다(지워지지 않고 방향키가 안 됨, 2026-10-03). 했으면 true.
+    /// 모드를 바꾸기 전에 남은 조합을 확정한다(CUAS, 입력 모드 칸을 바꾸면 CUAS가 조합을 스스로 끝내 버린다): 확정([`Finalize`]) →
+    /// 조합 끝([`EndComposition`])을 세션 둘로. 앱이 받는 것은 그 자리에서 키로 확정한 것과 같다: 일본어 CUAS는 확정 → 끝,
+    /// 한국어 CUAS는 우리 조합을 어떻게 끝내도 끝 → 확정(옛 MS 한국어 입력기 순서, 음절 경계·Space와 같다). 했으면 true.
     fn finish_before_switch(&self, text: &str) -> bool {
         let Some(c) = self.slot.try_borrow().ok().and_then(|s| s.clone()) else {
             debug_log("switching the profile: no composition in the document to finish");
@@ -1211,19 +1283,6 @@ impl TextService_Impl {
         let ended = request(EndComposition::new(c.clone()).into());
         debug_log(&format!("switching the profile: finalized, then ended the composition {ended:?}"));
         true
-    }
-
-    /// 문서의 조합을 확정하지 않고 지운다(지금, 동기). 엔진의 조합은 이미 확정으로 나왔다([`Self::after`]). 했으면 true.
-    fn cancel_composition(&self, context: &ITfContext) -> bool {
-        if !self.slot.try_borrow().is_ok_and(|s| s.is_some()) {
-            return false;
-        }
-        let Some(env) = self.edit_env(context) else { return false };
-        let canceled = self.request_edit(context, env, vec![Op::Clear], None, When::Now);
-        debug_log(&format!(
-            "mode change: canceled the composition to put it in after the language switch: {canceled}"
-        ));
-        canceled
     }
 
     /// 조합을 그 자리에서 끝내고(글자는 남는다) 엔진의 조합을 버린다. 미뤄 둔 새 조합도 버린다.
@@ -1475,7 +1534,9 @@ impl ITfThreadMgrEventSink_Impl for TextService_Impl {
                 }
                 // 설정 앱에서 고치고 돌아왔을 수 있다.
                 self.sync_host();
-                // 다른 앱에서 모드를 바꾸며 세션 프로필을 못 바꿨으면 이 앱만이라도 맞춘다.
+                // 이 앱에서 모드를 바꾸고 미뤄 둔 프로필 바꾸기는 지금(세션 전체). 다른 앱에서 모드를 바꾸며 세션 프로필을
+                // 못 바꿨으면 이 앱만이라도 맞춘다.
+                self.flush_profile("focus moved");
                 self.sync_profile(None);
                 Ok(())
             },

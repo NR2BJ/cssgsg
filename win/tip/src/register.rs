@@ -101,9 +101,9 @@ pub fn register() -> Result<()> {
         let _ = profiles.UnregisterProfile(&CLSID_TEXT_SERVICE, LANGID_EN_US, &GUID_PROFILE, 0);
         let _ = windows_registry::LOCAL_MACHINE.remove_tree(legacy_profile_key());
         // 아이콘은 아직 없다(M3b에서 DLL 리소스로). 기본 사용 켬: 사용자 목록에 넣으면 바로 고를 수 있다.
-        // 한국어가 기본이고, 일본어(月) 모드에서는 입력기가 스스로 일본어 프로필로 바꾼다(lib.rs LANGID_JA_JP). 일본어 프로필은 기본
-        // 사용 끔: 켜 두면 일본어가 깔린 PC에서 윈도우가 일본어 입력 목록에 넣어 Win+Space에 "일본어 cssgsg"가 떴다(0.2.9, 메인 PC).
-        // 바꿀 때 TF_IPPMF_ENABLEPROFILE로 켠다(언어 목록은 그대로다).
+        // 한국어가 기본이고, 일본어(月) 모드에서는 입력기가 스스로 일본어 프로필로 바꾼다(lib.rs LANGID_JA_JP). 일본어 프로필도 다른
+        // 입력기처럼 평범하게 등록한다: 일본어가 깔린 PC에서는 TSF가 사용으로 보아 Win+Space에 "일본어 cssgsg"가 뜬다.
+        // 0.2.10은 기본 사용 끔으로 숨겼는데 처음 쓸 때 다시 생겼다(2026-10-03, 표준대로 두기로 사용자 결정).
         for language in [LANGID_KO_KR, LANGID_JA_JP] {
             profiles.RegisterProfile(
                 &CLSID_TEXT_SERVICE,
@@ -114,7 +114,7 @@ pub fn register() -> Result<()> {
                 0,
                 HKL::default(),
                 0,
-                language == LANGID_KO_KR,
+                true,
                 0,
             )?;
         }

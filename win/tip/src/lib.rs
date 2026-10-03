@@ -39,7 +39,7 @@ use windows::core::{BOOL, GUID, HRESULT, IUnknown, Interface};
 
 /// 텍스트 서비스 COM 클래스. 한 번 정하면 바꾸지 않는다(사용자 입력 목록·레지스트리가 이 값을 기억한다).
 pub const CLSID_TEXT_SERVICE: GUID = GUID::from_u128(0xA9227DC2_56BC_4023_AE29_82A9AAA4EE14);
-/// 입력 프로필. 한국어 하나뿐이고 한·영·일은 입력기 안에서 바꾼다(CONCEPT §10.2).
+/// 입력 프로필(한국어·일본어 같은 GUID). 한·영·일은 입력기 안에서 바꾸고, 月 모드에서만 일본어 프로필로 간다(CONCEPT §10.2).
 pub const GUID_PROFILE: GUID = GUID::from_u128(0xDCFBD969_D52F_4AFB_ABC0_271CC58FE18C);
 /// 프로필 언어: 한국어. 앱과 게임이 한국어 입력기로 본다(오버워치는 입력 언어가 한국어일 때만 한글 조합을 제자리에 그린다,
 /// 2026-10-03). 기반 배치는 한국어 배치라 오른쪽 Alt·Ctrl이 한/영·한자 키다(키보드 종류 설정에 따라).
