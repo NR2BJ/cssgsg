@@ -19,24 +19,28 @@ use windows::Win32::Foundation::{E_UNEXPECTED, LPARAM, WPARAM};
 use windows::Win32::System::SystemInformation::GetTickCount;
 use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetFocus, GetKeyboardLayout, GetLastInputInfo, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS,
+    GetFocus, GetKeyboardLayout, GetLastInputInfo, HKL, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS,
     KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, LASTINPUTINFO, SendInput,
     VIRTUAL_KEY, VK_CAPITAL, VK_HANGUL, VK_HANJA, VK_PACKET,
 };
 use windows::Win32::UI::TextServices::{
     GUID_COMPARTMENT_EMPTYCONTEXT, GUID_COMPARTMENT_KEYBOARD_DISABLED,
     GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION, GUID_COMPARTMENT_KEYBOARD_OPENCLOSE,
-    IEnumTfDisplayAttributeInfo, ITfCategoryMgr, ITfCompartment, ITfCompartmentEventSink,
-    ITfCompartmentEventSink_Impl, ITfCompartmentMgr, ITfComposition, ITfCompositionSink,
-    ITfCompositionSink_Impl, ITfContext, ITfDisplayAttributeInfo, ITfDisplayAttributeProvider,
-    ITfDisplayAttributeProvider_Impl, ITfDocumentMgr, ITfEditSession, ITfKeyEventSink, ITfKeyEventSink_Impl,
+    GUID_TFCAT_TIP_KEYBOARD, IEnumTfDisplayAttributeInfo, ITfCategoryMgr, ITfCompartment,
+    ITfCompartmentEventSink, ITfCompartmentEventSink_Impl, ITfCompartmentMgr, ITfComposition,
+    ITfCompositionSink, ITfCompositionSink_Impl, ITfContext, ITfDisplayAttributeInfo,
+    ITfDisplayAttributeProvider, ITfDisplayAttributeProvider_Impl, ITfDocumentMgr, ITfEditSession,
+    ITfInputProcessorProfileMgr, ITfInputProcessorProfiles, ITfKeyEventSink, ITfKeyEventSink_Impl,
     ITfKeystrokeMgr, ITfLangBarItemButton, ITfLangBarItemMgr, ITfSource, ITfTextInputProcessor_Impl,
     ITfTextInputProcessorEx, ITfTextInputProcessorEx_Impl, ITfThreadMgr, ITfThreadMgrEventSink,
     ITfThreadMgrEventSink_Impl, TF_E_SYNCHRONOUS, TF_ES_ASYNCDONTCARE, TF_ES_READ, TF_ES_READWRITE,
-    TF_ES_SYNC, TF_SD_READONLY, TF_TMAE_UIELEMENTENABLEDONLY, TS_SS_NOHIDDENTEXT, TS_SS_TRANSITORY,
+    TF_ES_SYNC, TF_INPUTPROCESSORPROFILE, TF_IPPMF_FORPROCESS, TF_IPPMF_FORSESSION,
+    TF_PROFILETYPE_INPUTPROCESSOR, TF_SD_READONLY, TF_TMAE_UIELEMENTENABLEDONLY, TS_SS_NOHIDDENTEXT,
+    TS_SS_TRANSITORY,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetMessageTime, KillTimer, PostMessageW, SetTimer, WM_KEYDOWN,
+    GetForegroundWindow, GetMessageTime, GetWindowThreadProcessId, KillTimer, PostMessageW, SetTimer,
+    WM_KEYDOWN,
 };
 use windows::core::{
     BOOL, ComObject, GUID, HRESULT, IUnknown, IUnknownImpl, Interface, Ref, Result, implement,
@@ -53,8 +57,8 @@ use crate::plan::{Op, plan};
 use crate::ui::Screen;
 use crate::uiless::GameCandidates;
 use crate::{
-    GUID_COMPARTMENT_MODE, GUID_DISPLAY_ATTRIBUTE_FOCUSED, GUID_DISPLAY_ATTRIBUTE_INPUT, debug_log, display,
-    read_debug_flag,
+    CLSID_TEXT_SERVICE, GUID_COMPARTMENT_MODE, GUID_DISPLAY_ATTRIBUTE_FOCUSED, GUID_DISPLAY_ATTRIBUTE_INPUT,
+    GUID_PROFILE, LANGID_JA_JP, LANGID_KO_KR, debug_log, display, read_debug_flag,
 };
 
 // 입력기 안에서는 CoCreateInstance 대신 이것으로 카테고리 관리자를 얻는다(COMLESS). windows 크레이트 바인딩에 없다.
@@ -66,6 +70,37 @@ fn category_mgr() -> Result<ITfCategoryMgr> {
         TF_CreateCategoryMgr(&mut raw).ok()?;
         Ok(ITfCategoryMgr::from_raw(raw))
     }
+}
+
+windows::core::link!("msctf.dll" "system" fn TF_CreateInputProcessorProfiles(ppipr: *mut *mut std::ffi::c_void) -> HRESULT);
+
+/// 입력 프로필 관리자(COMLESS: CoCreateInstance 대신 TF_CreateInputProcessorProfiles).
+fn profile_mgr() -> Result<ITfInputProcessorProfileMgr> {
+    let mut raw = std::ptr::null_mut();
+    unsafe {
+        TF_CreateInputProcessorProfiles(&mut raw).ok()?;
+        ITfInputProcessorProfiles::from_raw(raw).cast()
+    }
+}
+
+/// 이 모드에 맞는 프로필 언어. 일본어는 일본어 프로필이어야 한다: 한국어 입력 언어의 CUAS(옛 Win32 앱, 게임)는 한 글자(중간
+/// 글자)보다 긴 조합을 바로 끝내 버려 가나가 한 글자씩 확정된다(메모장 "に☆しんこ゛", 오버워치, 2026-10-03). 한국어·영어는 한국어.
+fn profile_language(mode: Mode) -> u16 {
+    if mode == Mode::Ja { LANGID_JA_JP } else { LANGID_KO_KR }
+}
+
+/// 이 앱(프로세스)의 창이 맨 앞에 있는지.
+fn in_foreground() -> bool {
+    let mut process = 0;
+    unsafe { GetWindowThreadProcessId(GetForegroundWindow(), Some(&mut process)) };
+    process == std::process::id()
+}
+
+/// 이 스레드에서 지금 켜진 입력 프로필의 언어(우리 것이 아니면 None).
+fn active_language(profiles: &ITfInputProcessorProfileMgr) -> Option<u16> {
+    let mut profile = TF_INPUTPROCESSORPROFILE::default();
+    unsafe { profiles.GetActiveProfile(&GUID_TFCAT_TIP_KEYBOARD, &mut profile) }.ok()?;
+    (profile.clsid == CLSID_TEXT_SERVICE).then_some(profile.langid)
 }
 
 /// INPUTMODE_CONVERSION 칸 값(앱이 지금 입력 모드를 볼 때): 영어는 영숫자, 한국어는 네이티브, 일본어는 네이티브·전각.
@@ -96,6 +131,8 @@ pub struct TextService {
     screen: Rc<RefCell<Screen>>,
     /// CUAS 문서에서 확정 뒤로 미룬 새 조합(앱이 확정 메시지를 읽은 뒤 스레드 타이머로 시작한다, [`TextService_Impl::apply`]).
     deferred: RefCell<Option<(ITfContext, Vec<Op>)>>,
+    /// 모드를 바꾸며 입력 프로필을 바꿨더니 앱(CUAS)이 우리 조합을 끝내며 이 글자를 확정했다: 같은 키의 같은 확정은 넣지 않는다.
+    completed_by_switch: RefCell<Option<Vec<u16>>>,
 }
 
 /// Activate부터 Deactivate까지.
@@ -165,6 +202,7 @@ impl TextService {
             field: Cell::new(Field::Normal),
             screen: Rc::new(RefCell::new(Screen::default())),
             deferred: RefCell::new(None),
+            completed_by_switch: RefCell::new(None),
         }
     }
 }
@@ -486,8 +524,56 @@ impl TextService_Impl {
             }
         }
         self.follow_global_mode(true);
+        self.sync_profile(None);
         self.sync_host();
         Ok(())
+    }
+
+    /// 입력 프로필 언어를 모드에 맞춘다([`profile_language`]). 바꿨으면 true. 프로필은 모드를 따라가기만 한다(일본어 프로필은 사용자 입력 목록에
+    /// 넣지 않아 Win+Space에 뜨지 않고, 고를 수도 없다).
+    /// - `Some(mode)`: 모드를 바꾼 앱(앞에 있는 앱)이 세션 전체를 바꾼다(Win+Space로 고르는 것과 같다: 새로 뜨는 앱도 그 프로필).
+    ///   뒤에 있는 앱의 입력기는 전역 칸으로 모드만 따라가고 바꾸지 않는다(여러 앱이 같이 바꾸면 빠르게 오갈 때 순서가 엇갈린다).
+    /// - `None`: 켜질 때·입력칸이 바뀔 때 지금 모드와 다르면 이 앱만 맞춘다(세션 전체를 못 바꾼 경우).
+    fn sync_profile(&self, changed: Option<Mode>) -> bool {
+        let Some(mode) = changed.or_else(|| self.state.try_borrow().ok()?.as_ref().map(|a| a.engine.mode()))
+        else {
+            return false;
+        };
+        let want = profile_language(mode);
+        let profiles = match profile_mgr() {
+            Ok(p) => p,
+            Err(e) => {
+                debug_log(&format!("profile manager: {e:?}"));
+                return false;
+            }
+        };
+        let Some(now) = active_language(&profiles) else { return false };
+        if now == want {
+            return false;
+        }
+        let activate = |flags| unsafe {
+            profiles.ActivateProfile(
+                TF_PROFILETYPE_INPUTPROCESSOR,
+                want,
+                &CLSID_TEXT_SERVICE,
+                &GUID_PROFILE,
+                HKL::default(),
+                flags,
+            )
+        };
+        let result = if changed.is_some() {
+            activate(TF_IPPMF_FORSESSION).or_else(|e| {
+                debug_log(&format!("profile for the session: {e:?}, trying this app only"));
+                activate(TF_IPPMF_FORPROCESS)
+            })
+        } else {
+            activate(TF_IPPMF_FORPROCESS)
+        };
+        debug_log(&format!(
+            "profile {now:#06x} -> {want:#06x} for {mode:?} ({}): {result:?}",
+            if changed.is_some() { "changed here" } else { "catching up" }
+        ));
+        result.is_ok()
     }
 
     /// 작업 표시줄 모드 아이콘 메뉴에서 고른 것을 처리한다([`crate::menu`]).
@@ -690,7 +776,7 @@ impl TextService_Impl {
         if let Some(((reading, text), link)) = pick {
             host::report_pick(&link, &reading, &text);
         }
-        self.after(&out);
+        self.after(&out, context.is_some_and(cuas));
         if let Ok(mut seen) = self.seen.try_borrow_mut() {
             *seen = Some(Seen { id, out: out.clone(), applied: false, keyed: actual, taken: false });
         }
@@ -754,6 +840,12 @@ impl TextService_Impl {
     /// 시험: 실제 쪽을 불러 달라고 할지(먹거나, 문서를 고칠 일이 있으면).
     fn test(&self, down: bool, context: Option<&ITfContext>, wparam: WPARAM, lparam: LPARAM) -> bool {
         let Some((out, applied)) = self.process(down, false, context, wparam, lparam) else { return false };
+        // 모드를 바꾸며 입력 언어를 바꿨고 남은 조합은 CUAS가 확정한다(after): 이 키는 고칠 것이 없고, 잡지도 않는다. 잡으면
+        // CUAS가 그 키를 바뀐 언어로 한 번 더 처리하며 방금 확정한 글자를 또 보냈다(게임처럼 TSF를 켠 창, examples/imm_spy).
+        if self.completed_by_switch.try_borrow_mut().ok().and_then(|mut c| c.take()).is_some() {
+            self.mark_applied();
+            return down && out.consumed;
+        }
         let edits = !applied && has_edits(&out);
         // CUAS(옛 Win32 앱, 게임 채팅)에서 확정하고 넘기는 키(조합 중 Space·Enter·기호·방향키): 시험에서 확정하고, 키는 잡고
         // (앱에는 VK_PROCESSKEY), 같은 키를 포커스 창에 메시지로 붙인다. 시험 안에서 확정하면 CUAS가 확정 메시지(RESULTSTR,
@@ -860,9 +952,28 @@ impl TextService_Impl {
     }
 
     /// 모드가 바뀌었으면 전역 칸·입력 모드 칸·아이콘에 알린다. 일본어를 나가면 Caps Lock을 끈다.
-    fn after(&self, out: &Output) {
+    /// `cuas`: 이 출력을 넣을 입력칸이 CUAS 문서다.
+    fn after(&self, out: &Output, cuas: bool) {
         if let Some(mode) = out.mode {
             self.show_mode(mode, true);
+            // 프로필은 바로 바꾼다(다음 키가 새 언어로 오게). 이 키의 확정은 아직 문서에 넣기 전이다. CUAS는 입력 언어가 바뀌면
+            // 남은 조합을 그 자리에서 확정한다(조합 중에 프로필만 바꾸면 결과가 한 번, examples/imm_spy). 우리가 따로 확정하면
+            // 언어가 바뀐 뒤 CUAS가 그 글자를 한 번 더 보냈다(조합 중 한→일: "안안日本語", 2026-10-03). 그래서 언어를 바꿔 앱이
+            // 조합을 끝내면 이 키의 같은 확정은 넣지 않고 앱에 맡긴다([`Self::apply`]). 이 키도 잡지 않는다([`Self::test`]).
+            let composing = self.slot.try_borrow().is_ok_and(|s| s.is_some());
+            let switched = self.sync_profile(Some(mode));
+            // TSF 앱(Edge)은 프로필을 바꾸는 그 자리에서 우리 조합을 끝내며 글자를 남긴다: 그러면 우리 확정은 새 글자로 한 번 더
+            // 들어갔다("안안日本語"). CUAS는 바로 끝내지 않아도 언어가 바뀔 때 끝낸다(게임처럼 TSF를 켠 창은 이때 우리 조합이
+            // 이미 문서에 없었다). 모드를 바꾸며 확정이 나왔으면 엔진은 조합 중이었다.
+            let ended = composing && self.slot.try_borrow().is_ok_and(|s| s.is_none());
+            if switched && !out.commit.is_empty() && (cuas || ended) {
+                debug_log(&format!(
+                    "the profile switch completes the composition (CUAS {cuas}, ended {ended}), not committing it here"
+                ));
+                if let Ok(mut done) = self.completed_by_switch.try_borrow_mut() {
+                    *done = Some(out.commit.encode_utf16().collect());
+                }
+            }
         }
         // 이 앱에서 일본어로 바꿨다: 첫 변환을 기다리지 않게 엔진 호스트를 미리 띄우고 잇는다.
         if out.mode == Some(Mode::Ja) {
@@ -912,8 +1023,8 @@ impl TextService_Impl {
         if out.timer_ms.is_none() {
             debug_log(&format!("engine timer: flushed (commit={})", out.commit.chars().count()));
         }
-        self.after(&out);
         let context = unsafe { thread_mgr.GetFocus() }.ok().and_then(|d| unsafe { d.GetTop() }.ok());
+        self.after(&out, context.as_ref().is_some_and(cuas));
         match context {
             Some(context) => {
                 self.apply(&context, &out, When::Whenever);
@@ -937,6 +1048,13 @@ impl TextService_Impl {
     /// 엔진 출력대로 문서를 고친다. 고쳤거나 고치기로 했으면(비동기) true.
     fn apply(&self, context: &ITfContext, out: &Output, when: When) -> bool {
         let mut ops = plan(out);
+        // 입력 프로필을 바꾸며 앱이 이미 확정한 글자(after).
+        let completed = self.completed_by_switch.try_borrow_mut().ok().and_then(|mut c| c.take());
+        if let (Some(text), Some(Op::Commit(first))) = (completed, ops.first())
+            && *first == text
+        {
+            ops.remove(0);
+        }
         if ops.is_empty() {
             self.refresh_screen(Some(context));
             return true;
@@ -1092,18 +1210,25 @@ impl TextService_Impl {
 
     /// 모드를 아이콘·입력 모드 칸에 보이고, `publish`면 전역 칸에도 적는다(다른 앱이 따라온다).
     fn show_mode(&self, mode: Mode, publish: bool) {
-        let Ok(state) = self.state.try_borrow() else { return };
-        let Some(a) = state.as_ref() else { return };
-        if let Some(button) = &a.button {
-            button.set_mode(mode);
-        }
-        if let Ok(m) = a.thread_mgr.cast::<ITfCompartmentMgr>()
-            && let Ok(c) = unsafe { m.GetCompartment(&GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION) }
         {
-            let _ = set_i32(&c, a.client_id, conversion_value(mode));
+            let Ok(state) = self.state.try_borrow() else { return };
+            let Some(a) = state.as_ref() else { return };
+            if let Some(button) = &a.button {
+                button.set_mode(mode);
+            }
+            if let Ok(m) = a.thread_mgr.cast::<ITfCompartmentMgr>()
+                && let Ok(c) = unsafe { m.GetCompartment(&GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION) }
+            {
+                let _ = set_i32(&c, a.client_id, conversion_value(mode));
+            }
+            if publish && let Some((c, _)) = &a.mode_slot {
+                let _ = set_i32(c, a.client_id, mode_value(mode, a.engine.last_non_en()));
+            }
         }
-        if publish && let Some((c, _)) = &a.mode_slot {
-            let _ = set_i32(c, a.client_id, mode_value(mode, a.engine.last_non_en()));
+        // 다른 앱에서 바꾼 것을 따라가는데 이 앱이 앞에 있다(모드 아이콘 메뉴는 전역 칸에 바로 적는다): 세션 프로필을 맞춘다.
+        // 이 앱에서 바꾼 것은 after가 맞춘다.
+        if !publish && in_foreground() {
+            self.sync_profile(Some(mode));
         }
     }
 
@@ -1297,6 +1422,8 @@ impl ITfThreadMgrEventSink_Impl for TextService_Impl {
                 }
                 // 설정 앱에서 고치고 돌아왔을 수 있다.
                 self.sync_host();
+                // 다른 앱에서 모드를 바꾸며 세션 프로필을 못 바꿨으면 이 앱만이라도 맞춘다.
+                self.sync_profile(None);
                 Ok(())
             },
         )

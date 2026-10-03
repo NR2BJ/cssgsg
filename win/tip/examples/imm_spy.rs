@@ -31,7 +31,7 @@ mod imp {
     use std::ffi::c_void;
     use std::time::{Duration, Instant};
 
-    use cssgsg_tip::{CLSID_TEXT_SERVICE, GUID_PROFILE, LANGID_KO_KR};
+    use cssgsg_tip::{CLSID_TEXT_SERVICE, GUID_PROFILE, LANGID_JA_JP, LANGID_KO_KR};
     use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
     use windows::Win32::System::Com::{
         CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
@@ -43,7 +43,8 @@ mod imp {
     };
     use windows::Win32::UI::TextServices::{
         CLSID_TF_InputProcessorProfiles, CLSID_TF_ThreadMgr, ITfInputProcessorProfileMgr, ITfThreadMgrEx,
-        TF_IPPMF_FORPROCESS, TF_PROFILETYPE_INPUTPROCESSOR, TF_TMAE_UIELEMENTENABLEDONLY,
+        TF_IPPMF_FORPROCESS, TF_IPPMF_FORSESSION, TF_PROFILETYPE_INPUTPROCESSOR,
+        TF_TMAE_UIELEMENTENABLEDONLY,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
         CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, MSG, PM_REMOVE,
@@ -245,7 +246,7 @@ mod imp {
                     wScan: scan & 0xFF,
                     dwFlags: KEYEVENTF_SCANCODE
                         | if up { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) }
-                        | if scan > 0xFF { KEYEVENTF_EXTENDEDKEY } else { KEYBD_EVENT_FLAGS(0) },
+                        | if scan & 0xFF00 == 0xE000 { KEYEVENTF_EXTENDEDKEY } else { KEYBD_EVENT_FLAGS(0) },
                     ..Default::default()
                 },
             },
@@ -261,13 +262,50 @@ mod imp {
             return;
         }
         for &scan in scans {
-            println!("key {scan:#04x}");
-            unsafe {
-                SendInput(&[key(scan, false)], size_of::<INPUT>() as i32);
-                pump(60);
-                SendInput(&[key(scan, true)], size_of::<INPUT>() as i32);
-                pump(120);
+            // ffff·fffe: 여기서 입력 프로필을 cssgsg 일본어로 바꾼다(이 프로세스만·세션 전체). 입력 언어가 조합 중에 바뀔 때
+            // CUAS가 무엇을 보내는지 보려고.
+            if scan >= 0xFFFE {
+                println!("switch to the cssgsg Japanese profile");
+                unsafe { switch_to_japanese(scan == 0xFFFE) };
+                unsafe { pump(300) };
+                continue;
             }
+            println!("key {scan:#04x}");
+            // 1xx: 누르기만, 2xx: 떼기만(Shift를 누른 채 다른 키를 칠 때).
+            let (press, release) = match scan & 0xFF00 {
+                0x0100 => (true, false),
+                0x0200 => (false, true),
+                _ => (true, true),
+            };
+            let scan = if press != release { scan & 0xFF } else { scan };
+            unsafe {
+                if press {
+                    SendInput(&[key(scan, false)], size_of::<INPUT>() as i32);
+                    pump(60);
+                }
+                if release {
+                    SendInput(&[key(scan, true)], size_of::<INPUT>() as i32);
+                    pump(120);
+                }
+            }
+        }
+    }
+
+    unsafe fn switch_to_japanese(session: bool) {
+        unsafe {
+            let profiles: Result<ITfInputProcessorProfileMgr> =
+                CoCreateInstance(&CLSID_TF_InputProcessorProfiles, None, CLSCTX_INPROC_SERVER);
+            let result = profiles.and_then(|p| {
+                p.ActivateProfile(
+                    TF_PROFILETYPE_INPUTPROCESSOR,
+                    LANGID_JA_JP,
+                    &CLSID_TEXT_SERVICE,
+                    &GUID_PROFILE,
+                    HKL::default(),
+                    if session { TF_IPPMF_FORSESSION } else { TF_IPPMF_FORPROCESS },
+                )
+            });
+            println!("  -> {result:?}");
         }
     }
 
@@ -342,6 +380,7 @@ mod imp {
                 );
             }
             pump(500);
+            print_layout("after typing");
             let _ = threads.Deactivate();
             let _ = DestroyWindow(hwnd);
         }
