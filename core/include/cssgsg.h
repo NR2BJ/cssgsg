@@ -129,9 +129,7 @@ uint8_t cssgsg_engine_use_mozc(CssgsgEngine *engine, const char *library_path, c
 
 /* 맥 셸 설정(설정 파일의 [mac]). 엔진은 쓰지 않는다. engine이 NULL이면 기본값. */
 typedef struct CssgsgMacSettings {
-    uint8_t hud;               /* 모드를 바꿀 때 G/ㅊ/月를 잠깐 보인다 */
-    uint8_t hud_at_mouse;      /* 1이면 마우스 옆, 0이면 커서 위 */
-    uint32_t candidate_font_size; /* 후보창 글자 크기(포인트) */
+    uint32_t candidate_font_size; /* 후보창 글자 크기(포인트). 0.7.5에서 모드 표시(hud)를 뺐다 */
     uint32_t newline_insert_wait_ms;    /* 줄바꿈 넣기(웹 기술로 만든 앱)·⌘ 단축키 다시 보내기(모든 앱) 대기 */
     uint32_t newline_key_press_wait_ms; /* Shift+Enter 다시 보내기 대기(아래 목록의 앱) */
 } CssgsgMacSettings;

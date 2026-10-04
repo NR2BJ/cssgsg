@@ -211,11 +211,14 @@ mod tests {
         let text = toml_from_json(&json).unwrap();
         assert_eq!(Config::from_toml(&text).unwrap(), Config::default());
 
-        let changed =
-            json.replace(r#""hud":true"#, r#""hud":false"#).replace("chamshin-v18", "chamshin-d-v19");
+        // 맥 표에는 모드 표시(hud)가 없다(0.7.5에서 뺐다).
+        assert!(json.contains(r#""mac":{"candidate_font_size":14"#), "{json}");
+        let changed = json
+            .replace(r#""mac":{"candidate_font_size":14"#, r#""mac":{"candidate_font_size":20"#)
+            .replace("chamshin-v18", "chamshin-d-v19");
         let text = toml_from_json(&changed).unwrap();
         assert!(
-            text.contains("\nhud = false\n") && text.contains("\nko_layout = \"chamshin-d-v19\"\n"),
+            text.contains("\ncandidate_font_size = 20\n") && text.contains("\nko_layout = \"chamshin-d-v19\"\n"),
             "{text}"
         );
         let back: serde_json::Value = serde_json::from_str(&json_from_toml(Some(&text)).unwrap()).unwrap();

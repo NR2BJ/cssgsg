@@ -308,35 +308,6 @@ enum TextInputGeometry {
         return NSRect(x: quartzRect.origin.x, y: flippedY, width: max(quartzRect.size.width, 1), height: quartzRect.size.height)
     }
 
-    // MARK: - Is a position inside the app? (NRIME 1.0.12-beta.11)
-
-    /// On-screen window frames (AppKit coordinates) of a process, from the
-    /// window server — no accessibility needed.
-    static func windowFrames(ofPID pid: pid_t) -> [NSRect] {
-        guard let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
-                                                    kCGNullWindowID) as? [[String: Any]] else { return [] }
-        // Quartz puts the origin at the top left of the main display.
-        let mainHeight = NSScreen.screens.first?.frame.height ?? 0
-        return info.compactMap { window in
-            guard (window[kCGWindowOwnerPID as String] as? pid_t) == pid,
-                  let bounds = window[kCGWindowBounds as String] as? [String: CGFloat],
-                  let x = bounds["X"], let y = bounds["Y"],
-                  let width = bounds["Width"], let height = bounds["Height"],
-                  width > 1, height > 1 else { return nil }
-            return NSRect(x: x, y: mainHeight - y - height, width: width, height: height)
-        }
-    }
-
-    /// Whether a caret rect lies inside one of the app's windows. A lookup
-    /// that lands outside them — another window's text, a stale position, a
-    /// screen corner — is wrong even though it is on a screen. With no window
-    /// to check against, nothing is ruled out.
-    static func caretIsInside(_ rect: NSRect, windowFrames: [NSRect]) -> Bool {
-        guard !windowFrames.isEmpty else { return true }
-        let center = NSPoint(x: rect.midX, y: rect.midY)
-        return windowFrames.contains { $0.insetBy(dx: -4, dy: -4).contains(center) }
-    }
-
     /// Validate the rect has positive height, isn't zero, and is within a visible screen.
     static func isUsableRect(_ rect: NSRect) -> Bool {
         guard !rect.equalTo(.zero) && rect.height > 0 else { return false }

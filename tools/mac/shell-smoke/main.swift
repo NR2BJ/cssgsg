@@ -122,21 +122,6 @@ func selfTest() -> Bool {
         }
     }
 
-    // 모드 표시(HUD) 자리: 앱이 알려 준 커서가 그 앱의 창 밖이면 틀린 자리다(NRIME 1.0.12-beta.11). 창 자리는 창 서버에서.
-    do {
-        let windows = [NSRect(x: 100, y: 100, width: 800, height: 600)]
-        check(TextInputGeometry.caretIsInside(NSRect(x: 300, y: 400, width: 2, height: 18), windowFrames: windows),
-              "HUD 자리: 앱 창 안의 커서는 쓴다")
-        check(!TextInputGeometry.caretIsInside(NSRect(x: 1200, y: 400, width: 2, height: 18), windowFrames: windows),
-              "HUD 자리: 앱 창 밖(다른 창의 글자, 낡은 자리, 화면 구석)은 버린다")
-        check(TextInputGeometry.caretIsInside(NSRect(x: 1200, y: 400, width: 2, height: 18),
-                                              windowFrames: windows + [NSRect(x: 1000, y: 300, width: 400, height: 300)]),
-              "HUD 자리: 앱의 창 어느 것이든 된다(팝오버, 두 번째 창)")
-        check(TextInputGeometry.caretIsInside(NSRect(x: 5000, y: 5000, width: 2, height: 18), windowFrames: []),
-              "HUD 자리: 견줄 창이 없으면 버리지 않는다")
-        check(TextInputGeometry.windowFrames(ofPID: getpid()).isEmpty, "HUD 자리: 창이 없는 프로세스는 창 목록이 비어 있다")
-    }
-
     // 입력기는 한국어로 시작한다(셸이 쓰는 CoreEngine 그대로, 설정 파일 없이).
     check(CoreEngine(configTOML: nil).mode == .ko, "입력기는 한국어(ㅊ)로 시작")
 

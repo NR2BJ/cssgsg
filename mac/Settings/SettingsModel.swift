@@ -34,8 +34,6 @@ struct CssgsgConfig: Codable, Equatable {
     }
 
     struct Mac: Codable, Equatable {
-        var hud: Bool
-        var hudPosition: String
         var candidateFontSize: Int
         /// 줄바꿈 넣기(웹 기술로 만든 앱)·⌘ 단축키 다시 보내기(모든 앱) 대기(밀리초, 0~100, 기본 20).
         var newlineInsertWaitMs: Int

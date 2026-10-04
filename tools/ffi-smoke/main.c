@@ -66,15 +66,16 @@ int main(void) {
 
     /* 맥 셸 설정: 기본값과 [mac] 표 */
     CssgsgMacSettings m = cssgsg_engine_mac_settings(e);
-    CHECK(m.hud == 1 && m.hud_at_mouse == 0 && m.candidate_font_size == 14);
+    CHECK(m.candidate_font_size == 14);
     CHECK(m.newline_insert_wait_ms == 20 && m.newline_key_press_wait_ms == 50);
     m = cssgsg_engine_mac_settings(NULL);
-    CHECK(m.hud == 1 && m.hud_at_mouse == 0 && m.candidate_font_size == 14);
+    CHECK(m.candidate_font_size == 14);
     CHECK(m.newline_insert_wait_ms == 20 && m.newline_key_press_wait_ms == 50);
+    /* 0.7.4까지의 모드 표시(hud, hud_position)는 읽고 버린다 */
     CssgsgEngine *c = cssgsg_engine_new("[mac]\nhud = false\nhud_position = \"mouse\"\ncandidate_font_size = 18");
     CHECK(c != NULL);
     m = cssgsg_engine_mac_settings(c);
-    CHECK(m.hud == 0 && m.hud_at_mouse == 1 && m.candidate_font_size == 18);
+    CHECK(m.candidate_font_size == 18);
     cssgsg_engine_free(c);
     CHECK(cssgsg_engine_new("[mac]\ncandidate_font_size = 40") == NULL);
     /* Shift+Enter 줄바꿈 대기(0.6.2): 0부터, 두 값은 따로. 범위 밖은 거부 */

@@ -118,13 +118,13 @@ final class CssgsgInputController: IMKInputController {
     }
 
     /// 메뉴 막대 메뉴에서 모드를 골랐다. 조합 중인 것은 지금 앱에 확정하고(엔진 set_mode) 메뉴 막대를 맞춘다.
-    /// 메뉴에서 고른 것이라 HUD는 띄우지 않는다. cssgsg가 지금 입력 소스가 아니면 앞 앱 칸은 건드리지 않고(다른 입력기가
+    /// cssgsg가 지금 입력 소스가 아니면 앞 앱 칸은 건드리지 않고(다른 입력기가
     /// 조합 중일 수 있다. 우리 조합은 비활성화 때 이미 확정했다) cssgsg를 고른다(사용자가 추가했을 때만).
     static func chooseMode(_ mode: InputMode) {
         let out = CoreEngine.shared.setMode(mode)
         if InputSourceSetup.isCurrent {
             if let controller = activeController, let client = controller.cachedClient ?? controller.client() {
-                controller.apply(out, client: client, allowCommit: controller.canCommit(to: client), showHUD: false)
+                controller.apply(out, client: client, allowCommit: controller.canCommit(to: client))
             }
         } else {
             InputSourceSetup.selectIfNotCurrent()
@@ -132,16 +132,12 @@ final class CssgsgInputController: IMKInputController {
         (NSApp.delegate as? AppDelegate)?.updateStatus(CoreEngine.shared.mode)
     }
 
-    private func apply(_ out: EngineOutput, client: any IMKTextInput, allowCommit: Bool = true, showHUD: Bool = true) {
-        // 모드가 바뀌면 HUD를 띄운다. 자리는 확정하기 전에 잰다(확정한 뒤에는 앱마다 커서 자리가 어긋난다).
-        let settings = CoreEngine.shared.macSettings
-        let hudCaret: NSRect? = showHUD && out.mode != nil && settings.hud != 0 && settings.hud_at_mouse == 0
-            ? ModeHUD.caretRect(for: client) : nil
+    private func apply(_ out: EngineOutput, client: any IMKTextInput, allowCommit: Bool = true) {
         if !out.commit.isEmpty && !allowCommit {
             DeveloperLogger.shared.log("Controller", "commit dropped in secure field", metadata: ["length": "\(out.commit.count)"])
         }
         TextApplier.apply(out, to: IMKTextClient(client: client), allowCommit: allowCommit)
-        applyUI(out, client: client, hudCaret: hudCaret, showHUD: showHUD)
+        applyUI(out, client: client)
         scheduleTimer(out.timerMs)
     }
 
@@ -157,9 +153,10 @@ final class CssgsgInputController: IMKInputController {
         }
     }
 
-    /// 글자 밖의 것: 후보창, 모드 표시와 HUD, Caps Lock, 한자 학습 저장.
-    private func applyUI(_ out: EngineOutput, client: any IMKTextInput, hudCaret: NSRect? = nil, showHUD: Bool = true) {
-        let settings = CoreEngine.shared.macSettings
+    /// 글자 밖의 것: 후보창, 메뉴 막대 모드 표시, Caps Lock, 한자 학습 저장.
+    /// 모드를 바꿀 때 커서 근처에 띄우던 G/ㅊ/月(HUD)은 0.7.5에서 뺐다(사용자 결정: 앱마다 커서 자리를 틀리게 알려 줘서
+    /// 엉뚱한 데 뜨고 NRIME도 같다. 모드는 메뉴 막대에 있다).
+    private func applyUI(_ out: EngineOutput, client: any IMKTextInput) {
         switch out.candidates {
         case .unchanged:
             break
@@ -170,9 +167,6 @@ final class CssgsgInputController: IMKInputController {
         }
         if let mode = out.mode {
             (NSApp.delegate as? AppDelegate)?.updateStatus(mode)
-            if showHUD && settings.hud != 0 {
-                ModeHUD.shared.show(mode.label, caret: hudCaret)
-            }
         }
         if out.capsLockOff {
             CapsLock.set(false)

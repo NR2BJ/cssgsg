@@ -88,9 +88,6 @@ pub struct CssgsgOutput {
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct CssgsgMacSettings {
-    pub hud: u8,
-    /// 1이면 HUD를 마우스 옆에, 0이면 커서 위에.
-    pub hud_at_mouse: u8,
     /// 후보창 글자 크기(포인트).
     pub candidate_font_size: u32,
     /// 줄바꿈 넣기(웹 기술로 만든 앱)·⌘ 단축키 다시 보내기(모든 앱) 대기(밀리초).
@@ -521,8 +518,6 @@ pub unsafe extern "C" fn cssgsg_engine_mac_settings(e: *const CssgsgEngine) -> C
     // SAFETY: 위 약속대로 NULL이거나 살아 있는 엔진이다.
     let mac = unsafe { e.as_ref() }.map(|e| &e.engine.config().mac).unwrap_or(&default);
     CssgsgMacSettings {
-        hud: mac.hud as u8,
-        hud_at_mouse: (mac.hud_position == crate::config::HudPosition::Mouse) as u8,
         candidate_font_size: mac.candidate_font_size,
         newline_insert_wait_ms: mac.newline_insert_wait_ms,
         newline_key_press_wait_ms: mac.newline_key_press_wait_ms,
@@ -681,17 +676,18 @@ mod tests {
         unsafe {
             let e = cssgsg_engine_new(ptr::null());
             cssgsg_engine_set_mode(e, 1);
+            // 0.7.4까지의 hud는 읽고 버린다.
             let cfg = CString::new("[mac]\nhud = false\ncandidate_font_size = 20").unwrap();
             assert_eq!(cssgsg_engine_set_config(e, cfg.as_ptr()), 1);
             let m = cssgsg_engine_mac_settings(e);
-            assert_eq!((m.hud, m.candidate_font_size), (0, 20));
+            assert_eq!(m.candidate_font_size, 20);
             assert_eq!(cssgsg_engine_mode(e), 1, "모드는 그대로");
             let bad = CString::new("ko_layout = \"nope\"").unwrap();
             assert_eq!(cssgsg_engine_set_config(e, bad.as_ptr()), 0);
             assert!(s(cssgsg_last_error()).contains("nope"));
-            assert_eq!(cssgsg_engine_mac_settings(e).hud, 0, "오류면 그대로");
+            assert_eq!(cssgsg_engine_mac_settings(e).candidate_font_size, 20, "오류면 그대로");
             assert_eq!(cssgsg_engine_set_config(e, ptr::null()), 1);
-            assert_eq!(cssgsg_engine_mac_settings(e).hud, 1, "NULL은 기본 설정");
+            assert_eq!(cssgsg_engine_mac_settings(e).candidate_font_size, 14, "NULL은 기본 설정");
             cssgsg_engine_free(e);
         }
     }

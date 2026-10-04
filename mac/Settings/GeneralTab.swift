@@ -139,17 +139,6 @@ struct GeneralTab: View {
                     """))
             }
 
-            Section(tr("모드 표시", "Mode Indicator", "モード表示")) {
-                Toggle(tr("모드 전환 시 G · ㅊ · 月 표시", "Show G · ㅊ · 月 When Switching Modes", "モード切り替え時に G · ㅊ · 月 を表示"),
-                       isOn: model.binding(\.mac.hud))
-                Picker(tr("위치", "Position", "位置"), selection: model.binding(\.mac.hudPosition)) {
-                    Text(tr("입력 커서 위 (모르면 마우스 옆)", "Above the text cursor (next to the mouse if unknown)",
-                            "入力カーソルの上（分からなければマウスの横）")).tag("caret")
-                    Text(tr("마우스 포인터 옆", "Next to the mouse pointer", "マウスポインタの横")).tag("mouse")
-                }
-                .disabled(!model.config.mac.hud)
-            }
-
         }
         .formStyle(.grouped)
     }

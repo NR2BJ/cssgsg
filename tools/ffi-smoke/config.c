@@ -20,9 +20,9 @@ int main(void) {
     /* 바꾼 값은 주석 없이 적는다 */
     toml = cssgsg_config_toml("{\"ja\":{\"full_width_space\":true}}");
     CHECK(toml != NULL && strstr(toml, "\nfull_width_space = true\n") != NULL);
-    /* 파일 → JSON: 적은 값과 기본값 */
+    /* 파일 → JSON: 적은 값과 기본값. 0.7.4까지의 맥 모드 표시(hud)는 읽고 버린다 */
     json = cssgsg_config_json("[mac]\nhud = false\n");
-    CHECK(json != NULL && strstr(json, "\"hud\":false") != NULL && strstr(json, "\"candidate_font_size\":14") != NULL
+    CHECK(json != NULL && strstr(json, "\"mac\":{\"candidate_font_size\":14") != NULL
           && strstr(json, "delay") == NULL && strstr(json, "tap_overlap_ms") == NULL
           && strstr(json, "\"newline_insert_wait_ms\":20") != NULL && strstr(json, "\"newline_key_press_wait_ms\":50") != NULL);
     CHECK(cssgsg_config_toml("{\"mac\":{\"newline_key_press_wait_ms\":101}}") == NULL);

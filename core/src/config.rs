@@ -70,7 +70,7 @@ impl Default for JaConfig {
     }
 }
 
-/// 모드 HUD를 띄울 자리.
+/// 모드 HUD를 띄울 자리(윈도우. 맥은 0.7.5에서 모드 표시를 뺐다).
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum HudPosition {
@@ -85,9 +85,13 @@ pub enum HudPosition {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct MacConfig {
-    /// 모드를 바꿀 때 커서 근처에 G / ㅊ / 月을 잠깐 보인다(0.6.4만 입력칸을 옮길 때도 보였다).
-    pub hud: bool,
-    pub hud_position: HudPosition,
+    /// 0.7.4까지의 모드 표시(모드를 바꿀 때 커서 근처에 G / ㅊ / 月)와 그 자리. 0.7.5에서 뺐다(사용자 결정 2026-10-04: 앱마다
+    /// 커서 자리를 틀리게 알려 줘서 엉뚱한 데 뜨고 NRIME도 같다. 모드는 메뉴 막대에 있고 틀리면 지우고 다시 치면 된다).
+    /// 옛 설정 파일이 오류 나지 않게 읽기만 하고 버린다.
+    #[serde(skip_serializing)]
+    pub hud: Option<bool>,
+    #[serde(skip_serializing)]
+    pub hud_position: Option<HudPosition>,
     /// 후보창 글자 크기(포인트).
     pub candidate_font_size: u32,
     /// 줄바꿈 넣기·⌘ 단축키 대기(밀리초, 0~100, 기본 20): 웹 기술로 만든 앱(Electron·Chromium, 앱 자체를 보고 판별한다)에서
@@ -117,8 +121,8 @@ pub struct MacConfig {
 impl Default for MacConfig {
     fn default() -> Self {
         Self {
-            hud: true,
-            hud_position: HudPosition::Caret,
+            hud: None,
+            hud_position: None,
             candidate_font_size: 14,
             newline_insert_wait_ms: 20,
             newline_key_press_wait_ms: 50,
@@ -297,6 +301,9 @@ impl Config {
         c.mac.shift_enter_delay_ms = None;
         c.mac.newline_replay_ms = None;
         c.mac.newline_delay_offset_ms = None;
+        // 0.7.4까지의 맥 모드 표시도 버린다(MacConfig::hud).
+        c.mac.hud = None;
+        c.mac.hud_position = None;
         // 0.6.2의 Shift+Enter 다시 보내기 대기는 0~200이었다. 0.6.3부터 0~100(NRIME 1.0.12-beta.10과 같다).
         c.mac.newline_key_press_wait_ms = c.mac.newline_key_press_wait_ms.min(100);
         c.validate()?;
@@ -505,14 +512,6 @@ impl Config {
         if shell == Shell::Mac || mac != dmac {
             line("");
             line("[mac]");
-            line("# 모드를 바꿀 때 G/ㅊ/月을 잠깐 표시");
-            line(&setting("hud", &mac.hud.to_string(), mac.hud == dmac.hud));
-            line("# 모드 표시 위치: \"caret\"(입력 커서 위, 모르면 마우스 옆) 또는 \"mouse\"(마우스 옆)");
-            line(&setting(
-                "hud_position",
-                &quoted(hud_position_name(mac.hud_position)),
-                mac.hud_position == dmac.hud_position,
-            ));
             line("# 후보창 글자 크기(포인트, 10~28)");
             line(&setting(
                 "candidate_font_size",
@@ -693,8 +692,10 @@ mod tests {
         let mac = Config { windows: c.windows.clone(), ..Config::default() };
         round_trip(&mac);
         assert!(mac.to_toml().contains("\n[windows]\n"));
-        let from_mac =
-            Config { mac: MacConfig { hud: false, ..MacConfig::default() }, ..Config::windows_default() };
+        let from_mac = Config {
+            mac: MacConfig { candidate_font_size: 20, ..MacConfig::default() },
+            ..Config::windows_default()
+        };
         windows_round_trip(&from_mac);
         assert!(from_mac.to_toml_windows().contains("\n[mac]\n"));
         let big = Config {
@@ -815,6 +816,19 @@ mod tests {
     }
 
     #[test]
+    fn old_mac_mode_indicator_is_read_and_dropped() {
+        // 0.7.4까지의 맥 모드 표시: 오류 없이 읽고 버린다. 다시 쓰지도 않는다. 윈도우 표의 모드 표시는 그대로다.
+        for toml in ["[mac]\nhud = false", "[mac]\nhud = true\nhud_position = \"mouse\"", "[mac]\nhud_position = \"caret\""] {
+            let c = Config::from_toml(toml).unwrap_or_else(|e| panic!("{toml}: {e}"));
+            assert_eq!(c, Config::default(), "{toml}");
+            assert!(!c.to_toml().contains("hud"), "{toml}");
+        }
+        assert!(Config::from_toml("[mac]\nhud_position = \"nowhere\"").is_err(), "틀린 값은 여전히 오류");
+        let c = Config::from_toml("[windows]\nhud = false").unwrap();
+        assert!(!c.windows.hud);
+    }
+
+    #[test]
     fn old_newline_waits_are_read_and_dropped() {
         // 0.5.x 파일의 줄바꿈 대기는 오류 없이 읽고 버린다. 다시 쓰지도 않는다.
         for toml in [
@@ -883,8 +897,6 @@ mod tests {
                 ..JaConfig::default()
             },
             mac: MacConfig {
-                hud: false,
-                hud_position: HudPosition::Mouse,
                 candidate_font_size: 18,
                 newline_insert_wait_ms: 35,
                 newline_key_press_wait_ms: 0,
