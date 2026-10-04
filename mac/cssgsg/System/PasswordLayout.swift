@@ -17,7 +17,9 @@ import InputMethodKit
 /// - 끼운 자판이 실제로 먹었는지는 인증 창에서 처음 친, Graphite와 쿼티가 다른 키의 글자로 한 번 본다(글자는 기록하지 않는다).
 enum PasswordLayout {
     static let bundleURL = URL(fileURLWithPath: "/Library/Keyboard Layouts/cssgsg-Graphite.bundle")
-    static let sourceID = "com.cssgsg.keylayout.graphite"
+    /// 자판 번들의 번들 ID. 입력 소스 ID는 이것으로 찾는다: macOS 27은 Info.plist KLInfo의 TISInputSourceID를 쓰지 않고
+    /// 번들 ID와 자판 이름으로 짓는다(com.cssgsg.keyboardlayout.graphite.keylayout.Graphitecssgsg, 0.7.5-beta.1에서 확인).
+    static let layoutBundleID = "com.cssgsg.keyboardlayout.graphite"
     /// 자판을 끼울 인증 창(키를 넘기는 곳): 관리자 암호 창, 시스템 설정 등의 암호 시트.
     /// 잠금 화면(com.apple.loginwindow)은 아직 넣지 않는다: 재부팅 직후 로그인 창은 입력기가 없어 쿼티라서, 잠금 화면만 Graphite면
     /// 같은 암호를 두 가지로 쳐야 한다. 로그인 창 자판과 같이 바꾼다(0.7.5-beta.1, CONCEPT §13).
@@ -36,7 +38,7 @@ enum PasswordLayout {
         }
         let status = TISRegisterInputSource(bundleURL as CFURL)
         DeveloperLogger.shared.log("PasswordLayout", "register", metadata: [
-            "status": "\(status)", "found": "\(source(sourceID) != nil)",
+            "status": "\(status)", "id": layoutID ?? "not found",
         ])
     }
 
@@ -44,14 +46,14 @@ enum PasswordLayout {
     static func activated(client: any IMKTextInput) {
         let app = client.bundleIdentifier()
         if let app, clients.contains(app) {
-            guard source(sourceID) != nil else {
+            guard let id = layoutID else {
                 DeveloperLogger.shared.log("PasswordLayout", "layout not installed", metadata: ["app": app])
                 return
             }
-            client.overrideKeyboard(withKeyboardNamed: sourceID)
+            client.overrideKeyboard(withKeyboardNamed: id)
             overriddenApp = app
             checked = false
-            DeveloperLogger.shared.log("PasswordLayout", "override", metadata: ["app": app, "layout": sourceID])
+            DeveloperLogger.shared.log("PasswordLayout", "override", metadata: ["app": app, "layout": id])
         } else if let previous = overriddenApp {
             let ascii = currentASCIILayoutID() ?? "com.apple.keylayout.ABC"
             client.overrideKeyboard(withKeyboardNamed: ascii)
@@ -67,7 +69,8 @@ enum PasswordLayout {
         guard !checked, let app, app == overriddenApp, event.type == .keyDown,
               event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
               let typed = event.characters,
-              let graphite = character(layout: sourceID, code: event.keyCode, shift: event.modifierFlags.contains(.shift)),
+              let id = layoutID,
+              let graphite = character(layout: id, code: event.keyCode, shift: event.modifierFlags.contains(.shift)),
               let ascii = character(layout: currentASCIILayoutID() ?? "com.apple.keylayout.ABC", code: event.keyCode,
                                     shift: event.modifierFlags.contains(.shift)),
               graphite != ascii
@@ -83,6 +86,14 @@ enum PasswordLayout {
     private static func source(_ id: String) -> TISInputSource? {
         let filter = [kTISPropertyInputSourceID as String: id] as CFDictionary
         return (TISCreateInputSourceList(filter, true)?.takeRetainedValue() as? [TISInputSource])?.first
+    }
+
+    /// 설치된 Graphite 자판의 입력 소스 ID(번들 ID로 찾는다). 없으면 nil.
+    static var layoutID: String? {
+        let filter = [kTISPropertyBundleID as String: layoutBundleID] as CFDictionary
+        guard let source = (TISCreateInputSourceList(filter, true)?.takeRetainedValue() as? [TISInputSource])?.first,
+              let raw = TISGetInputSourceProperty(source, kTISPropertyInputSourceID) else { return nil }
+        return Unmanaged<CFString>.fromOpaque(raw).takeUnretainedValue() as String
     }
 
     /// 입력기가 키를 넘길 때 macOS가 쓰는 자판(가장 최근에 쓴 ASCII 자판, 보통 ABC).

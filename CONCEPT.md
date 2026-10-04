@@ -1276,7 +1276,9 @@ k     = { cho = "ㄱ" }
     Mozc·Keyman·macSKK가 같은 메서드로 기반 자판을 정한다. 자판은 엔진 데이터로 만든 `/Library/Keyboard Layouts/cssgsg-Graphite.bundle`
     (`tools/mac/keylayout`, 글자 층은 영어 모드 그대로·⌘/Control/Option 층은 ABC 그대로·원작자 배포본과 글자 층 94개 같음). 입력기 번들 안에
     넣은 자판이 등록되는지는 문서에 없어서 확실히 등록되는 그 폴더에 둔다(설치 위치가 하나 는다, 재부팅 로그인 창 단계에도 필요하다).
-    사용자가 입력 소스로 추가할 필요는 없다. 끼우는 곳은 SecurityAgent(관리자 암호 창)·LocalAuthenticationRemoteService(시스템 암호 시트)이고,
+    사용자가 입력 소스로 추가할 필요는 없다. 입력 소스 ID는 macOS가 Info.plist의 TISInputSourceID를 쓰지 않고 번들 ID와 자판 이름으로 지어서
+    (`com.cssgsg.keyboardlayout.graphite.keylayout.Graphitecssgsg`, beta.1에서 ID로 못 찾아 건너뜀) beta.2부터 번들 ID로 찾아 실제 ID를 쓴다.
+    pkg로 깔면 로그아웃 없이 바로 등록된다(beta.1 설치 직후 확인). 끼우는 곳은 SecurityAgent(관리자 암호 창)·LocalAuthenticationRemoteService(시스템 암호 시트)이고,
     인증 창이 활성화될 때 끼우고 그 뒤 처음 다른 앱이 활성화될 때 가장 최근 ASCII 자판으로 되돌린다(macSKK #292: 활성화마다 부르다가
     Apple 앱이 죽는다는 신고). 먹었는지는 인증 창에서 처음 친, Graphite와 쿼티가 다른 키의 글자로 한 번 기록한다(글자는 남기지 않는다).
   - 맥 잠금 화면·재부팅 로그인 창(다음): 잠금 화면(loginwindow)도 같은 길로 되지만, 재부팅 직후 로그인 창은 입력기가 없어 쿼티라서 잠금 화면만
