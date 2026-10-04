@@ -15,9 +15,9 @@ sealed partial class GeneralPage : SettingsPage
         foreach (var field in SettingsModel.ShortcutFields)
             rows.Add(Ui.Row(ShortcutText.ActionName(field), new ShortcutEditor(model, recorder, field, this)));
         var noEnglish = Ui.Note(T(
-            "영어로 전환하는 단축키가 없습니다. 작업 표시줄에서는 모드를 바꿀 수 없으니 하나는 정해 두세요.",
-            "No shortcut switches to English. The taskbar can’t change modes, so please set one.",
-            "英語に切り替えるショートカットがありません。タスクバーからはモードを変えられないので、一つは設定してください。"), warning: true);
+            "영어로 전환하는 단축키가 없습니다. 작업 표시줄의 모드 아이콘(G/ㅊ/月) 메뉴에서도 고를 수 있지만, 치면서 바꾸려면 하나는 정해 두세요.",
+            "No shortcut switches to English. You can still pick a mode from the mode icon (G/ㅊ/月) menu on the taskbar, but set one to switch while typing.",
+            "英語に切り替えるショートカットがありません。タスクバーのモードアイコン（G/ㅊ/月）のメニューからも選べますが、入力しながら切り替えるには一つ設定してください。"), warning: true);
         noEnglish.Margin = new Thickness(0, 10, 0, 10);
         OnRefresh(() => noEnglish.Visibility = M.Str("shortcuts.toggle_english").Length == 0 ? Visibility.Visible : Visibility.Collapsed);
         rows.Add(noEnglish);
