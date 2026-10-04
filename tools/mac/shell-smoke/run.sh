@@ -20,6 +20,7 @@ swiftc -O -module-name shellsmoke \
   -import-objc-header mac/cssgsg/cssgsg-Bridging-Header.h -I core/include \
   mac/Shared/Cssgsg.swift mac/cssgsg/Engine/CoreEngine.swift mac/cssgsg/Engine/KeyTranslation.swift mac/cssgsg/Engine/TextApplier.swift \
   mac/cssgsg/System/TextInputGeometry.swift mac/cssgsg/System/DeveloperLogger.swift \
+  mac/cssgsg/System/PasswordFields.swift mac/cssgsg/System/ChromiumDetector.swift \
   tools/mac/shell-smoke/Typist.swift tools/mac/shell-smoke/main.swift \
   build/cargo/release/libcssgsg_core.a -o "$OUT/shell-smoke"
 

@@ -140,6 +140,40 @@ func selfTest() -> Bool {
     // 입력기는 한국어로 시작한다(셸이 쓰는 CoreEngine 그대로, 설정 파일 없이).
     check(CoreEngine(configTOML: nil).mode == .ko, "입력기는 한국어(ㅊ)로 시작")
 
+    // 비밀번호 칸 Graphite(0.7.4): 맨 앞 앱 자기 칸이고 웹 엔진일 때만 넣는다. 인증 창·다른 프로세스의 시트·웹 엔진이
+    // 아닌 앱은 지금처럼 키를 넘긴다(넣은 글자를 버리는 칸이 있다).
+    do {
+        let web = { true }, native = { false }
+        check(PasswordFields.insertsGraphite(client: "org.mozilla.nightly", frontmost: "org.mozilla.nightly",
+                                             authentication: false, frontmostIsWebEngine: web),
+              "비밀번호 칸: 브라우저 자기 칸에는 Graphite를 넣는다")
+        check(!PasswordFields.insertsGraphite(client: "com.apple.SecurityAgent", frontmost: "com.apple.SecurityAgent",
+                                              authentication: true, frontmostIsWebEngine: web),
+              "비밀번호 칸: 인증 창(SecurityAgent)은 넘긴다")
+        check(!PasswordFields.insertsGraphite(client: "com.apple.LocalAuthenticationRemoteService",
+                                              frontmost: "com.apple.Safari", authentication: false, frontmostIsWebEngine: web),
+              "비밀번호 칸: 브라우저가 띄운 시스템 암호 시트(다른 프로세스)는 넘긴다")
+        check(!PasswordFields.insertsGraphite(client: "com.apple.systempreferences", frontmost: "com.apple.systempreferences",
+                                              authentication: false, frontmostIsWebEngine: native),
+              "비밀번호 칸: 웹 엔진이 아닌 앱은 넘긴다")
+        check(!PasswordFields.insertsGraphite(client: nil, frontmost: "com.apple.Safari", authentication: false,
+                                              frontmostIsWebEngine: web),
+              "비밀번호 칸: 클라이언트를 모르면 넘긴다")
+        var asked = false
+        _ = PasswordFields.insertsGraphite(client: "com.apple.SecurityAgent", frontmost: "com.apple.SecurityAgent",
+                                           authentication: true) { asked = true; return true }
+        check(!asked, "비밀번호 칸: 인증 창이면 번들을 뒤지지 않는다")
+        let fake = FileManager.default.temporaryDirectory.appendingPathComponent("cssgsg-gecko-\(getpid()).app")
+        try? FileManager.default.createDirectory(at: fake.appendingPathComponent("Contents/MacOS"),
+                                                 withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: fake.appendingPathComponent("Contents/MacOS/XUL").path, contents: Data())
+        check(PasswordFields.isGeckoBundle(atPath: fake.path), "Firefox 계열: 번들에 XUL이 있다")
+        try? FileManager.default.removeItem(at: fake)
+        check(!PasswordFields.isGeckoBundle(atPath: "/System/Applications/TextEdit.app"), "TextEdit은 Firefox 계열이 아니다")
+        check(!ChromiumDetector.isChromiumBundle(atPath: "/System/Applications/TextEdit.app"), "TextEdit은 Chromium이 아니다")
+        check(PasswordFields.webKitBrowsers.contains("com.apple.Safari"), "Safari는 웹 엔진")
+    }
+
     // 빠른 탭 전환 보정(tap_buffering): 탭 수식키를 누른 채 친 글자는 잡아 두고 타이머를 청한다.
     do {
         let config = "tap_buffering = true"

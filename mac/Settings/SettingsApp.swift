@@ -11,6 +11,17 @@ struct SettingsApp: App {
     @StateObject private var dictionary = UserDictionaryModel()
     @StateObject private var updater = Updater()
 
+    /// 창 복원을 끈다(0.7.4). 업데이트(postinstall이 앱을 끈다)·⌘Q로 창을 연 채 끝나면, "앱 종료 시 윈도우 닫기"를 끈 Mac은
+    /// 다음 실행에 그 창을 되살린다. 사용자는 처음 켠 창이 끌리지 않는다고 했고(빨간 X로 닫고 다시 켜면 끌린다: 그때는
+    /// 되살릴 창이 없어 새로 만든다), 되살린 창은 옮긴 자리가 저장되지 않았다(0.7.3에서 확인). 늘 새 창으로 열어 빨간 X
+    /// 뒤와 같게 한다. 자리·크기는 창 자동 저장(NSWindow Frame settings)이 남긴다.
+    /// AppKit은 실행을 마칠 때(복원할 때) 읽으니 그보다 먼저인 여기서 등록하면 된다. 시험 앱으로 확인했다(macOS 27):
+    /// 되살릴 상태가 있어도 launchIsDefaultUserInfoKey가 0에서 1이 된다. 파일에는 쓰지 않는다(등록 기본값).
+    /// SwiftUI의 restorationBehavior(.disabled)는 macOS 15부터라 쓰지 않는다(배포 대상 13, SceneBuilder에 else가 없다).
+    init() {
+        UserDefaults.standard.register(defaults: ["ApplePersistenceIgnoreState": true])
+    }
+
     var body: some Scene {
         Window("cssgsg", id: "settings") {
             SettingsView(model: model, dictionary: dictionary, updater: updater)

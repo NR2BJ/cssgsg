@@ -5,7 +5,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private(set) var server: IMKServer?
     let candidatePanel = CandidatePanel()
     private var statusItem: NSStatusItem?
+    private var modeItems: [NSMenuItem] = []
     private var settingsItem: NSMenuItem?
+    private var learnItem: NSMenuItem?
+    private var practiceItem: NSMenuItem?
     private var restartItem: NSMenuItem?
     private var quitItem: NSMenuItem?
 
@@ -45,13 +48,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: - 메뉴 막대
 
-    /// 메뉴는 설정·다시 시작·종료 셋뿐이다. 버전·업데이트·입력 소스·권한·배열 학습은 설정 앱에 있다.
+    /// 메뉴는 윈도우 작업 표시줄 아이콘 메뉴와 같은 차례다: 모드 셋(지금 모드에 체크), 설정·배열 학습·타자 연습,
+    /// 다시 시작·종료(윈도우는 끌 프로세스가 없어 종료가 없다). 버전·업데이트·입력 소스·권한은 설정 앱에 있다.
     private func setupStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         let menu = NSMenu()
         menu.delegate = self
+        for mode in [InputMode.en, .ko, .ja] {
+            let modeItem = menu.addItem(withTitle: "", action: #selector(chooseMode(_:)), keyEquivalent: "")
+            modeItem.target = self
+            modeItem.tag = Int(mode.rawValue)
+            modeItem.image = Self.statusIcon(mode.label, side: 16, fontSize: 12)
+            modeItems.append(modeItem)
+        }
+        menu.addItem(.separator())
         settingsItem = menu.addItem(withTitle: "", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem?.target = self
+        learnItem = menu.addItem(withTitle: "", action: #selector(openLearn), keyEquivalent: "")
+        learnItem?.target = self
+        practiceItem = menu.addItem(withTitle: "", action: #selector(openPractice), keyEquivalent: "")
+        practiceItem?.target = self
         menu.addItem(.separator())
         restartItem = menu.addItem(withTitle: "", action: #selector(restart), keyEquivalent: "")
         restartItem?.target = self
@@ -64,35 +80,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// 메뉴 글자는 설정 앱에서 고른 화면 언어를 따른다.
     private func titleMenuItems() {
+        for (item, name) in zip(modeItems, Self.modeNames()) {
+            item.title = name
+        }
         settingsItem?.title = tr("설정…", "Settings…", "設定…")
+        learnItem?.title = tr("배열 학습", "Layouts", "配列の学習")
+        practiceItem?.title = tr("타자 연습", "Typing Practice", "タイピング練習")
         restartItem?.title = tr("cssgsg 다시 시작", "Restart cssgsg", "cssgsg を再起動")
         quitItem?.title = tr("cssgsg 종료", "Quit cssgsg", "cssgsg を終了")
     }
 
-    /// 메뉴를 열 때마다 화면 언어와 입력기 상태를 다시 본다.
+    /// 메뉴를 열 때마다 화면 언어, 지금 모드, 입력기 상태를 다시 본다.
     func menuNeedsUpdate(_ menu: NSMenu) {
         UILanguage.active = UILanguage.stored()
         titleMenuItems()
+        let mode = Int(CoreEngine.shared.mode.rawValue)
+        for item in modeItems {
+            item.state = item.tag == mode ? .on : .off
+        }
         PermissionMonitor.refreshIfStale()
+    }
+
+    /// 모드 이름(메뉴 항목과 메뉴 막대 도움말).
+    private static func modeNames() -> [String] {
+        [
+            tr("영어 (Graphite)", "English (Graphite)", "英語 (Graphite)"),
+            tr("한국어 (참신세벌식)", "Korean (Chamshin Sebeolsik)", "韓国語 (チャムシン3ボル式)"),
+            tr("일본어 (新月配列)", "Japanese (Shingetsu)", "日本語 (新月配列)"),
+        ]
     }
 
     func updateStatus(_ mode: InputMode) {
         guard let button = statusItem?.button else { return }
         button.image = Self.statusIcon(mode.label)
         button.title = ""
-        let names = [
-            tr("영어 (Graphite)", "English (Graphite)", "英語 (Graphite)"),
-            tr("한국어 (참신세벌식)", "Korean (Chamshin Sebeolsik)", "韓国語 (チャムシン3ボル式)"),
-            tr("일본어 (新月配列)", "Japanese (Shingetsu)", "日本語 (新月配列)"),
-        ]
-        button.toolTip = "cssgsg: \(names[Int(mode.rawValue)])"
+        button.toolTip = "cssgsg: \(Self.modeNames()[Int(mode.rawValue)])"
     }
 
-    /// 메뉴 막대 아이콘을 글자로 그린다(Retina 자동 대응, 템플릿 이미지).
-    private static func statusIcon(_ text: String) -> NSImage {
-        let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
+    /// 메뉴 막대 아이콘을 글자로 그린다(Retina 자동 대응, 템플릿 이미지). 메뉴 항목에는 조금 작게 쓴다.
+    private static func statusIcon(_ text: String, side: CGFloat = 18, fontSize: CGFloat = 14) -> NSImage {
+        let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
             let attrs: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 14, weight: .medium),
+                .font: NSFont.systemFont(ofSize: fontSize, weight: .medium),
                 .foregroundColor: NSColor.black,
             ]
             let str = NSAttributedString(string: text, attributes: attrs)
@@ -104,9 +133,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return image
     }
 
+    /// 메뉴에서 모드를 골랐다(윈도우와 같다). 조합 중인 것은 확정한다.
+    @objc private func chooseMode(_ sender: NSMenuItem) {
+        guard let mode = InputMode(rawValue: Int32(sender.tag)) else { return }
+        CssgsgInputController.chooseMode(mode)
+    }
+
     /// 설정 앱을 연다. 없으면(개발 중 따로 빌드한 입력기 등) 설정 파일을 Finder에서 보인다.
     @objc private func openSettings() {
-        if !SettingsLauncher.open() {
+        showSettings(tab: nil)
+    }
+
+    /// 설정 앱의 배열 학습·타자 연습 탭을 연다(떠 있으면 그 탭으로 바꾼다).
+    @objc private func openLearn() {
+        showSettings(tab: "learn")
+    }
+
+    @objc private func openPractice() {
+        showSettings(tab: "practice")
+    }
+
+    private func showSettings(tab: String?) {
+        if !SettingsLauncher.open(tab: tab) {
             NSWorkspace.shared.activateFileViewerSelecting([Cssgsg.configURL])
         }
     }

@@ -27,7 +27,7 @@
 | 14 | ㅊ | `j f` 치고 다른 곳을 클릭 | "아"가 남고, 두 번 찍히지 않음 | `ko:jf{click}` → `아` |
 | 15 | ㅊ (Chrome이나 Codex 입력창) | `j f s` 후 Shift+Enter | "안" 다음에 줄바꿈, 안이 사라지지 않음 | `ko:jfs{S-ent}` → `안\n` |
 | 16 | ㅊ (웹 비밀번호 칸, 눈 아이콘으로 보기) | `j f s` | jfs (쿼티 그대로) | — (비밀번호 칸 판정은 앱에서만) |
-| 17 | 메뉴 막대 cssgsg 메뉴 | 메뉴 열기 | 설정…, cssgsg 다시 시작, cssgsg 종료 셋만 보인다(업데이트·배열 학습은 설정 앱으로 갔다) | — |
+| 17 | 메뉴 막대 cssgsg 메뉴 | 메뉴 열기 | 0.7.4부터 60번. (0.5.0~0.7.3: 설정…, cssgsg 다시 시작, cssgsg 종료 셋만) | — |
 | 18 | ㅊ (텍스트 편집기) | `i s h f s u d s k r e` 후 왼쪽 ⌥Option+Return | 대한민은 그대로, 조합 중인 "국"만 國(굵은 밑줄)으로 바뀌고 후보창: 1번 國 옆에 흐리게 "나라 국", 2번 局 "부분 국, 판 국", 3번 菊 … | `ko:ishfsudskre{A-ent}` → `대한민國` |
 | 18-1 | ㅊ | 18에 이어 Space, Return | 局으로 바뀌고 Return으로 확정 | `ko:ishfsudskre{A-ent}{sp}{ent}` → `대한민局` |
 | 18-2 | ㅊ | 18에 이어 Esc | "국"으로 돌아오고 밑줄(아직 조합 중) | `ko:ishfsudskre{A-ent}{esc}` → `대한민국` |
@@ -47,7 +47,7 @@
 | 32 | 설정 앱 → 일본어 → Tab으로 변환 끔 | 月에서 `c k e u w l` Tab | にほんご가 확정되고 Tab은 앱으로 간다(변환 안 함). 다시 켜면 Tab이 변환 | — |
 | 33 | 月 | `\` 키 | ¥ (설정 앱 일본어 → "\\ 자리로 ¥를 친다"를 끄면 반각 \\) | `ja:\` → `¥` |
 | 34 | 설정 앱 → 일본어 → 개인 사전 | 추가… → 읽기 くもつ, 단어 雲津 → 저장. 月에서 `h k k y` Space(여러 번) | 표에 1개, 후보에 雲津이 나온다(다시 시작 없이). 지우기 뒤에는 안 나온다. 읽기에 작은 가나(ゃ っ)·ー가 있어도 된다 | `ja:hkky` → `くもつ` |
-| 35 | 설정 앱 → 정보 → 화면 언어 English | 탭들을 둘러보고 메뉴 막대 cssgsg 메뉴 열기 | 설정 창이 영어로(고른 탭은 그대로), 메뉴도 Settings… / Restart cssgsg / Quit cssgsg. 日本語도 같다. 끝나면 한국어로 | — |
+| 35 | 설정 앱 → 정보 → 화면 언어 English | 탭들을 둘러보고 메뉴 막대 cssgsg 메뉴 열기 | 설정 창이 영어로(고른 탭은 그대로), 메뉴도 English (Graphite) / Korean (Chamshin Sebeolsik) / Japanese (Shingetsu), Settings… / Layouts / Typing Practice, Restart cssgsg / Quit cssgsg. 日本語도 같다. 끝나면 한국어로 | — |
 | 36 | 설정 앱 → 정보 → 업데이트 | 지금 확인 → 채널을 베타로 → 다시 정식으로 | 정식: "최신 버전이다". 베타로 바꾸면 바로 확인한다(베타 릴리스가 없으면 역시 최신) | — (`bash tools/mac/update-smoke/run.sh`) |
 | 37 | 月 | `c k e u w l` 후 ↓ | 변환하지 않는다: にほんご가 확정되고 ↓는 앱으로 간다(변환 키는 Space·Tab뿐) | `ja:ckeuwl{down}` → `にほんご` |
 | 38 | 메뉴 막대 cssgsg 메뉴 | cssgsg 다시 시작 | 다시 뜨면 **ㅊ**(한국어)로 시작한다 | — (`cargo test starts_in_korean`) |
@@ -72,8 +72,17 @@
 | 57 | `~/Library/Application Support/cssgsg/config.toml`에 `[windows]` 표를 넣는다(`hud = false`). 윈도우에서 쓴 파일을 가져와도 된다 | 설정 앱을 열고 맥 설정 하나를 바꿨다가 되돌린다 | 오류 안내 없이 읽고, 바꾼 뒤에도 파일에 `[windows]`의 `hud = false`가 남는다(0.7.1은 설정 전체를 기본값으로 읽었고, 쓰면 지웠다) | — (settings-smoke) |
 | 58 | 설정 앱 → 일반 → 한자 단축키를 왼쪽 Control 탭으로 녹화. ㅊ | `k r e` 후 왼쪽 Control 톡 | 國. Control을 누르는 순간 국이 확정되지 않는다(0.7.1은 확정됐다). 끝나면 단축키를 되돌린다 | — (`cargo test windows_hanja_is_a_right_control_tap`) |
 | 59 | 개발하지 않는 맥(맥북)에서 0.7.3 설치(0.7.2 설정 앱이 안 뜨면 릴리스 노트의 curl 명령으로) | 메뉴 막대 cssgsg → 설정… | 설정 앱이 뜬다(0.7.2는 dyld "Library not loaded …libcssgsg_config.dylib"로 바로 꺼졌다) | — (build-pkg.sh의 `otool -L` 확인) |
+| 60 | 메뉴 막대 cssgsg 메뉴 | 메뉴 열기 | 맨 위에 G 영어 (Graphite) · ㅊ 한국어 (참신세벌식) · 月 일본어 (新月配列), 지금 모드에 체크. 그 아래 설정… · 배열 학습 · 타자 연습, 그 아래 cssgsg 다시 시작 · cssgsg 종료(윈도우 메뉴와 같은 차례) | — |
+| 61 | ㅊ. 텍스트 편집기에서 `k f`(가)를 조합하는 중 | 메뉴에서 G 영어 → 몇 글자 → 메뉴에서 ㅊ 한국어 | 가가 확정되고 메뉴 막대가 G가 된다. 메뉴로 바꿀 때는 모드 표시(HUD)가 뜨지 않는다 | — |
+| 62 | 다른 입력 소스(ABC나 NRIME)를 고른 채 | cssgsg 메뉴에서 月 일본어 | 입력 소스가 cssgsg로 바뀌고 月로 쳐진다 | — |
+| 63 | 메뉴 막대 cssgsg 메뉴 | 배열 학습, 타자 연습(설정 앱이 꺼져 있을 때와 떠 있을 때) | 설정 앱이 그 탭으로 뜬다. 떠 있으면 그 탭으로 바뀐다 | — |
+| 64 | 설정 앱 창을 연 채 0.7.4로 업데이트(또는 ⌘Q로 끝냈다가 다시 열기) | 다시 뜬 설정 창 제목 막대를 끈다. 옮기고 크기를 바꾼 뒤 ⌘Q, 다시 연다 | 처음 뜬 창부터 끌린다. 다시 열면 옮긴 자리·크기 그대로(0.7.3은 ⌘Q·업데이트 뒤 창을 되살렸고, 되살린 창은 옮긴 자리가 남지 않았다). 그래도 안 끌리면 어떻게 열었는지(업데이트 뒤·메뉴·Finder)와 다른 창은 끌리는지 알려 준다 | — (시험 앱: 되살릴 상태가 있어도 새로 띄움) |
+| 65 | ㅊ 모드. Safari·Chrome·Firefox에서 [시험 페이지](../tools/win/field-test.html)의 비밀번호 칸 | `j l w w i 1`, 그다음 ⌘A·⌘C, 보통 칸에 ⌘V | hello1(모드와 상관없이 Graphite, 조합 밑줄 없음). ⌘ 단축키는 키캡(쿼티)대로. 글자가 사라지면(점이 늘지 않으면) 그 브라우저를 알려 준다 | — (`cargo test password_fields`, shell-smoke 비밀번호 칸 10) |
+| 66 | 관리자 암호 창(설정 앱 업데이트 설치 때), 시스템 설정의 암호 확인 | 암호를 친다 | 지금처럼 쿼티로 들어간다(입력기가 넣은 글자를 버리는 창이라 키를 넘긴다. Graphite는 다음 단계) | — |
+| 67 | 개발자 기록을 켠 채 65번 | 기록 파일(`~/Library/Application Support/cssgsg/developer.log`)을 본다 | `[Controller] secure field … graphite=true app=…`가 있고, 비밀번호 칸에서 친 키의 `[Key]` 줄은 없다(모드를 바꿨으면 "mode switch in a secure field"만) | — |
 
-틀린 항목이 있으면 번호를 알려 준다. 재현이 필요하면 개발자 기록을 켠다(키 코드·수식키·시각만 남고 글자 내용은 남지 않는다).
+틀린 항목이 있으면 번호를 알려 준다. 재현이 필요하면 개발자 기록을 켠다(키 코드·수식키·시각만 남고 글자 내용은 남지 않는다.
+비밀번호 칸에서는 그것도 남지 않는다).
 
 ```bash
 defaults write com.cssgsg.inputmethod.app developerMode -bool true

@@ -48,6 +48,19 @@ int main(void) {
     o = cssgsg_engine_handle_key(e, &k, NULL);
     CHECK(o->consumed == 1 && strcmp(o->commit, "h") == 0);
 
+    /* 비밀번호 칸: secure_field만이면 넘기고, secure_latin도 켜면 모드와 상관없이 Graphite로 바로 확정한다 */
+    o = cssgsg_engine_set_mode(e, CSSGSG_MODE_KO);
+    CHECK(o->mode == CSSGSG_MODE_KO);
+    CssgsgContext pass = { 0, 0, 1, 0 };
+    CssgsgContext latin = { 0, 0, 1, 1 };
+    k = key(0x26, 4.0); /* j */
+    o = cssgsg_engine_handle_key(e, &k, &pass);
+    CHECK(o->consumed == 0 && strcmp(o->commit, "") == 0);
+    k = key(0x26, 4.1);
+    o = cssgsg_engine_handle_key(e, &k, &latin);
+    CHECK(o->consumed == 1 && strcmp(o->commit, "h") == 0 && strcmp(o->preedit, "") == 0);
+    CHECK(cssgsg_engine_mode(e) == CSSGSG_MODE_KO);
+
     CHECK(cssgsg_engine_new("ko_layout = \"x\"") == NULL);
     CHECK(strlen(cssgsg_last_error()) > 0);
 

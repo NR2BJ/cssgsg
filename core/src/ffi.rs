@@ -35,6 +35,8 @@ pub struct CssgsgContext {
     pub game_mode: u8,
     pub taps_disabled: u8,
     pub secure_field: u8,
+    /// secure_field이고 셸이 그 칸에 글자를 넣을 수 있다(맥: 브라우저 비밀번호 칸). secure_field가 아니면 무시한다.
+    pub secure_latin: u8,
 }
 
 #[repr(C)]
@@ -295,12 +297,13 @@ pub unsafe extern "C" fn cssgsg_engine_handle_key(
         repeat: ev.is_repeat != 0,
         time: ev.time,
     };
-    // secure_latin은 맥(이 C ABI를 쓰는 셸)에서는 쓰지 않는다: 비밀번호 칸에 글자를 넣을 수 없다.
+    // secure_latin: 맥은 입력기가 글자를 넣을 수 있는 비밀번호 칸(브라우저)에서만 켠다. 인증 창(SecurityAgent 등)은
+    // 입력기가 넣은 글자를 버려서 켜지 않는다(키를 넘긴다).
     let ctx = Context {
         game_mode: ctx.game_mode != 0,
         taps_disabled: ctx.taps_disabled != 0,
         secure_field: ctx.secure_field != 0,
-        secure_latin: false,
+        secure_latin: ctx.secure_field != 0 && ctx.secure_latin != 0,
     };
     unsafe { run(e, |engine| engine.handle_key(&event, &ctx)) }
 }
@@ -588,6 +591,31 @@ mod tests {
 
             let out = &*cssgsg_engine_commit(e);
             assert_eq!(s(out.commit), "가");
+            cssgsg_engine_free(e);
+        }
+    }
+
+    #[test]
+    fn password_fields_through_c_abi() {
+        unsafe {
+            let e = cssgsg_engine_new(ptr::null());
+            assert_eq!(cssgsg_engine_mode(e), 1, "한국어 모드");
+            // secure_field만: 키를 넘긴다(쿼티).
+            let only = CssgsgContext { secure_field: 1, ..CssgsgContext::default() };
+            let out = &*cssgsg_engine_handle_key(e, &key(0x26, 1.0), &only); // j
+            assert_eq!((out.consumed, s(out.commit).as_str()), (0, ""));
+            // secure_latin도: 모드와 상관없이 Graphite로 바로 확정한다(조합 없음).
+            let latin = CssgsgContext { secure_field: 1, secure_latin: 1, ..CssgsgContext::default() };
+            let out = &*cssgsg_engine_handle_key(e, &key(0x26, 2.0), &latin); // j → h
+            assert_eq!((out.consumed, s(out.commit).as_str(), s(out.preedit).as_str()), (1, "h", ""));
+            // 쿼티와 같은 숫자는 앱이 친다.
+            let out = &*cssgsg_engine_handle_key(e, &key(0x12, 3.0), &latin); // 1
+            assert_eq!((out.consumed, s(out.commit).as_str()), (0, ""));
+            // secure_field가 아니면 secure_latin은 무시한다(한국어로 조합).
+            let stray = CssgsgContext { secure_latin: 1, ..CssgsgContext::default() };
+            let out = &*cssgsg_engine_handle_key(e, &key(0x28, 4.0), &stray); // k → ㄱ
+            assert_eq!((out.consumed, out.preedit_changed, s(out.preedit).as_str()), (1, 1, "ㄱ"));
+            assert_eq!(cssgsg_engine_mode(e), 1);
             cssgsg_engine_free(e);
         }
     }

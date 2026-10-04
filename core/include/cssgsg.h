@@ -53,6 +53,8 @@ typedef struct CssgsgContext {
     uint8_t game_mode;      /* 영어 모드를 쿼티 그대로 통과 (윈도우 게임) */
     uint8_t taps_disabled;  /* 수식키 탭 전환 끄기 */
     uint8_t secure_field;   /* 비밀번호 칸 등: 조합 없이 모두 통과 (언어 전환 탭은 된다) */
+    uint8_t secure_latin;   /* secure_field이고 셸이 그 칸에 글자를 넣을 수 있다: 모드와 상관없이 Graphite로 바로 확정
+                               (쿼티와 같은 키·단축키는 통과). secure_field가 아니면 무시한다 */
 } CssgsgContext;
 
 typedef struct CssgsgSegment {

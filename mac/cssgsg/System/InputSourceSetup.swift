@@ -38,4 +38,28 @@ enum InputSourceSetup {
     static func openKeyboardSettings() {
         Cssgsg.openKeyboardSettings()
     }
+
+    /// 지금 고른 입력 소스의 ID.
+    static var currentID: String? {
+        guard let current = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue() else { return nil }
+        return TISGetInputSourceProperty(current, kTISPropertyInputSourceID)
+            .map { Unmanaged<CFString>.fromOpaque($0).takeUnretainedValue() as String }
+    }
+
+    /// cssgsg가 지금 입력 소스다.
+    static var isCurrent: Bool { currentID == Cssgsg.inputModeID }
+
+    /// 메뉴 막대 메뉴에서 모드를 골랐는데 다른 입력 소스가 골라져 있으면 cssgsg를 고른다.
+    /// 사용자가 추가했을 때만(추가하지 않은 입력기도 TIS가 "켜짐"으로 줄 때가 있어서 저장 파일로 본다). 켜지는 않는다.
+    static func selectIfNotCurrent() {
+        let currentID = currentID
+        guard currentID != Cssgsg.inputModeID, isAdded else { return }
+        let filter = [kTISPropertyInputSourceID as String: Cssgsg.inputModeID] as CFDictionary
+        guard let list = TISCreateInputSourceList(filter, false)?.takeRetainedValue() as? [TISInputSource],
+              let source = list.first else { return }
+        let status = TISSelectInputSource(source)
+        DeveloperLogger.shared.log("Setup", "selected from the menu", metadata: [
+            "status": "\(status)", "from": currentID ?? "unknown",
+        ])
+    }
 }

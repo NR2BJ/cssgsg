@@ -122,12 +122,15 @@ final class CoreEngine {
     }
 
 
-    func handle(_ event: CssgsgKeyEvent, secureField: Bool = false, gameMode: Bool = false, tapsDisabled: Bool = false) -> EngineOutput {
+    /// secureLatin: 비밀번호 칸(secureField)인데 입력기가 글자를 넣을 수 있다(PasswordFields). 모드와 상관없이 Graphite로 친다.
+    func handle(_ event: CssgsgKeyEvent, secureField: Bool = false, secureLatin: Bool = false, gameMode: Bool = false,
+                tapsDisabled: Bool = false) -> EngineOutput {
         var ev = event
         var ctx = CssgsgContext(
             game_mode: gameMode ? 1 : 0,
             taps_disabled: tapsDisabled ? 1 : 0,
-            secure_field: secureField ? 1 : 0
+            secure_field: secureField ? 1 : 0,
+            secure_latin: secureField && secureLatin ? 1 : 0
         )
         return Self.copy(cssgsg_engine_handle_key(engine, &ev, &ctx))
     }

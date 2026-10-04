@@ -22,6 +22,7 @@ final class CssgsgInputController: IMKInputController {
     /// 마우스 감시 콜백 때는 self.client()가 이미 nil일 수 있어서 마지막 클라이언트를 들고 있는다.
     private var cachedClient: (any IMKTextInput)?
     private var lastSecureState = false
+    private var lastLatinState = false
 
     override func recognizedEvents(_ sender: Any!) -> Int {
         Int(NSEvent.EventTypeMask([.keyDown, .flagsChanged]).rawValue)
@@ -37,13 +38,19 @@ final class CssgsgInputController: IMKInputController {
             KeyEventReposter.flushPendingNewline()
         }
 
-        let secure = secureInput.shouldSuppressComposition() || secureInput.isAuthenticationClient(client.bundleIdentifier())
-        if secure != lastSecureState {
+        let app = client.bundleIdentifier()
+        let authentication = secureInput.isAuthenticationClient(app)
+        let secure = secureInput.shouldSuppressComposition() || authentication
+        // 브라우저 비밀번호 칸이면 모드와 상관없이 Graphite를 직접 넣는다(넣은 글자를 버리는 인증 창 등은 넘긴다).
+        let latin = secure && PasswordFields.insertsGraphite(client: app, authentication: authentication)
+        if secure != lastSecureState || latin != lastLatinState {
             lastSecureState = secure
+            lastLatinState = latin
             DeveloperLogger.shared.log("Controller", "secure field", metadata: [
                 "secure": "\(secure)",
+                "graphite": "\(latin)",
                 "holder": secureInput.secureInputHolderBundleID() ?? "unknown",
-                "app": client.bundleIdentifier() ?? "unknown",
+                "app": app ?? "unknown",
             ])
         }
 
@@ -51,8 +58,8 @@ final class CssgsgInputController: IMKInputController {
         case .flagsChanged:
             // 바뀐 것이 없으면(IMKit이 같은 flagsChanged를 두 번 보낸다) 엔진에 넘기지 않는다.
             guard let keyEvent = Self.modifiers.flagsChanged(event) else { return false }
-            let out = CoreEngine.shared.handle(keyEvent, secureField: secure)
-            logKey(event, keyEvent, out)
+            let out = CoreEngine.shared.handle(keyEvent, secureField: secure, secureLatin: latin)
+            logKey(event, keyEvent, out, secure: secure)
             // 전환은 되지만, 확정할 글자를 비밀번호 칸에 넣지는 않는다.
             apply(out, client: client, allowCommit: !secure)
             return false
@@ -67,11 +74,12 @@ final class CssgsgInputController: IMKInputController {
                 return true
             }
             let keyEvent = Self.modifiers.keyDown(event)
-            let out = CoreEngine.shared.handle(keyEvent, secureField: secure)
-            logKey(event, keyEvent, out)
-            if secure {
+            let out = CoreEngine.shared.handle(keyEvent, secureField: secure, secureLatin: latin)
+            logKey(event, keyEvent, out, secure: secure)
+            if secure && !latin {
                 return false
             }
+            // 브라우저 비밀번호 칸: 엔진이 Graphite 글자를 확정으로 준다(쿼티와 같은 키·단축키는 넘긴다).
             return finish(out, event: event, client: client)
 
         default:
@@ -107,16 +115,31 @@ final class CssgsgInputController: IMKInputController {
         return out.consumed
     }
 
-    private func apply(_ out: EngineOutput, client: any IMKTextInput, allowCommit: Bool = true) {
+    /// 메뉴 막대 메뉴에서 모드를 골랐다. 조합 중인 것은 지금 앱에 확정하고(엔진 set_mode) 메뉴 막대를 맞춘다.
+    /// 메뉴에서 고른 것이라 HUD는 띄우지 않는다. cssgsg가 지금 입력 소스가 아니면 앞 앱 칸은 건드리지 않고(다른 입력기가
+    /// 조합 중일 수 있다. 우리 조합은 비활성화 때 이미 확정했다) cssgsg를 고른다(사용자가 추가했을 때만).
+    static func chooseMode(_ mode: InputMode) {
+        let out = CoreEngine.shared.setMode(mode)
+        if InputSourceSetup.isCurrent {
+            if let controller = activeController, let client = controller.cachedClient ?? controller.client() {
+                controller.apply(out, client: client, allowCommit: controller.canCommit(to: client), showHUD: false)
+            }
+        } else {
+            InputSourceSetup.selectIfNotCurrent()
+        }
+        (NSApp.delegate as? AppDelegate)?.updateStatus(CoreEngine.shared.mode)
+    }
+
+    private func apply(_ out: EngineOutput, client: any IMKTextInput, allowCommit: Bool = true, showHUD: Bool = true) {
         // 모드가 바뀌면 HUD를 띄운다. 자리는 확정하기 전에 잰다(확정한 뒤에는 앱마다 커서 자리가 어긋난다).
         let settings = CoreEngine.shared.macSettings
-        let hudCaret: NSRect? = out.mode != nil && settings.hud != 0 && settings.hud_at_mouse == 0
+        let hudCaret: NSRect? = showHUD && out.mode != nil && settings.hud != 0 && settings.hud_at_mouse == 0
             ? ModeHUD.caretRect(for: client) : nil
         if !out.commit.isEmpty && !allowCommit {
             DeveloperLogger.shared.log("Controller", "commit dropped in secure field", metadata: ["length": "\(out.commit.count)"])
         }
         TextApplier.apply(out, to: IMKTextClient(client: client), allowCommit: allowCommit)
-        applyUI(out, client: client, hudCaret: hudCaret)
+        applyUI(out, client: client, hudCaret: hudCaret, showHUD: showHUD)
         scheduleTimer(out.timerMs)
     }
 
@@ -133,7 +156,7 @@ final class CssgsgInputController: IMKInputController {
     }
 
     /// 글자 밖의 것: 후보창, 모드 표시와 HUD, Caps Lock, 한자 학습 저장.
-    private func applyUI(_ out: EngineOutput, client: any IMKTextInput, hudCaret: NSRect? = nil) {
+    private func applyUI(_ out: EngineOutput, client: any IMKTextInput, hudCaret: NSRect? = nil, showHUD: Bool = true) {
         let settings = CoreEngine.shared.macSettings
         switch out.candidates {
         case .unchanged:
@@ -145,7 +168,7 @@ final class CssgsgInputController: IMKInputController {
         }
         if let mode = out.mode {
             (NSApp.delegate as? AppDelegate)?.updateStatus(mode)
-            if settings.hud != 0 {
+            if showHUD && settings.hud != 0 {
                 ModeHUD.shared.show(mode.label, caret: hudCaret)
             }
         }
@@ -209,8 +232,15 @@ final class CssgsgInputController: IMKInputController {
     // MARK: - 기록
 
     /// 키 코드·수식키·결과 모양만 남긴다. 글자 내용은 남기지 않는다.
-    private func logKey(_ event: NSEvent, _ key: CssgsgKeyEvent, _ out: EngineOutput) {
+    /// 비밀번호 칸에서는 키 코드·시각·글자 수도 남기지 않는다(키 코드가 곧 비밀번호다, NRIME와 같다). 모드 전환만 남긴다.
+    private func logKey(_ event: NSEvent, _ key: CssgsgKeyEvent, _ out: EngineOutput, secure: Bool) {
         guard DeveloperLogger.shared.isEnabled else { return }
+        if secure {
+            if let mode = out.mode {
+                DeveloperLogger.shared.log("Key", "mode switch in a secure field", metadata: ["mode": "\(mode.rawValue)"])
+            }
+            return
+        }
         DeveloperLogger.shared.log("Key", event.type == .flagsChanged ? "flags" : "down", metadata: [
             "keyCode": String(format: "0x%02X", event.keyCode),
             "hid": String(format: "0x%02X", key.key),

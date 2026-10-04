@@ -21,9 +21,9 @@ struct GeneralTab: View {
                 ShortcutRow(title: ShortcutText.actionName(\.hanja), value: shortcuts.hanja,
                             defaultValue: defaults.hanja) { model.setShortcut(\.hanja, to: $0) }
                 if shortcuts.toggleEnglish.isEmpty {
-                    Label(tr("영어로 전환하는 단축키가 없습니다. 메뉴 막대에서는 모드를 바꿀 수 없으니 하나는 정해 두세요.",
-                             "No shortcut switches to English. The menu bar can’t change modes, so please set one.",
-                             "英語に切り替えるショートカットがありません。メニューバーからはモードを変えられないので、一つは設定してください。"),
+                    Label(tr("영어로 전환하는 단축키가 없습니다. 메뉴 막대 cssgsg 메뉴에서도 고를 수 있지만, 치면서 바꾸려면 하나는 정해 두세요.",
+                             "No shortcut switches to English. You can still pick a mode from the cssgsg menu in the menu bar, but set one to switch while typing.",
+                             "英語に切り替えるショートカットがありません。メニューバーの cssgsg メニューからも選べますが、入力しながら切り替えるには一つ設定してください。"),
                           systemImage: "exclamationmark.triangle")
                         .foregroundStyle(.orange)
                 }
