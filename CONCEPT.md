@@ -336,10 +336,8 @@ cssgsg/
 - **윈도우:** TIP을 한국어(ko-KR) 프로필로 등록한다(0.2.8부터. 0.2.7까지는 en-US, §10.2 프로필).
   - 텍스트 컨텍스트가 있을 때만 키를 먹고, edit session으로 커밋한다.
   - 빈 컨텍스트(`EMPTYCONTEXT`)이거나 `KEYBOARD_DISABLED`이면 통과시킨다.
-- **비번:** NRIME 로직(인증 UI 판정 → 비켜주기 / ABC 핸드오프)을 그대로 가져온다.
-  - 이제 기반 레이아웃이 원래 쿼티라서 비번은 자연스럽게 쿼티가 된다.
-  - 지금 macOS 27에서 돌고 있는 코드라 이 환경에서는 검증된 셈이다.
-  - 남은 과제: NRIME의 "20초 상한" 버그를 claim별 latch로 고친다.
+- **비번:** 처음 설계는 NRIME 로직(인증 UI 판정 → 비켜주기 / ABC 핸드오프)을 그대로 가져와 쿼티였다. 비밀번호도 Graphite로
+  바꿨다(§13): 브라우저 칸은 입력기가 Graphite를 넣고(0.7.4), 인증 창은 그 앱에만 Graphite 자판을 끼운다(0.7.5-beta.1).
 
 ### 4.3 게임 모드 (윈도우 전용)
 
@@ -1197,6 +1195,10 @@ k     = { cho = "ㄱ" }
     되살린 창은 옮긴 자리가 창 자동 저장(NSWindow Frame settings)에 남지 않았다(확인). 설정 앱이 ApplePersistenceIgnoreState를 등록해
     늘 새 창으로 연다(시험 앱: 되살릴 상태가 있어도 launchIsDefault 0 → 1). 재현하지 못했으니 사용자 확인으로 닫는다.
   - 개발자 기록: 비밀번호 칸에서는 키 줄을 남기지 않는다(모드 전환만). 0.7.3까지는 기록을 켜 두면 비밀번호의 키 코드와 시각이 남았다.
+- 0.7.5-beta.1(사용자 "비번은 로그인 화면 같은 것도 다 Graphite로", "시험판 해보자"): 관리자 암호 창·시스템 암호 시트에 Graphite 자판을 끼운다
+  (§13 비밀번호, `PasswordLayout`, `tools/mac/keylayout`). pkg가 `/Library/Keyboard Layouts/cssgsg-Graphite.bundle`을 같이 설치하고 입력기가
+  뜰 때 등록한다. 잠금 화면과 재부팅 로그인 창은 다음 단계에서 같이 한다. 윈도우는 로그인 화면에 서드파티 입력기가 아예 안 뜨고(§10, CVE-2024-43583)
+  입력기 밑에 직접 만든 자판을 까는 공식 방법도 없어서, 같은 데이터로 Graphite 자판(DLL)을 만들어 환영 화면 자판으로 정하는 길뿐이다(윈도우 세션).
 - 3단계 M3a(2026-10-01, 윈도우 VM): TSF 텍스트 서비스 뼈대 `win/tip`(Rust + windows 0.62, 워크스페이스에 넣고 맥에서는 빈 크레이트).
   글자 키를 Graphite 글자로 바로 확정, 단축키는 쿼티 자리, 등록·해제(`tools/win/tip-dev.ps1`), 해제 뒤 흔적 없음(§10.2). 코어에 윈도우 스캔 코드 표.
   다음 M3b: 코어 엔진 연결(조합 밑줄, 세 모드, Shift 톡, 모드 아이콘).
@@ -1267,14 +1269,24 @@ k     = { cho = "ㄱ" }
   - 맥(0.7.4): 입력기가 키를 받는 브라우저 비밀번호 칸(맨 앞 앱 자기 칸이고 Safari·Chromium/Electron·Firefox 계열)은 윈도우처럼
     Graphite를 직접 넣는다(`PasswordFields`). 처음 생각("입력기는 비밀번호 칸에 글자를 넣을 수 없다")은 인증 창에만 맞았다: NRIME에서
     입력기가 넣은 글자를 버린 곳은 SecurityAgent·loginwindow였다. 그 밖의 앱 칸은 확인할 때까지 넘긴다(쿼티).
-  - 맥 인증 창·잠금 화면(남은 것): OS 키보드 배열이 Graphite여야 한다. 입력기가 OS 배열을 정하는 TISSetInputMethodKeyboardLayoutOverride는
-    macOS 26부터 무시된다(§12 0.7.4). 남은 길은 Graphite keylayout을 /Library/Keyboard Layouts에 설치하고 사용자가 입력 소스로 한 번 추가한 뒤,
-    인증 창이 보안 입력을 잡는 동안 그 배열로 넘겼다 돌아오기다(NRIME의 ABC 넘기기를 Graphite로, 넘기는 곳은 인증 창만·20초 상한·주인이
-    죽은 보안 입력은 무시 같은 NRIME 규칙을 그대로). 설치 위치가 하나 늘고 그 배열이 입력 메뉴에 보인다(사용자 결정이 필요하다).
-    로그인·잠금 화면은 그 배열을 로그인 창의 입력 소스로도 골라야 한다. secure input 감지 지연(~2초) 동안 첫 글자가 쿼티로 들어가지 않게.
+  - 맥 인증 창(0.7.5-beta.1, 사용자 "시험판 해보자"): OS 키보드 자판이 Graphite여야 한다(입력기가 넣은 글자를 버린다). 입력기가
+    `IMKTextInput.overrideKeyboard(withKeyboardNamed:)`로 그 앱에만 Graphite 자판을 끼운다(`PasswordLayout`). 이 메서드는 앱 프로세스 안에서
+    설치된 자판을 입력 소스 ID(없으면 자판 이름)로 찾아 TISSetInputMethodKeyboardLayoutOverride를 부른다(HIToolbox
+    `-[IMKInputSession_Modern overrideKeyboardWithKeyboardNamed:]`를 lldb로 봤다). 무시된다고 측정된 것은 입력기 프로세스에서 부른 경우다.
+    Mozc·Keyman·macSKK가 같은 메서드로 기반 자판을 정한다. 자판은 엔진 데이터로 만든 `/Library/Keyboard Layouts/cssgsg-Graphite.bundle`
+    (`tools/mac/keylayout`, 글자 층은 영어 모드 그대로·⌘/Control/Option 층은 ABC 그대로·원작자 배포본과 글자 층 94개 같음). 입력기 번들 안에
+    넣은 자판이 등록되는지는 문서에 없어서 확실히 등록되는 그 폴더에 둔다(설치 위치가 하나 는다, 재부팅 로그인 창 단계에도 필요하다).
+    사용자가 입력 소스로 추가할 필요는 없다. 끼우는 곳은 SecurityAgent(관리자 암호 창)·LocalAuthenticationRemoteService(시스템 암호 시트)이고,
+    인증 창이 활성화될 때 끼우고 그 뒤 처음 다른 앱이 활성화될 때 가장 최근 ASCII 자판으로 되돌린다(macSKK #292: 활성화마다 부르다가
+    Apple 앱이 죽는다는 신고). 먹었는지는 인증 창에서 처음 친, Graphite와 쿼티가 다른 키의 글자로 한 번 기록한다(글자는 남기지 않는다).
+  - 맥 잠금 화면·재부팅 로그인 창(다음): 잠금 화면(loginwindow)도 같은 길로 되지만, 재부팅 직후 로그인 창은 입력기가 없어 쿼티라서 잠금 화면만
+    바꾸면 같은 암호를 두 가지로 쳐야 한다. 로그인 창의 시스템 자판(/Library/Preferences/com.apple.HIToolbox, 지금 ABC)을 Graphite로 정하는 것과
+    같이 한다. FileVault를 켠 맥은 부팅 직후 화면이 별도 환경이라 직접 설치한 자판을 못 쓸 수 있다(확인 필요, 맥 미니는 FileVault 꺼짐).
+    secure input 감지 지연(~2초)은 끼우는 기준이 번들 ID라 상관없다.
 - 맥 배포는 **pkg + GitHub 릴리스(공개) + 앱 안 업데이트**다(NRIME 방식, 2026-09-29).
   - 0.5.0부터 업데이트는 설정 앱 정보 탭에서 한다. 채널은 정식(`/releases/latest`)과 베타(`/releases` 목록에서 가장 높은 버전, prerelease 포함). 정보 탭을 열 때마다(1분 간격까지), "지금 확인", 채널을 바꿀 때 확인한다. 0.5.0~0.5.2는 NRIME처럼 하루 한 번이었는데, 그날 한 번 본 뒤 나온 릴리스가 다음 날까지 안 보여서(사용자가 0.5.0에 머물렀다) 0.5.3에서 줄였다. 설치가 끝나면 설치 셸이 입력기와 설정 앱을 다시 띄운다.
-  - 설치 위치는 `/Library/Input Methods` 하나다. 개발 중에도 스크립트로 따로 깔지 않는다.
+  - 설치 위치는 `/Library/Input Methods` 하나다. 개발 중에도 스크립트로 따로 깔지 않는다. 예외: 0.7.5-beta.1부터 인증 창 비밀번호용 Graphite 자판
+    `/Library/Keyboard Layouts/cssgsg-Graphite.bundle`(위 비밀번호 항목, pkg가 같이 설치한다).
   - 로그인 키체인의 자체 서명 인증서("cssgsg Code Signing")로 서명한다. 서명 요구조건이 인증서 기준이라 업데이트해도 권한이 유지된다.
   - 업데이트에는 로그아웃이 필요 없다. 첫 설치만 필요할 수 있다.
   - macOS 27에서는 서드파티 입력기를 프로그램이 입력 소스에 켤 수 없다(TISEnableInputSource가 성공이라고 답하지만 저장되지 않는다, 2026-09-29 확인). 첫 설치 뒤 사용자가 시스템 설정 → 키보드 → 입력 소스 → + → 영어 → cssgsg로 추가한다. 앱은 추가되지 않았으면 안내만 한다.

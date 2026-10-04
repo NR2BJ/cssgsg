@@ -78,8 +78,12 @@
 | 63 | 메뉴 막대 cssgsg 메뉴 | 배열 학습, 타자 연습(설정 앱이 꺼져 있을 때와 떠 있을 때) | 설정 앱이 그 탭으로 뜬다. 떠 있으면 그 탭으로 바뀐다 | — |
 | 64 | 설정 앱 창을 연 채 0.7.4로 업데이트(또는 ⌘Q로 끝냈다가 다시 열기) | 다시 뜬 설정 창 제목 막대를 끈다. 옮기고 크기를 바꾼 뒤 ⌘Q, 다시 연다 | 처음 뜬 창부터 끌린다. 다시 열면 옮긴 자리·크기 그대로(0.7.3은 ⌘Q·업데이트 뒤 창을 되살렸고, 되살린 창은 옮긴 자리가 남지 않았다). 그래도 안 끌리면 어떻게 열었는지(업데이트 뒤·메뉴·Finder)와 다른 창은 끌리는지 알려 준다 | — (시험 앱: 되살릴 상태가 있어도 새로 띄움) |
 | 65 | ㅊ 모드. Safari·Chrome·Firefox에서 [시험 페이지](../tools/win/field-test.html)의 비밀번호 칸 | `j l w w i 1`, 그다음 ⌘A·⌘C, 보통 칸에 ⌘V | hello1(모드와 상관없이 Graphite, 조합 밑줄 없음). ⌘ 단축키는 키캡(쿼티)대로. 글자가 사라지면(점이 늘지 않으면) 그 브라우저를 알려 준다 | — (`cargo test password_fields`, shell-smoke 비밀번호 칸 10) |
-| 66 | 관리자 암호 창(설정 앱 업데이트 설치 때), 시스템 설정의 암호 확인 | 암호를 친다 | 지금처럼 쿼티로 들어간다(입력기가 넣은 글자를 버리는 창이라 키를 넘긴다. Graphite는 다음 단계) | — |
+| 66 | 관리자 암호 창(설정 앱 업데이트 설치 때), 시스템 설정의 암호 확인 | 암호를 친다 | 0.7.4는 쿼티로 들어간다(입력기가 넣은 글자를 버리는 창이라 키를 넘긴다). 0.7.5-beta.1부터는 68·69번 | — |
 | 67 | 개발자 기록을 켠 채 65번 | 기록 파일(`~/Library/Application Support/cssgsg/developer.log`)을 본다 | `[Controller] secure field … graphite=true app=…`가 있고, 비밀번호 칸에서 친 키의 `[Key]` 줄은 없다(모드를 바꿨으면 "mode switch in a secure field"만) | — |
+| 68 | 0.7.5-beta.1 설치 뒤(설정 → 정보 → 채널 베타). cssgsg를 고른 채 터미널에서 `osascript -e 'do shell script "true" with administrator privileges'` | 뜬 관리자 암호 창에 아무 글자나 몇 개(예: `j l w w i`) 치고 취소 | 개발자 기록에 `[PasswordLayout] override app=com.apple.SecurityAgent`와 `[PasswordLayout] check … graphite=true`. false면 로그아웃했다 다시 해 본다(그래도 false면 알려 준다). 진짜 암호는 칠 필요 없다 | — (`tools/mac/keylayout/run.sh --check`: 원작자 배포본과 글자 층 94개 같음) |
+| 69 | 68번이 true일 때. 시스템 설정 → 사용자 및 그룹 → 사용자 추가 등 암호 시트가 뜨는 곳 | 아무 글자나 치고 취소 | 기록에 `override app=com.apple.LocalAuthenticationRemoteService`, `check … graphite=true` | — |
+| 70 | 68번 뒤 다른 앱(메모 등)으로 돌아와서 | ㅊ·G·月로 몇 글자, ⌘C·⌘V, 영어 모드의 `-` `=` `[` | 평소와 같다(되돌리기: 기록에 `[PasswordLayout] restore`). 영어 모드 글자는 Graphite, 단축키는 키캡(쿼티) 자리 | — |
+| 71 | 시스템 설정 → 키보드 → 입력 소스 편집 → + → 영어 | 목록만 본다(추가하지 않는다) | "Graphite (cssgsg)"가 보일 수 있다. 추가할 필요는 없다(입력기가 인증 창에만 끼운다) | — |
 
 틀린 항목이 있으면 번호를 알려 준다. 재현이 필요하면 개발자 기록을 켠다(키 코드·수식키·시각만 남고 글자 내용은 남지 않는다.
 비밀번호 칸에서는 그것도 남지 않는다).

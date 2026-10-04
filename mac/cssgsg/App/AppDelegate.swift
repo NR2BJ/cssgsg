@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateStatus(engine.mode)
         observeSettingsNotices()
         InputSourceSetup.register()
+        PasswordLayout.register()
         InputSourceSetup.promptOnceIfNotAdded()
         PermissionMonitor.start()
         MozcUpdater.shared.start()

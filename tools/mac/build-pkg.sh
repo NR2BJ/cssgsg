@@ -50,11 +50,14 @@ echo "버전 $VERSION"
 
 echo "=== 담을 것 준비 ==="
 rm -rf "$WORK"
-mkdir -p "$WORK/payload/Library/Input Methods" "$WORK/scripts"
+mkdir -p "$WORK/payload/Library/Input Methods" "$WORK/payload/Library/Keyboard Layouts" "$WORK/scripts"
 APP="$WORK/payload/Library/Input Methods/cssgsg.app"
 SETTINGS_APP="$WORK/payload/Library/Input Methods/cssgsgSettings.app"
 ditto "$BUILT" "$APP"
 ditto "$BUILT_SETTINGS" "$SETTINGS_APP"
+# 인증 창 비밀번호용 Graphite 자판(0.7.5). 입력기가 그 창에서만 끼운다(PasswordLayout). 입력 소스로 추가할 필요는 없다.
+# 코드가 없어서 서명하지 않는다.
+ditto "$ROOT/mac/KeyboardLayout/cssgsg-Graphite.bundle" "$WORK/payload/Library/Keyboard Layouts/cssgsg-Graphite.bundle"
 find "$WORK/payload" -name ".syncthing.*" -delete
 cp "$ROOT/tools/mac/pkg/postinstall" "$WORK/scripts/postinstall"
 chmod +x "$WORK/scripts/postinstall"

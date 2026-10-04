@@ -39,6 +39,8 @@ final class CssgsgInputController: IMKInputController {
         }
 
         let app = client.bundleIdentifier()
+        // 인증 창에 끼운 Graphite 자판이 먹었는지 한 번 본다(PasswordLayout, 글자는 기록하지 않는다).
+        PasswordLayout.check(event, app: app)
         let authentication = secureInput.isAuthenticationClient(app)
         let secure = secureInput.shouldSuppressComposition() || authentication
         // 브라우저 비밀번호 칸이면 모드와 상관없이 Graphite를 직접 넣는다(넣은 글자를 버리는 인증 창 등은 넘긴다).
@@ -197,6 +199,10 @@ final class CssgsgInputController: IMKInputController {
         (NSApp.delegate as? AppDelegate)?.updateStatus(CoreEngine.shared.mode)
         let client = sender as? (any IMKTextInput)
         DeveloperLogger.shared.log("Controller", "activateServer", metadata: ["app": client?.bundleIdentifier() ?? "unknown"])
+        // 인증 창이면 넘긴 키를 Graphite로 읽게 자판을 끼우고, 그 뒤 다른 앱이면 되돌린다.
+        if let client {
+            PasswordLayout.activated(client: client)
+        }
     }
 
     override func deactivateServer(_ sender: Any!) {
