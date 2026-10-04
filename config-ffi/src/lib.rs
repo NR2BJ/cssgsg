@@ -218,7 +218,8 @@ mod tests {
             .replace("chamshin-v18", "chamshin-d-v19");
         let text = toml_from_json(&changed).unwrap();
         assert!(
-            text.contains("\ncandidate_font_size = 20\n") && text.contains("\nko_layout = \"chamshin-d-v19\"\n"),
+            text.contains("\ncandidate_font_size = 20\n")
+                && text.contains("\nko_layout = \"chamshin-d-v19\"\n"),
             "{text}"
         );
         let back: serde_json::Value = serde_json::from_str(&json_from_toml(Some(&text)).unwrap()).unwrap();

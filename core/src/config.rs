@@ -818,7 +818,11 @@ mod tests {
     #[test]
     fn old_mac_mode_indicator_is_read_and_dropped() {
         // 0.7.4까지의 맥 모드 표시: 오류 없이 읽고 버린다. 다시 쓰지도 않는다. 윈도우 표의 모드 표시는 그대로다.
-        for toml in ["[mac]\nhud = false", "[mac]\nhud = true\nhud_position = \"mouse\"", "[mac]\nhud_position = \"caret\""] {
+        for toml in [
+            "[mac]\nhud = false",
+            "[mac]\nhud = true\nhud_position = \"mouse\"",
+            "[mac]\nhud_position = \"caret\"",
+        ] {
             let c = Config::from_toml(toml).unwrap_or_else(|e| panic!("{toml}: {e}"));
             assert_eq!(c, Config::default(), "{toml}");
             assert!(!c.to_toml().contains("hud"), "{toml}");
