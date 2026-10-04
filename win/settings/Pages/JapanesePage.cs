@@ -52,11 +52,11 @@ sealed partial class JapanesePage : SettingsPage
             Ui.Row(T("/ 키 → ・ (나카구로)", "/ Key → ・ (Nakaguro)", "/ キー → ・（中黒）"), Toggle("ja.slash_nakaguro")),
             Ui.Row(T("\\ 키 → ¥ (엔 기호)", "\\ Key → ¥ (Yen Sign)", "\\ キー → ¥（円記号）"), Toggle("ja.yen_sign"))));
 
+        // "일본어 모드를 나가면 Caps Lock 끄기"(ja.caps_katakana_auto_off)는 맥에만 있다: 윈도우에는 Caps Lock을 끄는 API가 없어 키를
+        // 흉내 내야 하는데, 입력기는 가짜 키 입력을 만들지 않는다(0.2.13, 안티치트).
         Add(Ui.Section(T("가타카나 (Caps Lock)", "Katakana (Caps Lock)", "カタカナ（Caps Lock）"), null,
             Ui.Row(T("입력하는 대로 바로 확정 (마지막 글자만 잠시 밑줄)", "Confirm as You Type (only the last kana stays underlined)",
-                "入力したそばから確定（最後の一文字だけ下線）"), Toggle("ja.katakana_direct")),
-            Ui.Row(T("일본어 모드를 나가면 Caps Lock 끄기", "Turn Off Caps Lock When Leaving Japanese",
-                "日本語モードを抜けたら Caps Lock をオフ"), Toggle("ja.caps_katakana_auto_off"))));
+                "入力したそばから確定（最後の一文字だけ下線）"), Toggle("ja.katakana_direct"))));
 
         dictionaryView = new UserDictionaryView(dictionary);
         Add(Ui.Section(T("개인 사전", "User Dictionary", "ユーザー辞書"), T(

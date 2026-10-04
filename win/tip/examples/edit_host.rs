@@ -5,6 +5,7 @@
 //!                                                                              12a·22a처럼 누르기만·떼기만)
 //!   ... -- fast keys=…                                                          키를 한꺼번에 보낸다(빠른 타자)
 //!   ... -- password keys=…                                                      한 줄 비밀번호 칸(ES_PASSWORD, 입력기를 끊는다)
+//!   ... -- fullscreen keys=…                                                    제목 표시줄 없이 화면 전체를 덮는 창(전체 화면 게임처럼)
 //!
 //! 창을 띄우고 스스로 키를 보낸다(SendInput). 그동안 다른 창을 누르지 않는다.
 
@@ -14,6 +15,7 @@ fn main() {
         let args: Vec<String> = std::env::args().skip(1).collect();
         let fast = args.iter().any(|a| a == "fast");
         let password = args.iter().any(|a| a == "password");
+        let fullscreen = args.iter().any(|a| a == "fullscreen");
         let keys: Vec<u16> = args
             .iter()
             .find_map(|a| a.strip_prefix("keys="))
@@ -21,7 +23,7 @@ fn main() {
                 list.split(',').map(|k| u16::from_str_radix(k.trim(), 16).expect("hex scan code")).collect()
             })
             .unwrap_or_default();
-        match imp::run(&keys, fast, password) {
+        match imp::run(&keys, fast, password, fullscreen) {
             Ok(text) => println!("text: [{}]", text.replace("\r\n", "<CRLF>")),
             Err(e) => {
                 eprintln!("{e:?}");
@@ -43,9 +45,10 @@ mod imp {
     };
     use windows::Win32::UI::WindowsAndMessaging::{
         CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, ES_AUTOHSCROLL,
-        ES_AUTOVSCROLL, ES_MULTILINE, ES_PASSWORD, GetWindowTextLengthW, GetWindowTextW, HMENU, MSG,
-        PM_REMOVE, PeekMessageW, RegisterClassW, SetForegroundWindow, TranslateMessage, WINDOW_EX_STYLE,
-        WINDOW_STYLE, WNDCLASSW, WS_CHILD, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+        ES_AUTOVSCROLL, ES_MULTILINE, ES_PASSWORD, GetSystemMetrics, GetWindowTextLengthW, GetWindowTextW,
+        HMENU, MSG, PM_REMOVE, PeekMessageW, RegisterClassW, SM_CXSCREEN, SM_CYSCREEN, SetForegroundWindow,
+        TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WNDCLASSW, WS_CHILD, WS_OVERLAPPEDWINDOW, WS_POPUP,
+        WS_VISIBLE,
     };
     use windows::core::{Result, w};
 
@@ -124,7 +127,7 @@ mod imp {
         }
     }
 
-    pub fn run(keys: &[u16], fast: bool, password: bool) -> Result<String> {
+    pub fn run(keys: &[u16], fast: bool, password: bool, fullscreen: bool) -> Result<String> {
         unsafe {
             let instance = GetModuleHandleW(None)?;
             let class = w!("cssgsg-edit-host");
@@ -138,11 +141,11 @@ mod imp {
                 WINDOW_EX_STYLE(0),
                 class,
                 w!("cssgsg edit host"),
-                WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-                CW_USEDEFAULT,
-                CW_USEDEFAULT,
-                480,
-                240,
+                if fullscreen { WS_POPUP | WS_VISIBLE } else { WS_OVERLAPPEDWINDOW | WS_VISIBLE },
+                if fullscreen { 0 } else { CW_USEDEFAULT },
+                if fullscreen { 0 } else { CW_USEDEFAULT },
+                if fullscreen { GetSystemMetrics(SM_CXSCREEN) } else { 480 },
+                if fullscreen { GetSystemMetrics(SM_CYSCREEN) } else { 240 },
                 None,
                 None,
                 Some(instance.into()),

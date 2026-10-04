@@ -19,9 +19,7 @@ use windows::Win32::Foundation::{E_UNEXPECTED, LPARAM, WPARAM};
 use windows::Win32::System::SystemInformation::GetTickCount;
 use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetFocus, GetKeyboardLayout, GetLastInputInfo, HKL, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS,
-    KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, LASTINPUTINFO, SendInput,
-    VIRTUAL_KEY, VK_CAPITAL, VK_HANGUL, VK_HANJA, VK_PACKET,
+    GetFocus, GetKeyboardLayout, GetLastInputInfo, HKL, LASTINPUTINFO, VK_HANGUL, VK_HANJA, VK_PACKET,
 };
 use windows::Win32::UI::TextServices::{
     GUID_COMPARTMENT_EMPTYCONTEXT, GUID_COMPARTMENT_KEYBOARD_DISABLED,
@@ -40,7 +38,7 @@ use windows::Win32::UI::TextServices::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     GetForegroundWindow, GetMessageTime, GetWindowThreadProcessId, KillTimer, PostMessageW, SetTimer,
-    WM_KEYDOWN,
+    WM_CHAR, WM_KEYDOWN,
 };
 use windows::core::{
     BOOL, ComObject, GUID, HRESULT, IUnknown, IUnknownImpl, Interface, Ref, Result, implement,
@@ -402,38 +400,6 @@ fn get_i32(compartment: &ITfCompartment) -> Option<i32> {
     i32::try_from(&v).ok()
 }
 
-/// Caps Lock 키를 한 번 눌렀다 뗀다(일본어 모드를 나갈 때 가타카나 끄기).
-fn toggle_caps_lock() {
-    let key = |flags: KEYBD_EVENT_FLAGS| INPUT {
-        r#type: INPUT_KEYBOARD,
-        Anonymous: INPUT_0 {
-            ki: KEYBDINPUT { wVk: VK_CAPITAL, wScan: 0, dwFlags: flags, time: 0, dwExtraInfo: 0 },
-        },
-    };
-    let inputs = [key(KEYBD_EVENT_FLAGS(0)), key(KEYEVENTF_KEYUP)];
-    unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) };
-}
-
-/// 받은 키(누름)를 다시 보낸다(가상 키와 스캔 코드, 확장 키 그대로). 지금 눌린 수식키(Shift·Ctrl)는 그대로 실린다. 뗌은 사용자가
-/// 실제로 뗄 때 온다. 다시 받은 키는 조합이 없어서 입력기가 그냥 넘긴다.
-fn resend_key(wparam: WPARAM, lparam: LPARAM) {
-    let scan = ((lparam.0 >> 16) & 0xFF) as u16;
-    let extended = lparam.0 & (1 << 24) != 0;
-    let input = INPUT {
-        r#type: INPUT_KEYBOARD,
-        Anonymous: INPUT_0 {
-            ki: KEYBDINPUT {
-                wVk: VIRTUAL_KEY(wparam.0 as u16),
-                wScan: scan,
-                dwFlags: if extended { KEYEVENTF_EXTENDEDKEY } else { KEYBD_EVENT_FLAGS(0) },
-                time: 0,
-                dwExtraInfo: 0,
-            },
-        },
-    };
-    unsafe { SendInput(&[input], std::mem::size_of::<INPUT>() as i32) };
-}
-
 /// 받은 키를 메시지로 붙일 창(이 스레드의 포커스 창). Alt를 누르고 있으면(WM_SYSKEYDOWN 자리) 붙이지 않는다.
 fn key_window(lparam: LPARAM) -> Option<HWND> {
     const ALT_DOWN: isize = 1 << 29;
@@ -451,29 +417,13 @@ fn post_key(window: HWND, wparam: WPARAM, lparam: LPARAM) -> bool {
     unsafe { PostMessageW(Some(window), WM_KEYDOWN, wparam, lparam) }.is_ok()
 }
 
-/// 글자를 유니코드 키 입력(VK_PACKET)으로 넣는다. 앱이 문서 고치기를 받지 않을 때만 쓴다: 이미 줄 선 키보다
-/// 뒤에 들어간다. 이 키는 입력기도 다시 받는데, [`TextService_Impl::process`]가 VK_PACKET은 넘긴다.
-fn inject_text(text: &str) {
-    let inputs: Vec<INPUT> = text
-        .encode_utf16()
-        .flat_map(|unit| {
-            [KEYBD_EVENT_FLAGS(0), KEYEVENTF_KEYUP].map(|up| INPUT {
-                r#type: INPUT_KEYBOARD,
-                Anonymous: INPUT_0 {
-                    ki: KEYBDINPUT {
-                        wVk: VIRTUAL_KEY(0),
-                        wScan: unit,
-                        dwFlags: KEYEVENTF_UNICODE | up,
-                        time: 0,
-                        dwExtraInfo: 0,
-                    },
-                },
-            })
-        })
-        .collect();
-    if !inputs.is_empty() {
-        unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) };
-    }
+/// 글자를 포커스 창에 WM_CHAR로 붙인다(UTF-16 단위마다). 앱이 문서 고치기를 받지 않을 때만 쓴다(비밀번호 칸). 가짜 키 입력(SendInput)은
+/// 쓰지 않는다: 안티치트가 매크로를 찾을 때 보는 신호라서 윈도우 입력기는 어디서도 만들지 않는다(2026-10-04 사용자 결정).
+/// 붙일 창이 없으면 false.
+fn post_text(text: &str) -> bool {
+    let Some(window) = Some(unsafe { GetFocus() }).filter(|w| !w.is_invalid()) else { return false };
+    text.encode_utf16()
+        .all(|unit| unsafe { PostMessageW(Some(window), WM_CHAR, WPARAM(unit as usize), LPARAM(1)) }.is_ok())
 }
 
 impl TextService_Impl {
@@ -982,43 +932,34 @@ impl TextService_Impl {
         }
         if !applied {
             match context {
-                // 비밀번호 칸: 앱이 문서 고치기를 바로 받지 않으면(빈 문맥 등) 글자를 유니코드 키 입력으로 넣는다.
-                // 게임에서는 유니코드 키 입력도 만들지 않는다(그 글자는 빠진다, in_game).
+                // 비밀번호 칸: 앱이 문서 고치기를 바로 받지 않으면(빈 문맥 등) 글자를 포커스 창에 WM_CHAR로 붙인다(post_text).
                 Some(context) if self.field.get() == Field::Password => {
                     if !self.apply(context, &out, When::Now) {
-                        let game = self.in_game();
+                        let posted = post_text(&out.commit);
                         if !self.password_injection_noted.replace(true) {
-                            debug_log(if game {
-                                "password field in a game: no synthetic input, the commits are dropped"
+                            debug_log(if posted {
+                                "password field: posting the commits as characters"
                             } else {
-                                "password field: typing the commits as unicode input"
+                                "password field: no window to post the commits to, they are dropped"
                             });
-                        }
-                        if !game {
-                            inject_text(&out.commit);
                         }
                     }
                 }
                 // CUAS에서 확정하고 넘기는 키를 시험에서 다루지 못했다(Alt를 누르고 있다, 포커스 창이 없다, 시험의 동기 편집을
-                // 거절당했다): 키를 먹고, 확정한 뒤 같은 키를 입력으로 다시 보낸다. 시험에서 이미 키를 잡아 CUAS가 그 키를
-                // VK_PROCESSKEY로 바꿨으므로, 넘긴다고 해도 원래 키가 앱에 가지 않는다(0.2.5까지 메모장 "안 녕" → "안녕"). 다시 보낸
-                // 키는 확정 메시지 다음에 가지만 입력 줄 맨 뒤에 선다(빠르게 친 다음 키보다 늦을 수 있다).
-                // 게임에서는 SendInput 대신 창 메시지로만 붙인다(in_game). 붙일 수 없으면(Alt를 누르고 있다, 포커스 창이 없다) 그 키는 빠진다.
+                // 거절당했다: Windows Terminal): 키를 먹고, 확정한 뒤 같은 키를 다시 보낸다. 시험에서 이미 키를 잡아 CUAS가 그 키를
+                // VK_PROCESSKEY로 바꿨으므로, 넘긴다고 해도 원래 키가 앱에 가지 않는다(0.2.5까지 메모장 "안 녕" → "안녕").
+                // 시험에서처럼 창 메시지로 붙인다(입력 줄 맨 뒤에 서지 않아 빠르게 친 다음 키보다 늦지 않는다). 0.2.12까지는 SendInput으로
+                // 다시 보냈고 Windows Terminal이 늘 이 길이었는데(시험의 동기 편집을 거절한다), 창 메시지로도 맞게 들어갔다(2026-10-04 VM,
+                // 보통 창·전체 화면). 가짜 키 입력은 만들지 않으므로(post_text) 붙일 수 없으면(Alt를 누르고 있다, 포커스 창이 없다) 그 키는 빠진다.
                 Some(context) if down && !out.consumed && has_edits(&out) && cuas(context) => {
                     if !self.apply(context, &out, When::Now) {
                         self.apply(context, &out, When::Whenever);
                     }
                     self.mark_applied();
-                    if self.in_game() {
-                        let posted = key_window(lparam).is_some_and(|w| post_key(w, wparam, lparam));
-                        debug_log(if posted {
-                            "CUAS in a game: committed and posting the key again"
-                        } else {
-                            "CUAS in a game: committed; no synthetic input, the key is dropped"
-                        });
+                    if key_window(lparam).is_some_and(|w| post_key(w, wparam, lparam)) {
+                        debug_log("CUAS: committed and posting the key again");
                     } else {
-                        debug_log("CUAS: committed and sending the key again");
-                        resend_key(wparam, lparam);
+                        debug_log("CUAS: committed; no window to post the key to, it is dropped");
                     }
                     return true;
                 }
@@ -1109,12 +1050,8 @@ impl TextService_Impl {
                 host::prepare(&link);
             }
         }
-        // 게임에서는 Caps Lock을 대신 누르지 않는다(가짜 키 입력, in_game): 가타카나 Caps Lock은 켜진 채 남는다.
-        if out.caps_lock_off && keys::caps_on() && self.in_game() {
-            debug_log("leaving Japanese in a game: Caps Lock left on (no synthetic input)");
-        } else if out.caps_lock_off && keys::caps_on() {
-            toggle_caps_lock();
-        }
+        // 일본어 모드에서 켠 Caps Lock(가타카나)은 다른 모드로 나가도 끄지 않는다(out.caps_lock_off는 맥만 쓴다): 윈도우에는 Caps Lock을
+        // 끄는 API가 없어 키를 흉내 내야 하는데, 가짜 키 입력은 만들지 않는다(post_text, 2026-10-04 사용자 "가타카나 캡스락은 직접 할게").
         if let Some(ms) = out.timer_ms {
             self.schedule_timer(ms);
         }
@@ -1374,9 +1311,7 @@ impl TextService_Impl {
         }
     }
 
-    /// 게임 스레드(TSF를 UILess 전용으로 켠 창: 오버워치 등)인지. 게임에서는 가짜 키 입력(SendInput)을 만들지 않는다:
-    /// 안티치트가 매크로를 찾을 때 보는 신호다(입력기 때문에 정지된 확인 사례는 없고, 가장 가까운 사례가 AutoHotkey로 만든
-    /// 입력기 전환 도구였다. 2026-10-04 사용자 결정).
+    /// 게임 스레드(TSF를 UILess 전용으로 켠 창: 오버워치 등)인지.
     fn in_game(&self) -> bool {
         self.state.try_borrow().ok().and_then(|s| s.as_ref().map(|a| a.game)).unwrap_or(false)
     }
