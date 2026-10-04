@@ -127,7 +127,9 @@ pub struct TextService {
     scope: RefCell<ScopeRead>,
     /// 지난 키의 입력칸 종류(실제 쪽에서 문서를 고칠 때 쓴다).
     field: Cell<Field>,
-    /// 후보창과 모드 HUD(편집 세션이 자리를 잰 뒤 맞춘다).
+    /// 이 비밀번호 칸에서 유니코드 키 입력으로 넣는다고 기록에 남겼다(칸마다 한 번: 키마다 남기면 길이·시각이 드러난다).
+    password_injection_noted: Cell<bool>,
+    /// 후보창(편집 세션이 자리를 잰 뒤 맞춘다).
     screen: Rc<RefCell<Screen>>,
     /// CUAS 문서에서 확정 뒤로 미룬 새 조합(앱이 확정 메시지를 읽은 뒤 스레드 타이머로 시작한다, [`TextService_Impl::apply`]).
     deferred: RefCell<Option<(ITfContext, Vec<Op>)>>,
@@ -200,6 +202,7 @@ impl TextService {
             terminated: Cell::new(false),
             scope: RefCell::new(ScopeRead::NotRun),
             field: Cell::new(Field::Normal),
+            password_injection_noted: Cell::new(false),
             screen: Rc::new(RefCell::new(Screen::default())),
             deferred: RefCell::new(None),
             completed_by_switch: RefCell::new(None),
@@ -558,6 +561,8 @@ impl TextService_Impl {
             }
         }
         self.follow_global_mode(true);
+        // 입력기가 꺼진 창에서 켜졌을 수 있다(포커스 문서가 없다): 작업 표시줄 아이콘을 Q로.
+        self.show_input_off(unsafe { thread_mgr.GetFocus() }.is_err());
         self.sync_profile(None);
         self.sync_host();
         Ok(())
@@ -747,7 +752,8 @@ impl TextService_Impl {
             && (s.id == id || (actual && !s.keyed && s.id.same_key(&id)))
         {
             if actual {
-                if s.id != id {
+                // 비밀번호 칸에서는 키(lParam의 스캔 코드)를 남기지 않는다.
+                if s.id != id && self.field.get() != Field::Password {
                     debug_log(&format!(
                         "key matched its test by key only: lparam {:#x} -> {:#x}, time {} -> {}",
                         s.id.lparam, id.lparam, s.id.time, id.time
@@ -760,12 +766,16 @@ impl TextService_Impl {
         // 앞 메시지의 할 일이 남았다(시험만 하고 실제를 부르지 않은 앱): 지금이라도 적용한다.
         let left = self.seen.try_borrow_mut().ok().and_then(|mut s| s.take()).filter(|s| !s.applied);
         if let (Some(left), Some(context)) = (left, context) {
-            debug_log(&format!(
-                "key test without the key: applying its edits late (test {:?}, now {:?} {})",
-                left.id,
-                id,
-                if actual { "key" } else { "test" }
-            ));
+            if self.field.get() == Field::Password {
+                debug_log("key test without the key in a password field: applying its edits late");
+            } else {
+                debug_log(&format!(
+                    "key test without the key: applying its edits late (test {:?}, now {:?} {})",
+                    left.id,
+                    id,
+                    if actual { "key" } else { "test" }
+                ));
+            }
             self.apply(context, &left.out, When::Whenever);
         }
         // 조합을 확정하고 입력 언어 바꾸기를 미뤄 둔 사이 다음 키가 왔다: 이 키의 조합은 새 언어에서 시작해야 한다.
@@ -778,9 +788,12 @@ impl TextService_Impl {
         // 문맥이 없으면(입력칸이 없는 창, 입력기를 끈 창: 게임, Win32 비밀번호 칸) 글자를 넣을 곳이 없다: 키를 넘긴다.
         let (field, why) = context
             .map_or((Field::Closed, "no context"), |c| self.classify(c, down && !self.has_composition()));
-        self.field.set(field);
+        let previous = self.field.replace(field);
+        if field != Field::Password {
+            self.password_injection_noted.set(false);
+        }
         // 게임(UILess 전용 스레드)에서 입력칸이 없으면(플레이 화면) 수식키 탭으로 모드를 바꾸지 않는다. 채팅을 열면 그대로 된다.
-        let game = self.state.try_borrow().ok().and_then(|s| s.as_ref().map(|a| a.game)).unwrap_or(false);
+        let game = self.in_game();
         let ctx = Context {
             secure_field: field != Field::Normal,
             secure_latin: field == Field::Password,
@@ -815,9 +828,19 @@ impl TextService_Impl {
                 a.engine.handle_key(&ev, &ctx)
             };
             if let Ok(mut screen) = self.screen.try_borrow_mut() {
-                screen.queue(out.candidates.clone(), out.mode, a.engine.mode() == Mode::Ja);
+                screen.queue(out.candidates.clone(), a.engine.mode() == Mode::Ja);
             }
-            if a.log {
+            // 비밀번호 칸에서는 키 줄을 남기지 않는다(키·시각·길이로 비밀번호를 되살릴 수 있다, 맥 0.7.4와 같다): 칸에 들어왔을 때와
+            // 모드를 바꿨을 때만 한 줄.
+            if a.log && field == Field::Password {
+                if previous != Field::Password || out.mode.is_some() {
+                    debug_log(&format!(
+                        "password field ({why}) scope={:?}: Graphite, keys are not logged; mode {:?}",
+                        self.scope.try_borrow().map(|s| s.clone()).unwrap_or_default(),
+                        a.engine.mode()
+                    ));
+                }
+            } else if a.log {
                 debug_log(&format!(
                     "key {:?} vk={:#04x} down={} mods={:?} repeat={} field={:?}({}) scope={:?} -> eat={} commit={} preedit={:?} mode={:?}",
                     ev.key,
@@ -944,7 +967,7 @@ impl TextService_Impl {
         }
         if !edits {
             self.mark_applied();
-            // 문서는 그대로인데 화면만 바뀌었다(모드 HUD, 후보 페이지): 실제 쪽이 안 올 수 있으니 지금 맞춘다.
+            // 문서는 그대로인데 화면만 바뀌었다(후보 페이지): 실제 쪽이 안 올 수 있으니 지금 맞춘다.
             self.refresh_screen(context);
         }
         (down && out.consumed) || edits
@@ -960,23 +983,43 @@ impl TextService_Impl {
         if !applied {
             match context {
                 // 비밀번호 칸: 앱이 문서 고치기를 바로 받지 않으면(빈 문맥 등) 글자를 유니코드 키 입력으로 넣는다.
+                // 게임에서는 유니코드 키 입력도 만들지 않는다(그 글자는 빠진다, in_game).
                 Some(context) if self.field.get() == Field::Password => {
                     if !self.apply(context, &out, When::Now) {
-                        debug_log("password field: typing the commit as unicode input");
-                        inject_text(&out.commit);
+                        let game = self.in_game();
+                        if !self.password_injection_noted.replace(true) {
+                            debug_log(if game {
+                                "password field in a game: no synthetic input, the commits are dropped"
+                            } else {
+                                "password field: typing the commits as unicode input"
+                            });
+                        }
+                        if !game {
+                            inject_text(&out.commit);
+                        }
                     }
                 }
                 // CUAS에서 확정하고 넘기는 키를 시험에서 다루지 못했다(Alt를 누르고 있다, 포커스 창이 없다, 시험의 동기 편집을
                 // 거절당했다): 키를 먹고, 확정한 뒤 같은 키를 입력으로 다시 보낸다. 시험에서 이미 키를 잡아 CUAS가 그 키를
                 // VK_PROCESSKEY로 바꿨으므로, 넘긴다고 해도 원래 키가 앱에 가지 않는다(0.2.5까지 메모장 "안 녕" → "안녕"). 다시 보낸
                 // 키는 확정 메시지 다음에 가지만 입력 줄 맨 뒤에 선다(빠르게 친 다음 키보다 늦을 수 있다).
+                // 게임에서는 SendInput 대신 창 메시지로만 붙인다(in_game). 붙일 수 없으면(Alt를 누르고 있다, 포커스 창이 없다) 그 키는 빠진다.
                 Some(context) if down && !out.consumed && has_edits(&out) && cuas(context) => {
                     if !self.apply(context, &out, When::Now) {
                         self.apply(context, &out, When::Whenever);
                     }
                     self.mark_applied();
-                    debug_log("CUAS: committed and sending the key again");
-                    resend_key(wparam, lparam);
+                    if self.in_game() {
+                        let posted = key_window(lparam).is_some_and(|w| post_key(w, wparam, lparam));
+                        debug_log(if posted {
+                            "CUAS in a game: committed and posting the key again"
+                        } else {
+                            "CUAS in a game: committed; no synthetic input, the key is dropped"
+                        });
+                    } else {
+                        debug_log("CUAS: committed and sending the key again");
+                        resend_key(wparam, lparam);
+                    }
                     return true;
                 }
                 // 키를 앱에 넘기면 그 키보다 먼저 고쳐야 한다(조합 중 Ctrl, 기호 키).
@@ -991,7 +1034,7 @@ impl TextService_Impl {
         down && out.consumed
     }
 
-    /// 편집 세션이 잰 자리로 후보창·HUD를 맞추는 고리.
+    /// 편집 세션이 잰 자리로 후보창을 맞추는 고리.
     fn ui_hook(&self) -> UiHook {
         let screen = self.screen.clone();
         Rc::new(move |rect| {
@@ -1066,7 +1109,10 @@ impl TextService_Impl {
                 host::prepare(&link);
             }
         }
-        if out.caps_lock_off && keys::caps_on() {
+        // 게임에서는 Caps Lock을 대신 누르지 않는다(가짜 키 입력, in_game): 가타카나 Caps Lock은 켜진 채 남는다.
+        if out.caps_lock_off && keys::caps_on() && self.in_game() {
+            debug_log("leaving Japanese in a game: Caps Lock left on (no synthetic input)");
+        } else if out.caps_lock_off && keys::caps_on() {
             toggle_caps_lock();
         }
         if let Some(ms) = out.timer_ms {
@@ -1097,7 +1143,7 @@ impl TextService_Impl {
             let Some(a) = state.as_mut() else { return };
             let out = a.engine.timer(now, keys::physical_mods());
             if let Ok(mut screen) = self.screen.try_borrow_mut() {
-                screen.queue(out.candidates.clone(), out.mode, a.engine.mode() == Mode::Ja);
+                screen.queue(out.candidates.clone(), a.engine.mode() == Mode::Ja);
             }
             (out, a.thread_mgr.clone())
         };
@@ -1319,6 +1365,22 @@ impl TextService_Impl {
 
     // ---- 모드 ------------------------------------------------------------------------------------
 
+    /// 포커스 창에 문서가 없으면(앱이 입력기를 껐다) 작업 표시줄 모드 아이콘을 Q로, 있으면 모드로.
+    fn show_input_off(&self, off: bool) {
+        if let Ok(state) = self.state.try_borrow()
+            && let Some(button) = state.as_ref().and_then(|a| a.button.as_ref())
+        {
+            button.set_off(off);
+        }
+    }
+
+    /// 게임 스레드(TSF를 UILess 전용으로 켠 창: 오버워치 등)인지. 게임에서는 가짜 키 입력(SendInput)을 만들지 않는다:
+    /// 안티치트가 매크로를 찾을 때 보는 신호다(입력기 때문에 정지된 확인 사례는 없고, 가장 가까운 사례가 AutoHotkey로 만든
+    /// 입력기 전환 도구였다. 2026-10-04 사용자 결정).
+    fn in_game(&self) -> bool {
+        self.state.try_borrow().ok().and_then(|s| s.as_ref().map(|a| a.game)).unwrap_or(false)
+    }
+
     /// 모드를 아이콘·입력 모드 칸에 보이고, `publish`면 전역 칸에도 적는다(다른 앱이 따라온다).
     fn show_mode(&self, mode: Mode, publish: bool) {
         {
@@ -1508,6 +1570,8 @@ impl ITfThreadMgrEventSink_Impl for TextService_Impl {
             || Ok(()),
             || {
                 // 문서가 없는 창(앱이 입력기를 끈 창: 게임 화면 등)으로 갔다. 그 창의 키는 입력기에 오지 않는다.
+                // 작업 표시줄 모드 아이콘이 Q로 바뀐다(그 창의 키는 OS 자판의 쿼티 글자가 된다).
+                self.show_input_off(focus.is_null());
                 match focus.ok() {
                     Err(_) => debug_log(
                         "focus: a window without a document (the app turned the input method off there)",

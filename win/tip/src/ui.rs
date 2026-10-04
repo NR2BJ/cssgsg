@@ -1,7 +1,8 @@
-//! 입력기 화면: 후보창과 모드 HUD. 앱 프로세스 안(입력기를 쓰는 스레드)에서 GDI로 그린다.
+//! 입력기 화면: 후보창. 앱 프로세스 안(입력기를 쓰는 스레드)에서 GDI로 그린다.
 //! 맥 후보창(NRIME CandidatePanel)과 같은 모양이다: 목록 9개("1." 번호, 후보 뒤에 작고 흐린 뜻, 고른 줄은 강조색),
-//! 격자 5×6(고른 후보의 뜻은 아래 줄), 페이지가 여럿이면 "n/N". 모드 HUD는 모드를 바꿀 때 커서 위에 1초 보이고
-//! 0.3초 동안 사라진다. 둥근 모서리·그림자는 윈도우 11 DWM에 맡기고, 밝은·어두운 앱 테마를 따른다.
+//! 격자 5×6(고른 후보의 뜻은 아래 줄), 페이지가 여럿이면 "n/N". 둥근 모서리·그림자는 윈도우 11 DWM에 맡기고,
+//! 밝은·어두운 앱 테마를 따른다. 모드를 바꿀 때 커서 위에 잠깐 보이던 모드 HUD(G/ㅊ/月)는 0.2.12에서 뺐다(모드는 작업
+//! 표시줄 아이콘, CONCEPT §13).
 //!
 //! 창은 포커스를 가져가지 않는다(WS_EX_NOACTIVATE, 클릭에도 MA_NOACTIVATE). 창 상태는 GWLP_USERDATA에 둔
 //! Rc가 쥐고, WM_NCDESTROY에서 놓는다.
@@ -11,8 +12,7 @@ use std::rc::Rc;
 use std::sync::Once;
 
 use crate::uiless::GameCandidates;
-use cssgsg_core::Mode;
-use cssgsg_core::config::{HudPosition, WindowsConfig};
+use cssgsg_core::config::WindowsConfig;
 use cssgsg_core::engine::{CAND_GRID_COLUMNS, CAND_GRID_PAGE, CAND_LIST_PAGE, Candidates};
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
 use windows::Win32::Graphics::Dwm::{DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute};
@@ -26,16 +26,14 @@ use windows::Win32::Graphics::Gdi::{
 };
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CS_DROPSHADOW, CS_IME, CURSOR_SHOWING, CURSORINFO, CreateWindowExW, DefWindowProcW, DestroyWindow,
-    GWLP_USERDATA, GetCursorInfo, GetCursorPos, GetWindowLongPtrW, HWND_TOPMOST, IDC_ARROW, IsWindow,
-    KillTimer, LWA_ALPHA, LoadCursorW, MA_NOACTIVATE, RegisterClassExW, SW_HIDE, SWP_NOACTIVATE,
-    SWP_SHOWWINDOW, SetLayeredWindowAttributes, SetTimer, SetWindowLongPtrW, SetWindowPos, ShowWindow,
-    WM_MOUSEACTIVATE, WM_NCDESTROY, WM_PAINT, WM_TIMER, WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE,
-    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    CS_DROPSHADOW, CS_IME, CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA, GetCursorPos,
+    GetWindowLongPtrW, HWND_TOPMOST, IDC_ARROW, IsWindow, LoadCursorW, MA_NOACTIVATE, RegisterClassExW,
+    SW_HIDE, SWP_NOACTIVATE, SWP_SHOWWINDOW, SetWindowLongPtrW, SetWindowPos, ShowWindow, WM_MOUSEACTIVATE,
+    WM_NCDESTROY, WM_PAINT, WNDCLASSEXW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{PCWSTR, w};
 
-use crate::{debug_log, module};
+use crate::module;
 
 // ---- 색과 글꼴 -----------------------------------------------------------------------------------
 
@@ -162,22 +160,25 @@ fn fill(dc: HDC, rect: RECT, color: COLORREF) {
     }
 }
 
-/// 화면 안에 들어가는 자리: 기준 사각형 아래(모자라면 위), 왼쪽 맞춤, 작업 영역 안으로.
-fn place(anchor: RECT, width: i32, height: i32, gap: i32, prefer_above: bool) -> (i32, i32) {
+/// 기준 사각형이 있는 모니터의 작업 영역(모르면 1920×1080).
+fn work_area(anchor: &RECT) -> RECT {
     let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
-    let work = unsafe {
-        let monitor = MonitorFromRect(&anchor, MONITOR_DEFAULTTONEAREST);
+    unsafe {
+        let monitor = MonitorFromRect(anchor, MONITOR_DEFAULTTONEAREST);
         if GetMonitorInfoW(monitor, &mut info).as_bool() {
             info.rcWork
         } else {
             RECT { left: 0, top: 0, right: 1920, bottom: 1080 }
         }
-    };
+    }
+}
+
+/// 화면 안에 들어가는 자리: 기준 사각형 아래(모자라면 위), 왼쪽 맞춤, 작업 영역 안으로.
+fn place(anchor: RECT, width: i32, height: i32, gap: i32) -> (i32, i32) {
+    let work = work_area(&anchor);
     let below = anchor.bottom + gap;
     let above = anchor.top - gap - height;
-    let y = if prefer_above {
-        if above >= work.top { above } else { below }
-    } else if below + height <= work.bottom || above < work.top {
+    let y = if below + height <= work.bottom || above < work.top {
         below.min(work.bottom - height)
     } else {
         above
@@ -188,10 +189,9 @@ fn place(anchor: RECT, width: i32, height: i32, gap: i32, prefer_above: bool) ->
 
 // ---- 창 바탕 ---------------------------------------------------------------------------------------
 
-/// 창 하나의 그리기·타이머 동작.
+/// 창 하나의 그리기.
 trait Surface {
     fn paint(&self, hwnd: HWND, dc: HDC, width: i32, height: i32);
-    fn timer(&self, _hwnd: HWND, _id: usize) {}
 }
 
 const CLASS: PCWSTR = w!("cssgsg.Popup");
@@ -238,10 +238,6 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
                     let _ = EndPaint(hwnd, &ps);
                     LRESULT(0)
                 }
-                WM_TIMER if !surface.is_null() => {
-                    (*surface).timer(hwnd, wparam.0);
-                    LRESULT(0)
-                }
                 WM_NCDESTROY => {
                     if !surface.is_null() {
                         SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
@@ -261,12 +257,9 @@ struct Popup {
 }
 
 impl Popup {
-    fn new(surface: Rc<dyn Surface>, layered: bool) -> Option<Self> {
+    fn new(surface: Rc<dyn Surface>) -> Option<Self> {
         register_class();
-        let mut ex = WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE;
-        if layered {
-            ex |= WS_EX_LAYERED;
-        }
+        let ex = WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE;
         let hwnd = unsafe {
             CreateWindowExW(ex, CLASS, w!(""), WS_POPUP, 0, 0, 1, 1, None, None, Some(module().into()), None)
                 .ok()?
@@ -280,9 +273,6 @@ impl Popup {
                 &corner as *const _ as *const _,
                 std::mem::size_of_val(&corner) as u32,
             );
-            if layered {
-                let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), 255, LWA_ALPHA);
-            }
         }
         Some(Popup { hwnd })
     }
@@ -559,7 +549,7 @@ impl CandidateWindow {
             return;
         }
         if self.popup.is_none() {
-            self.popup = Popup::new(self.view.clone(), false);
+            self.popup = Popup::new(self.view.clone());
         }
         let Some(popup) = &self.popup else { return };
         let mut view = CandidateView {
@@ -573,7 +563,7 @@ impl CandidateWindow {
         popup.measure(|dc| view.measure(dc));
         let l = view.layout;
         let anchor = anchor.unwrap_or_else(|| mouse_anchor(view.dpi));
-        let (x, y) = place(anchor, l.width, l.height, px(2, view.dpi), false);
+        let (x, y) = place(anchor, l.width, l.height, px(2, view.dpi));
         if let Ok(mut slot) = self.view.try_borrow_mut() {
             *slot = Some(view);
         }
@@ -595,131 +585,16 @@ impl CandidateWindow {
     }
 }
 
-// ---- 모드 HUD ------------------------------------------------------------------------------------
-
-const HUD_SHOW_MS: u32 = 1000;
-const HUD_FADE_MS: u32 = 300;
-const HUD_FADE_STEP_MS: u32 = 30;
-const TIMER_HOLD: usize = 1;
-const TIMER_FADE: usize = 2;
-
-struct HudView {
-    mode: Mode,
-    theme: Theme,
-    dpi: u32,
-    alpha: std::cell::Cell<u8>,
-}
-
-impl Surface for RefCell<Option<HudView>> {
-    fn paint(&self, _hwnd: HWND, dc: HDC, width: i32, height: i32) {
-        let Ok(view) = self.try_borrow() else { return };
-        let Some(v) = view.as_ref() else { return };
-        fill(dc, RECT { left: 0, top: 0, right: width, bottom: height }, v.theme.background);
-        let font = Font::new(px(22, v.dpi), true, w!("Malgun Gothic"));
-        draw(
-            dc,
-            &font,
-            v.theme.text,
-            crate::langbar::label(v.mode),
-            RECT { left: 0, top: 0, right: width, bottom: height },
-            DT_CENTER,
-        );
-    }
-
-    fn timer(&self, hwnd: HWND, id: usize) {
-        let Ok(view) = self.try_borrow() else { return };
-        let Some(v) = view.as_ref() else { return };
-        unsafe {
-            match id {
-                TIMER_HOLD => {
-                    let _ = KillTimer(Some(hwnd), TIMER_HOLD);
-                    SetTimer(Some(hwnd), TIMER_FADE, HUD_FADE_STEP_MS, None);
-                }
-                TIMER_FADE => {
-                    let step = (255 * HUD_FADE_STEP_MS / HUD_FADE_MS) as u8;
-                    let alpha = v.alpha.get().saturating_sub(step);
-                    v.alpha.set(alpha);
-                    let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), alpha, LWA_ALPHA);
-                    if alpha == 0 {
-                        let _ = KillTimer(Some(hwnd), TIMER_FADE);
-                        let _ = ShowWindow(hwnd, SW_HIDE);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-}
-
-/// 모드를 바꿀 때 잠깐 보이는 모드 글자(G/ㅊ/月).
-#[derive(Default)]
-pub struct Hud {
-    popup: Option<Popup>,
-    view: Rc<RefCell<Option<HudView>>>,
-}
-
-impl Hud {
-    /// 커서 사각형(화면 좌표) 위에 보인다. 커서를 모르면 마우스 옆.
-    pub fn show(&mut self, mode: Mode, caret: Option<RECT>) {
-        if self.popup.is_none() {
-            self.popup = Popup::new(self.view.clone(), true);
-        }
-        let Some(popup) = &self.popup else { return };
-        let dpi = popup.dpi();
-        let size = px(36, dpi);
-        let anchor = caret.unwrap_or_else(|| mouse_anchor(dpi));
-        let (x, y) = place(anchor, size, size, px(6, dpi), caret.is_some());
-        if let Ok(mut slot) = self.view.try_borrow_mut() {
-            *slot = Some(HudView { mode, theme: theme(), dpi, alpha: std::cell::Cell::new(255) });
-        }
-        unsafe {
-            let _ = KillTimer(Some(popup.hwnd), TIMER_FADE);
-            let _ = SetLayeredWindowAttributes(popup.hwnd, COLORREF(0), 255, LWA_ALPHA);
-            SetTimer(Some(popup.hwnd), TIMER_HOLD, HUD_SHOW_MS, None);
-        }
-        popup.show_at(x, y, size, size);
-    }
-}
-
-/// 마우스 커서가 보이는지(게임이 숨기지 않았는지).
-fn mouse_cursor_visible() -> bool {
-    let mut info = CURSORINFO { cbSize: size_of::<CURSORINFO>() as u32, ..Default::default() };
-    unsafe { GetCursorInfo(&mut info) }.is_ok()
-        && info.flags.0 & CURSOR_SHOWING.0 != 0
-        && !info.hCursor.is_invalid()
-        && !at_screen_corner(info.ptScreenPos)
-}
-
-/// 화면 구석의 점인지. 게임은 IME 창을 숨기려고 입력 자리를 구석에 박아 두거나(오버워치: 4K 화면의 (3839, 2159)) 마우스 커서를
-/// 구석에 둔다. 그 자리에 HUD를 띄우면 모니터 오른쪽 아래에 뜬다(2026-10-03).
-fn at_screen_corner(p: POINT) -> bool {
-    let monitor = unsafe {
-        MonitorFromRect(
-            &RECT { left: p.x, top: p.y, right: p.x + 1, bottom: p.y + 1 },
-            MONITOR_DEFAULTTONEAREST,
-        )
-    };
-    let mut info = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
-    if !unsafe { GetMonitorInfoW(monitor, &mut info) }.as_bool() {
-        return false;
-    }
-    let r = info.rcMonitor;
-    let near = |a: i32, b: i32| (a - b).abs() <= 2;
-    (near(p.x, r.left) || near(p.x, r.right - 1)) && (near(p.y, r.top) || near(p.y, r.bottom - 1))
-}
-
 // ---- 화면 상태 -----------------------------------------------------------------------------------
 
-/// 엔진 출력이 바꾼 화면(후보창, 모드 HUD)을 편집 세션이 자리를 잰 뒤에 맞춘다.
+/// 엔진 출력이 바꾼 화면(후보창)을 편집 세션이 자리를 잰 뒤에 맞춘다.
 #[derive(Default)]
 pub struct Screen {
     candidates: CandidateWindow,
-    hud: Hud,
-    /// 설정 파일의 `[windows]`(모드 HUD를 보일지·어디에, 후보 글자 크기).
+    /// 설정 파일의 `[windows]`(후보 글자 크기).
     settings: WindowsConfig,
     /// 보일 후보(Some(None)이면 닫기). 다음 [`Screen::flush`]에서 맞춘다.
     pending_candidates: Option<Option<Candidates>>,
-    pending_hud: Option<Mode>,
     japanese: bool,
     /// 마지막으로 잰 자리(이번에 못 재면 이것을 쓴다).
     last: Option<RECT>,
@@ -736,19 +611,16 @@ impl Screen {
         self.game = game;
     }
 
-    /// 엔진 출력의 화면 변경을 받아 둔다. `hud`는 이 앱에서 모드를 바꿨을 때만(다른 앱을 따라갈 때는 보이지 않는다).
-    pub fn queue(&mut self, candidates: Option<Option<Candidates>>, hud: Option<Mode>, japanese: bool) {
+    /// 엔진 출력의 화면 변경을 받아 둔다.
+    pub fn queue(&mut self, candidates: Option<Option<Candidates>>, japanese: bool) {
         if candidates.is_some() {
             self.pending_candidates = candidates;
-        }
-        if hud.is_some() && self.settings.hud {
-            self.pending_hud = hud;
         }
         self.japanese = japanese;
     }
 
     pub fn pending(&self) -> bool {
-        self.pending_candidates.is_some() || self.pending_hud.is_some()
+        self.pending_candidates.is_some()
     }
 
     /// 잰 자리로 받아 둔 변경을 보인다.
@@ -773,31 +645,6 @@ impl Screen {
             }
             None => {}
         }
-        if let Some(mode) = self.pending_hud.take() {
-            let at = match self.settings.hud_position {
-                HudPosition::Caret => rect,
-                HudPosition::Mouse => None,
-            };
-            // 게임에서 입력 자리를 모르면 마우스 옆에 띄우되, 마우스 커서가 보일 때만(채팅을 열면 커서를 살리는 게임). 오버워치는
-            // 커서를 숨긴 채 화면 구석에 두어 0.2.4의 HUD가 모니터 오른쪽 아래에 떴다(2026-10-03). 자리와 커서 상태를 기록에 남긴다.
-            let at = if self.game.is_some() {
-                let given = at;
-                let at = at.filter(|r| !at_screen_corner(POINT { x: r.left, y: r.top }));
-                let cursor = mouse_cursor_visible();
-                debug_log(&format!(
-                    "game mode HUD: caret {:?} (usable {}), mouse cursor visible and not in a corner {cursor}",
-                    given.map(|r| (r.left, r.top, r.right, r.bottom)),
-                    at.is_some()
-                ));
-                if at.is_none() && !cursor {
-                    return;
-                }
-                at
-            } else {
-                at
-            };
-            self.hud.show(mode, at);
-        }
     }
 
     /// 조합이 끝났다(포커스 이동, 앱이 끝냄, 입력기 끄기): 후보창을 닫는다.
@@ -817,8 +664,12 @@ mod tests {
     #[test]
     fn places_below_and_flips_above_at_the_screen_bottom() {
         let anchor = RECT { left: 100, top: 100, right: 110, bottom: 120 };
-        assert_eq!(place(anchor, 50, 40, 2, false), (100, 122));
-        assert_eq!(place(anchor, 50, 40, 2, true), (100, 58));
+        let work = work_area(&anchor);
+        let left = 100.clamp(work.left, work.right - 50);
+        assert_eq!(place(anchor, 50, 40, 2), (left, 122.max(work.top)));
+        // 작업 영역 아래 끝: 아래에 자리가 없으면 위로.
+        let low = RECT { left: 100, top: work.bottom - 30, right: 110, bottom: work.bottom - 10 };
+        assert_eq!(place(low, 50, 40, 2), (left, work.bottom - 30 - 2 - 40));
     }
 
     #[test]

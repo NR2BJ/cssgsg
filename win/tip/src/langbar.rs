@@ -1,5 +1,7 @@
 //! 작업 표시줄 입력 표시기의 모드 아이콘(GUID_LBI_INPUTMODE): G(영어) / ㅊ(한국어) / 月(일본어).
 //! 맥 메뉴 막대 아이콘과 같은 글자다. 작업 표시줄이 밝으면 검은 글자, 어두우면 흰 글자로 그린다.
+//! 입력기가 꺼진 창(문서가 없다: 앱이 입력기를 끈 비밀번호 칸, 입력칸이 아닌 곳)에서는 흐린 Q다: 그 창의 키는 입력기를 거치지 않고
+//! OS 자판으로 쿼티 글자가 된다(2026-10-04 사용자 결정, 윈도우는 그런 칸에서도 모드 아이콘을 그대로 둔다).
 
 use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
@@ -34,6 +36,10 @@ pub fn label(mode: Mode) -> &'static str {
     }
 }
 
+/// 입력기가 꺼진 창에서 보이는 글자와 풍선 도움말.
+const OFF_LABEL: &str = "Q";
+const OFF_TOOLTIP: &str = "cssgsg: 입력기 꺼짐(쿼티로 쳐집니다)";
+
 fn tooltip(mode: Mode) -> &'static str {
     match mode {
         Mode::En => "cssgsg: 영어(Graphite)",
@@ -47,6 +53,8 @@ const SINK_COOKIE: u32 = 1;
 #[implement(ITfLangBarItemButton, ITfSource, Agile = false)]
 pub struct ModeButton {
     mode: Cell<Mode>,
+    /// 이 스레드의 포커스 창에 문서가 없다(입력기가 꺼졌다): Q를 보인다.
+    off: Cell<bool>,
     sink: RefCell<Option<ITfLangBarItemSink>>,
     /// 아이콘 메뉴에서 고른 것을 처리한다([`crate::menu`]).
     menu: Option<menu::Handler>,
@@ -54,7 +62,7 @@ pub struct ModeButton {
 
 impl ModeButton {
     pub fn new(mode: Mode, menu: Option<menu::Handler>) -> Self {
-        Self { mode: Cell::new(mode), sink: RefCell::new(None), menu }
+        Self { mode: Cell::new(mode), off: Cell::new(false), sink: RefCell::new(None), menu }
     }
 
     fn chosen(&self, command: Option<menu::Command>) {
@@ -66,9 +74,23 @@ impl ModeButton {
 
     /// 모드가 바뀌면 작업 표시줄에 다시 그려 달라고 알린다.
     pub fn set_mode(&self, mode: Mode) {
-        if self.mode.replace(mode) == mode {
-            return;
+        if self.mode.replace(mode) != mode {
+            self.redraw();
         }
+    }
+
+    /// 포커스 창에 문서가 있는지(입력기가 키를 받는지)가 바뀌었다. 없으면 Q.
+    pub fn set_off(&self, off: bool) {
+        if self.off.replace(off) != off {
+            self.redraw();
+        }
+    }
+
+    fn label(&self) -> &'static str {
+        if self.off.get() { OFF_LABEL } else { label(self.mode.get()) }
+    }
+
+    fn redraw(&self) {
         if let Ok(sink) = self.sink.try_borrow()
             && let Some(sink) = sink.as_ref()
         {
@@ -106,7 +128,7 @@ impl ITfLangBarItem_Impl for ModeButton_Impl {
     }
 
     fn GetTooltipString(&self) -> Result<BSTR> {
-        Ok(BSTR::from(tooltip(self.mode.get())))
+        Ok(BSTR::from(if self.off.get() { OFF_TOOLTIP } else { tooltip(self.mode.get()) }))
     }
 }
 
@@ -154,12 +176,12 @@ impl ITfLangBarItemButton_Impl for ModeButton_Impl {
     fn GetIcon(&self) -> Result<HICON> {
         guarded(
             || Err(windows::Win32::Foundation::E_UNEXPECTED.into()),
-            || icon(self.mode.get(), light_taskbar()),
+            || icon(self.label(), light_taskbar(), self.off.get()),
         )
     }
 
     fn GetText(&self) -> Result<BSTR> {
-        Ok(BSTR::from(label(self.mode.get())))
+        Ok(BSTR::from(self.label()))
     }
 }
 
@@ -195,7 +217,8 @@ pub fn light_taskbar() -> bool {
 }
 
 /// 모드 글자 아이콘을 그린다(작은 아이콘 크기, 맑은 고딕 굵게). 검은 바탕에 흰 글자로 그려 밝기를 알파로 쓴다.
-pub fn icon(mode: Mode, light: bool) -> Result<HICON> {
+/// `dim`이면 흐리게(입력기가 꺼진 창의 Q).
+pub fn icon(text: &str, light: bool, dim: bool) -> Result<HICON> {
     let size = unsafe { GetSystemMetrics(SM_CXSMICON) }.max(16);
     unsafe {
         let dc = CreateCompatibleDC(None);
@@ -234,13 +257,14 @@ pub fn icon(mode: Mode, light: bool) -> Result<HICON> {
         SetBkMode(dc, TRANSPARENT);
         SetTextColor(dc, COLORREF(0x00FF_FFFF));
         let mut rect = RECT { left: 0, top: 0, right: size, bottom: size };
-        let mut text: Vec<u16> = label(mode).encode_utf16().collect();
+        let mut text: Vec<u16> = text.encode_utf16().collect();
         DrawTextW(dc, &mut text, &mut rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
         let _ = GdiFlush();
         let pixels = std::slice::from_raw_parts_mut(bits as *mut u32, (size * size) as usize);
         let ink: u32 = if light { 0x00 } else { 0xFF };
         for p in pixels.iter_mut() {
             let a = (*p >> 16 & 0xFF).max(*p >> 8 & 0xFF).max(*p & 0xFF);
+            let a = if dim { a * 140 / 255 } else { a };
             let c = ink * a / 255;
             *p = (a << 24) | (c << 16) | (c << 8) | c;
         }
@@ -302,10 +326,12 @@ mod tests {
 
     #[test]
     fn draws_each_mode_letter_in_both_themes() {
-        for mode in [Mode::En, Mode::Ko, Mode::Ja] {
+        for (text, dim) in
+            [(label(Mode::En), false), (label(Mode::Ko), false), (label(Mode::Ja), false), (OFF_LABEL, true)]
+        {
             for light in [true, false] {
-                let icon = icon(mode, light).unwrap();
-                assert!(ink_pixels(icon) > 10, "{mode:?} light={light}: 글자가 그려지지 않았다");
+                let icon = icon(text, light, dim).unwrap();
+                assert!(ink_pixels(icon) > 10, "{text} light={light}: 글자가 그려지지 않았다");
                 unsafe { DestroyIcon(icon).unwrap() };
             }
         }

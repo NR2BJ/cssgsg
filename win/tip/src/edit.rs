@@ -1,7 +1,7 @@
 //! 편집 세션: 앱 문서를 바꾸는 일은 TSF가 허락한 세션(편집 쿠키 `ec`) 안에서만 한다.
 //!
 //! 조합은 TSF 조합(ITfComposition)이다. 지금 조합은 텍스트 서비스와 편집 세션이 같이 쥐는 칸([`Slot`])에 둔다:
-//! 비동기로 늦게 도는 세션도 그때의 조합을 이어서 쓴다. 세션 끝에서 후보창·HUD를 붙일 자리를 재서 [`UiHook`]에 준다.
+//! 비동기로 늦게 도는 세션도 그때의 조합을 이어서 쓴다. 세션 끝에서 후보창을 붙일 자리를 재서 [`UiHook`]에 준다.
 
 use std::cell::{Cell, RefCell};
 use std::mem::ManuallyDrop;
@@ -39,7 +39,7 @@ pub struct Attrs {
     pub focused: i32,
 }
 
-/// 문서를 고친 뒤(또는 읽기만 하는 세션 끝에) 화면을 맞추라고 부른다. 인자는 후보창·HUD를 붙일 사각형(화면 좌표):
+/// 문서를 고친 뒤(또는 읽기만 하는 세션 끝에) 화면을 맞추라고 부른다. 인자는 후보창을 붙일 사각형(화면 좌표):
 /// 조합이 있으면 포커스된 문절(없으면 조합 전체), 없으면 커서. 모르면 None.
 pub type UiHook = Rc<dyn Fn(Option<RECT>)>;
 
@@ -282,7 +282,7 @@ unsafe fn select_interim(ec: u32, context: &ITfContext, range: &ITfRange) -> Res
     }
 }
 
-/// 후보창·HUD를 붙일 사각형을 잰다(편집 쿠키가 있어야 한다): 조합이 있으면 포커스된 문절(없으면 조합 전체),
+/// 후보창을 붙일 사각형을 잰다(편집 쿠키가 있어야 한다): 조합이 있으면 포커스된 문절(없으면 조합 전체),
 /// 없으면 커서(선택 영역).
 unsafe fn anchor(ec: u32, context: &ITfContext, slot: &Slot, focus: Option<(usize, usize)>) -> Option<RECT> {
     unsafe {
@@ -315,7 +315,7 @@ unsafe fn anchor(ec: u32, context: &ITfContext, slot: &Slot, focus: Option<(usiz
     }
 }
 
-/// 문서는 고치지 않고 후보창·HUD 자리만 잰다(모드만 바뀌었을 때, 후보 페이지만 바뀌었을 때).
+/// 문서는 고치지 않고 후보창 자리만 잰다(후보 페이지만 바뀌었을 때).
 #[implement(ITfEditSession)]
 pub struct Measure {
     context: ITfContext,

@@ -65,16 +65,7 @@ sealed partial class GeneralPage : SettingsPage
                 "Pixels at 100% display scaling; it grows with the scaling.",
                 "表示スケール100%のときのピクセルです。スケールを上げると一緒に大きくなります。"),
             Ui.Row(T("글자 크기", "Font Size", "文字サイズ"), ValueSlider("windows.candidate_font_size", 10, 28, 1, "px"))));
-
-        var position = Choice("windows.hud_position",
-            ("caret", T("입력 커서 위 (모르면 마우스 옆)", "Above the text cursor (next to the mouse if unknown)",
-                "入力カーソルの上（分からなければマウスの横）")),
-            ("mouse", T("마우스 포인터 옆", "Next to the mouse pointer", "マウスポインタの横")));
-        OnRefresh(() => position.IsEnabled = M.Bool("windows.hud"));
-        Add(Ui.Section(T("모드 표시", "Mode Indicator", "モード表示"), null,
-            Ui.Row(T("모드 전환 시 G · ㅊ · 月 표시", "Show G · ㅊ · 月 When Switching Modes", "モード切り替え時に G · ㅊ · 月 を表示"),
-                Toggle("windows.hud")),
-            Ui.Row(T("위치", "Position", "位置"), position)));
+        // 모드 표시(모드를 바꿀 때 G · ㅊ · 月)는 0.2.12에서 뺐다. 모드는 작업 표시줄 아이콘에서 본다(맥 0.7.5와 같다).
     }
 }
 

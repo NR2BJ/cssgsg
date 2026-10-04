@@ -135,7 +135,9 @@ public static extern bool InstallLayoutOrTip(string psz, uint dwFlags);
                 # 설치기와 같은 코드(cssgsg-host.exe --install-user, win/host/src/setup.rs): 내 입력 목록에 넣고, 엔진 호스트를
                 # 시작 프로그램에 넣고 띄운다(스토어 앱·관리자 앱은 호스트를 띄울 수 없어서 로그인부터 늘 켜 둔다).
                 if (-not (Test-Path $HostExe)) { throw "$HostExe 없음" }
-                $p = Start-Process $HostExe -ArgumentList '--install-user' -Wait -PassThru
+                # -Wait는 자식까지 기다려서(--install-user가 띄운 호스트는 늘 떠 있다) 이 단계가 끝나지 않았다: 그 프로세스만 기다린다.
+                $p = Start-Process $HostExe -ArgumentList '--install-user' -PassThru
+                $p.WaitForExit()
                 Write-Host "cssgsg-host --install-user(입력 목록, 시작 프로그램, 호스트): 종료 코드 $($p.ExitCode)"
             }
             'disable' {
@@ -213,7 +215,9 @@ function Invoke-Outside([string]$what) {
     New-Item -ItemType Directory -Force (Split-Path $log) | Out-Null
     Remove-Item $log -ErrorAction SilentlyContinue
     $command = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" $what -Outside -Log `"$log`""
-    $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $command }
+    # 콘솔 창을 숨긴다(윈도우 11 26H2부터 콘솔이 Windows Terminal 창으로 떠서 포커스를 가져갔다).
+    $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }
+    $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $command; ProcessStartupInformation = $startup }
     if ($r.ReturnValue -ne 0) { throw "WMI로 프로세스를 띄우지 못함 ($($r.ReturnValue))" }
     $deadline = (Get-Date).AddSeconds(60)
     while ((Get-Process -Id $r.ProcessId -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 100 }

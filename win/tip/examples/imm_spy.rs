@@ -243,6 +243,14 @@ mod imp {
         }
     }
 
+    /// 키를 보낼 시험 창. 맨 앞 창이 이것일 때만 친다(다른 창에 키가 들어가지 않게, 2026-10-04 VM에서 남은 터미널 창에 들어갔다).
+    static WINDOW: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+
+    fn in_front() -> bool {
+        let front = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
+        front.0 as isize == WINDOW.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     /// 쿼티 자리(스캔 코드)로 한 키씩 친다. `fast`면 모두 한꺼번에 보내고 나서 메시지를 처리한다.
     unsafe fn type_keys(scans: &[u16], fast: bool) {
         let key = |scan: u16, up: bool| INPUT {
@@ -258,6 +266,10 @@ mod imp {
                 },
             },
         };
+        if !in_front() {
+            println!("the test window is not in front: not typing");
+            return;
+        }
         if fast {
             println!("keys {scans:#04x?} (all at once)");
             let all: Vec<INPUT> =
@@ -285,6 +297,10 @@ mod imp {
                 _ => (true, true),
             };
             let scan = if press != release { scan & 0xFF } else { scan };
+            if !in_front() {
+                println!("the test window left the front: stopped typing");
+                return;
+            }
             unsafe {
                 if press {
                     SendInput(&[key(scan, false)], size_of::<INPUT>() as i32);
@@ -347,6 +363,7 @@ mod imp {
                 None,
             )?;
             let _ = SetForegroundWindow(hwnd);
+            WINDOW.store(hwnd.0 as isize, std::sync::atomic::Ordering::Relaxed);
             let _ = SetFocus(Some(hwnd));
             pump(300);
             print_layout("before");

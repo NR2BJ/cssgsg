@@ -70,7 +70,7 @@ impl Default for JaConfig {
     }
 }
 
-/// 모드 HUD를 띄울 자리(윈도우. 맥은 0.7.5에서 모드 표시를 뺐다).
+/// 모드 HUD를 띄우던 자리. 맥은 0.7.5, 윈도우는 0.2.12에서 모드 표시를 뺐다: 옛 설정 파일을 읽을 때만 쓴다.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum HudPosition {
@@ -134,21 +134,25 @@ impl Default for MacConfig {
     }
 }
 
-/// 윈도우 셸 설정(`[windows]`): 입력기 화면(모드 HUD, 후보창). 엔진은 쓰지 않는다.
+/// 윈도우 셸 설정(`[windows]`): 입력기 화면(후보창). 엔진은 쓰지 않는다.
 /// 맥의 `[mac]`과 이름이 같은 설정도 따로 둔다: 글자 크기의 단위(맥은 포인트, 윈도우는 픽셀)와 기본값이 다르다.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct WindowsConfig {
-    /// 모드를 바꿀 때 커서 근처에 G / ㅊ / 月을 잠깐 보인다.
-    pub hud: bool,
-    pub hud_position: HudPosition,
+    /// 0.2.11까지의 모드 표시(모드를 바꿀 때 커서 근처에 G / ㅊ / 月)와 그 자리. 0.2.12에서 뺐다(사용자 결정 2026-10-04: 맥 0.7.5와
+    /// 같이. 모드는 작업 표시줄 아이콘에 있고 MS 한국어 입력기도 이런 표시를 띄우지 않는다). 옛 설정 파일이 오류 나지 않게 읽기만
+    /// 하고 버린다.
+    #[serde(skip_serializing)]
+    pub hud: Option<bool>,
+    #[serde(skip_serializing)]
+    pub hud_position: Option<HudPosition>,
     /// 후보창 글자 크기(픽셀, 화면 배율 100% 기준. 배율을 따라 커진다).
     pub candidate_font_size: u32,
 }
 
 impl Default for WindowsConfig {
     fn default() -> Self {
-        Self { hud: true, hud_position: HudPosition::Caret, candidate_font_size: 15 }
+        Self { hud: None, hud_position: None, candidate_font_size: 15 }
     }
 }
 
@@ -301,9 +305,11 @@ impl Config {
         c.mac.shift_enter_delay_ms = None;
         c.mac.newline_replay_ms = None;
         c.mac.newline_delay_offset_ms = None;
-        // 0.7.4까지의 맥 모드 표시도 버린다(MacConfig::hud).
+        // 0.7.4까지의 맥, 0.2.11까지의 윈도우 모드 표시도 버린다(MacConfig::hud, WindowsConfig::hud).
         c.mac.hud = None;
         c.mac.hud_position = None;
+        c.windows.hud = None;
+        c.windows.hud_position = None;
         // 0.6.2의 Shift+Enter 다시 보내기 대기는 0~200이었다. 0.6.3부터 0~100(NRIME 1.0.12-beta.10과 같다).
         c.mac.newline_key_press_wait_ms = c.mac.newline_key_press_wait_ms.min(100);
         c.validate()?;
@@ -554,14 +560,6 @@ impl Config {
         if shell == Shell::Windows || win != dwin {
             line("");
             line("[windows]");
-            line("# 모드를 바꿀 때 G/ㅊ/月을 잠깐 표시");
-            line(&setting("hud", &win.hud.to_string(), win.hud == dwin.hud));
-            line("# 모드 표시 위치: \"caret\"(입력 커서 위, 모르면 마우스 옆) 또는 \"mouse\"(마우스 옆)");
-            line(&setting(
-                "hud_position",
-                &quoted(hud_position_name(win.hud_position)),
-                win.hud_position == dwin.hud_position,
-            ));
             line("# 후보창 글자 크기(픽셀, 화면 배율 100% 기준, 10~28)");
             line(&setting(
                 "candidate_font_size",
@@ -623,13 +621,6 @@ fn ja_punct_name(p: JaPunct) -> &'static str {
     }
 }
 
-fn hud_position_name(p: HudPosition) -> &'static str {
-    match p {
-        HudPosition::Caret => "caret",
-        HudPosition::Mouse => "mouse",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -676,7 +667,7 @@ mod tests {
     #[test]
     fn windows_settings_are_written_and_kept_across_shells() {
         let c = Config {
-            windows: WindowsConfig { hud: false, hud_position: HudPosition::Mouse, candidate_font_size: 20 },
+            windows: WindowsConfig { candidate_font_size: 20, ..WindowsConfig::default() },
             shortcuts: Shortcuts {
                 hanja: Shortcut::parse("alt_left+enter").unwrap(),
                 ..Shortcuts::windows()
@@ -685,8 +676,8 @@ mod tests {
         };
         windows_round_trip(&c);
         let text = c.to_toml_windows();
-        assert!(text.contains("\nhud = false\n") && text.contains("\nhud_position = \"mouse\"\n"), "{text}");
-        assert!(text.contains("\ncandidate_font_size = 20\n"));
+        assert!(text.contains("\ncandidate_font_size = 20\n"), "{text}");
+        assert!(!text.contains("hud"), "모드 표시는 0.2.12에서 뺐다: {text}");
         assert!(text.contains("\nhanja = \"alt_left+enter\"\n"), "맥 기본값도 윈도우 파일에는 적는다");
         // 다른 OS에서 가져온 파일의 값은 그 OS의 표를 지킨다.
         let mac = Config { windows: c.windows.clone(), ..Config::default() };
@@ -816,20 +807,26 @@ mod tests {
     }
 
     #[test]
-    fn old_mac_mode_indicator_is_read_and_dropped() {
-        // 0.7.4까지의 맥 모드 표시: 오류 없이 읽고 버린다. 다시 쓰지도 않는다. 윈도우 표의 모드 표시는 그대로다.
+    fn old_mode_indicators_are_read_and_dropped() {
+        // 0.7.4까지의 맥, 0.2.11까지의 윈도우 모드 표시: 오류 없이 읽고 버린다. 다시 쓰지도 않는다.
         for toml in [
             "[mac]\nhud = false",
             "[mac]\nhud = true\nhud_position = \"mouse\"",
             "[mac]\nhud_position = \"caret\"",
+            "[windows]\nhud = false",
+            "[windows]\nhud = true\nhud_position = \"mouse\"",
+            "[windows]\nhud_position = \"caret\"\ncandidate_font_size = 15",
         ] {
             let c = Config::from_toml(toml).unwrap_or_else(|e| panic!("{toml}: {e}"));
             assert_eq!(c, Config::default(), "{toml}");
             assert!(!c.to_toml().contains("hud"), "{toml}");
+            let w = Config::from_toml_windows(toml).unwrap_or_else(|e| panic!("{toml}: {e}"));
+            assert_eq!(w, Config::windows_default(), "{toml}");
+            assert!(!w.to_toml_windows().contains("hud"), "{toml}");
         }
-        assert!(Config::from_toml("[mac]\nhud_position = \"nowhere\"").is_err(), "틀린 값은 여전히 오류");
-        let c = Config::from_toml("[windows]\nhud = false").unwrap();
-        assert!(!c.windows.hud);
+        for toml in ["[mac]\nhud_position = \"nowhere\"", "[windows]\nhud_position = \"nowhere\""] {
+            assert!(Config::from_toml(toml).is_err(), "틀린 값은 여전히 오류: {toml}");
+        }
     }
 
     #[test]

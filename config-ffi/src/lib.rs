@@ -243,10 +243,8 @@ mod tests {
     fn windows_reads_and_writes_with_its_own_defaults() {
         let json = json_from_toml_windows(None).unwrap();
         assert!(json.contains(r#""hanja":"tap:control_right""#), "{json}");
-        assert!(
-            json.contains(r#""windows":{"hud":true,"hud_position":"caret","candidate_font_size":15}"#),
-            "{json}"
-        );
+        // 모드 표시(hud)는 0.2.12에서 뺐다.
+        assert!(json.contains(r#""windows":{"candidate_font_size":15}"#), "{json}");
         // 기본 설정은 모두 주석, 맥 표 없음.
         let text = toml_from_json_windows(&json).unwrap();
         assert_eq!(Config::from_toml_windows(&text).unwrap(), Config::windows_default());

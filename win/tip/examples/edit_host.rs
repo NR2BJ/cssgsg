@@ -4,6 +4,7 @@
 //!   cargo run -p cssgsg-tip --example edit_host -- keys=24,21,1f,39            쿼티 자리 스캔 코드(16진, E038처럼 확장 키,
 //!                                                                              12a·22a처럼 누르기만·떼기만)
 //!   ... -- fast keys=…                                                          키를 한꺼번에 보낸다(빠른 타자)
+//!   ... -- password keys=…                                                      한 줄 비밀번호 칸(ES_PASSWORD, 입력기를 끊는다)
 //!
 //! 창을 띄우고 스스로 키를 보낸다(SendInput). 그동안 다른 창을 누르지 않는다.
 
@@ -12,6 +13,7 @@ fn main() {
     {
         let args: Vec<String> = std::env::args().skip(1).collect();
         let fast = args.iter().any(|a| a == "fast");
+        let password = args.iter().any(|a| a == "password");
         let keys: Vec<u16> = args
             .iter()
             .find_map(|a| a.strip_prefix("keys="))
@@ -19,7 +21,7 @@ fn main() {
                 list.split(',').map(|k| u16::from_str_radix(k.trim(), 16).expect("hex scan code")).collect()
             })
             .unwrap_or_default();
-        match imp::run(&keys, fast) {
+        match imp::run(&keys, fast, password) {
             Ok(text) => println!("text: [{}]", text.replace("\r\n", "<CRLF>")),
             Err(e) => {
                 eprintln!("{e:?}");
@@ -40,10 +42,10 @@ mod imp {
         KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, SendInput, SetFocus,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, ES_AUTOVSCROLL,
-        ES_MULTILINE, GetWindowTextLengthW, GetWindowTextW, HMENU, MSG, PM_REMOVE, PeekMessageW,
-        RegisterClassW, SetForegroundWindow, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WNDCLASSW,
-        WS_CHILD, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+        CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, ES_AUTOHSCROLL,
+        ES_AUTOVSCROLL, ES_MULTILINE, ES_PASSWORD, GetWindowTextLengthW, GetWindowTextW, HMENU, MSG,
+        PM_REMOVE, PeekMessageW, RegisterClassW, SetForegroundWindow, TranslateMessage, WINDOW_EX_STYLE,
+        WINDOW_STYLE, WNDCLASSW, WS_CHILD, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
     };
     use windows::core::{Result, w};
 
@@ -65,6 +67,14 @@ mod imp {
         }
     }
 
+    /// 키를 보낼 시험 창. 맨 앞 창이 이것일 때만 친다(다른 창에 키가 들어가지 않게, 2026-10-04 VM에서 남은 터미널 창에 들어갔다).
+    static WINDOW: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+
+    fn in_front() -> bool {
+        let front = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
+        front.0 as isize == WINDOW.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     /// 쿼티 자리(스캔 코드)로 친다. 0xFF보다 크면 확장 키. `fast`면 모두 한꺼번에 보내고 나서 메시지를 처리한다.
     unsafe fn type_keys(scans: &[u16], fast: bool) {
         let key = |scan: u16, up: bool| INPUT {
@@ -80,6 +90,10 @@ mod imp {
             },
         };
         unsafe {
+            if !in_front() {
+                eprintln!("the test window is not in front: not typing");
+                return;
+            }
             if fast {
                 let all: Vec<INPUT> = scans.iter().flat_map(|&s| [key(s, false), key(s, true)]).collect();
                 SendInput(&all, size_of::<INPUT>() as i32);
@@ -94,6 +108,10 @@ mod imp {
                     _ => (true, true),
                 };
                 let scan = if press != release { scan & 0xFF } else { scan };
+                if !in_front() {
+                    eprintln!("the test window left the front: stopped typing");
+                    return;
+                }
                 if press {
                     SendInput(&[key(scan, false)], size_of::<INPUT>() as i32);
                     pump(60);
@@ -106,7 +124,7 @@ mod imp {
         }
     }
 
-    pub fn run(keys: &[u16], fast: bool) -> Result<String> {
+    pub fn run(keys: &[u16], fast: bool, password: bool) -> Result<String> {
         unsafe {
             let instance = GetModuleHandleW(None)?;
             let class = w!("cssgsg-edit-host");
@@ -134,17 +152,24 @@ mod imp {
                 WINDOW_EX_STYLE(0),
                 w!("EDIT"),
                 w!(""),
-                WS_CHILD | WS_VISIBLE | WINDOW_STYLE((ES_MULTILINE | ES_AUTOVSCROLL) as u32),
+                WS_CHILD
+                    | WS_VISIBLE
+                    | WINDOW_STYLE(if password {
+                        ES_PASSWORD | ES_AUTOHSCROLL
+                    } else {
+                        ES_MULTILINE | ES_AUTOVSCROLL
+                    } as u32),
                 8,
                 8,
                 440,
-                180,
+                if password { 28 } else { 180 },
                 Some(hwnd),
                 Some(HMENU(1 as _)),
                 Some(instance.into()),
                 None,
             )?;
             let _ = SetForegroundWindow(hwnd);
+            WINDOW.store(hwnd.0 as isize, std::sync::atomic::Ordering::Relaxed);
             let _ = SetFocus(Some(edit));
             pump(500);
             eprintln!("keyboard layout before: {:#010x}", GetKeyboardLayout(0).0 as usize as u32);

@@ -146,7 +146,13 @@ pub fn install_user() -> i32 {
         .and_then(|k| k.set_string(RUN_VALUE, format!("\"{}\"", exe.display())))
         .is_ok();
     // 지금도 띄운다. 이미 떠 있으면 새것은 바로 끝난다(사용자당 하나).
-    let spawned = std::process::Command::new(&exe).spawn().is_ok();
+    // 부른 쪽의 콘솔·파이프를 물려받지 않는다(늘 떠 있는 호스트가 쥐고 있으면 부른 쪽이 끝나기를 기다리며 멈춘다).
+    let spawned = std::process::Command::new(&exe)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .is_ok();
     log(&format!(
         "install-user: input list {listed}, old en-US entry removed {legacy}, startup {startup}, host {spawned}"
     ));
