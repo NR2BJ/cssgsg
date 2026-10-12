@@ -50,7 +50,15 @@ try {
     $flags = @('--config', 'oss_windows', '--config', 'release_build', '--nocheck_visibility', '--features=static_link_msvcrt')
     if ($env:MOZC_BAZEL_FLAGS) { $flags += @($env:MOZC_BAZEL_FLAGS -split '\s+' | Where-Object { $_ }) }
     $targets = @('//cssgsg:cssgsg_mozc.dll', '//cssgsg:cssgsg_mozc_main', '//data_manager/oss:mozc.data')
-    Invoke-Native 'bazelisk build' { bazelisk build @flags @targets }
+    # Bazel은 의존성을 GitHub 등에서 받는데, 그쪽 서버 오류 하나로 빌드 전체가 실패한다(build.sh와 같다).
+    # 1분 간격으로 세 번까지 해 본다. 이미 받은 것과 빌드한 것은 다시 쓴다.
+    for ($attempt = 1; ; $attempt++) {
+        bazelisk build @flags @targets
+        if ($LASTEXITCODE -eq 0) { break }
+        if ($attempt -ge 3) { throw "bazelisk build failed 3 times (exit code $LASTEXITCODE)" }
+        Write-Host "Mozc 빌드 실패($attempt번째), 60초 뒤 다시 시도"
+        Start-Sleep -Seconds 60
+    }
     # 다음 빌드(같은 워크플로의 cargo 등)와 디스크 캐시 저장이 Bazel 서버에 묶이지 않게 끈다.
     bazelisk shutdown | Out-Null
 

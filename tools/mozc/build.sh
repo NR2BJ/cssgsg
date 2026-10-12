@@ -38,7 +38,19 @@ if [ -n "${MOZC_BAZEL_FLAGS:-}" ]; then
   read -r -a EXTRA <<< "$MOZC_BAZEL_FLAGS"
   FLAGS+=("${EXTRA[@]}")
 fi
-bazelisk build "${FLAGS[@]}" //cssgsg:libcssgsg_mozc.dylib //cssgsg:cssgsg_mozc_main //data_manager/oss:mozc.data
+# Bazel은 의존성을 GitHub 등에서 받는데, 그쪽 서버 오류 하나로 빌드 전체가 실패한다(2026-10-12 NRIME: tar.bzl에서 500).
+# 1분 간격으로 세 번까지 해 본다. 이미 받은 것과 빌드한 것은 다시 쓴다.
+for attempt in 1 2 3; do
+  if bazelisk build "${FLAGS[@]}" //cssgsg:libcssgsg_mozc.dylib //cssgsg:cssgsg_mozc_main //data_manager/oss:mozc.data; then
+    break
+  fi
+  if [ "$attempt" -eq 3 ]; then
+    echo "Mozc 빌드 세 번 실패" >&2
+    exit 1
+  fi
+  echo "Mozc 빌드 실패($attempt번째), 60초 뒤 다시 시도" >&2
+  sleep 60
+done
 BIN="$(bazelisk info "${FLAGS[@]}" bazel-bin 2>/dev/null)"
 
 rm -rf "$OUT/lib"
